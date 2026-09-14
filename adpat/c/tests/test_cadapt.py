@@ -1,5 +1,7 @@
-"""Exercise optional encoding verification and folder coding through the
-compiled CLI."""
+"""The compiled CLI: encoding's optional verification, folder coding, the
+whole command surface driven once, and — on the committed vectors — the
+exact messages and reports each command gives, the bytes `info` describes,
+and the file a pipe and a file encode to."""
 
 import os
 import stat
@@ -406,6 +408,166 @@ class SurfaceTest(unittest.TestCase):
         self.assertIn(b"record period   120 bytes", r.stdout)
         # an existing output without --force, and a folder output for a file
         self.assertEqual(self.run_codec("encode", self.source).returncode, 1)
+
+
+class CommandTest(CodecTest):
+    """The exact texts behind SurfaceTest's sweep: each usage error's
+    message, what a damaged file is called, what `info` says of every kind
+    of committed vector, and the reports and bytes `encode` gives."""
+
+    def test_argument_errors_are_usage_errors(self) -> None:
+        cases = (
+            (("encode",), b"encode takes exactly one input"),
+            (("encode", self.source, "extra.bin"), b"encode takes exactly one input"),
+            (("decode",), b"decode takes exactly one input"),
+            (("info",), b"info takes exactly one file"),
+            (("encode", self.source, "--bogus"), b"unknown option --bogus"),
+            (("decode", self.source, "--fast"), b"unknown option --fast"),
+            (("info", self.source, "--force"), b"unknown option --force"),
+            (("encode", self.source, "-o"), b"-o needs a value"),
+            (("encode", self.source, "--max-memory", "64M"), b"--max-memory: not a byte count: 64M"),
+            (("encode", self.source, "--max-memory", ""), b"--max-memory: not a byte count"),
+            (("encode", self.source, "--max-memory", "99999999999999999999999"), b"--max-memory: not a byte count"),
+            (("decode", self.source, "--max-output", "-1"), b"--max-output: not a byte count: -1"),
+            (("decode", self.source, "--max-output", "1e9"), b"--max-output: not a byte count: 1e9"),
+            (("decode", self.source, "--max-memory", "lots"), b"--max-memory: not a byte count: lots"),
+            (("encode", self.source, "--threads", "0"), b"--threads: not a count of one or more: 0"),
+            (("encode", self.source, "--threads", "two"), b"--threads: not a count of one or more: two"),
+            (("decode", self.source, "--threads", "0"), b"--threads: not a count of one or more: 0"),
+            (("encode", self.source, "--fast", "--max"), b"--fast and --max are two profiles"),
+            (("encode", self.source, "--segment-bytes", "1000"), b"--segment-bytes: not a whole number of 262144-byte blocks: 1000"),
+            (("encode", self.source, "--segment-bytes", "262144"), b"--segment-bytes needs --threads of two or more"),
+        )
+        for args, fragment in cases:
+            with self.subTest(args=args):
+                self.assert_usage_error(self.run_codec(*args), fragment)
+
+    def test_decode_from_and_to_pipes_and_files(self) -> None:
+        encoded = VECTORS / "text.adpt"
+        want = (VECTORS / "text.bin").read_bytes()
+        run = self.run_codec("decode", "-", data=encoded.read_bytes())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, want)
+        run = self.run_codec("decode", encoded, "-o", "-")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, want)
+        out = self.root / "text.bin"
+        run = self.run_codec("decode", "-", "-o", out, data=encoded.read_bytes())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(out.read_bytes(), want)
+        # --threads is accepted and reported; this port decodes in order
+        run = self.run_codec("decode", VECTORS / "segmented.adpt", "-o", "-", "--threads", "4")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b"2 segments on 1 thread", run.stderr)
+        self.assertEqual(run.stdout, (VECTORS / "segmented.bin").read_bytes())
+        run = self.run_codec("decode", "-", "--threads", "4", data=encoded.read_bytes())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b"on 1 thread (a pipe is read in order)", run.stderr)
+
+    def test_decode_refuses_damage_limits_and_missing_files(self) -> None:
+        encoded = (VECTORS / "text.adpt").read_bytes()
+        cases = (
+            (encoded[:5], b"file is truncated"),
+            (b"RIFF" + encoded[4:], b"not an adapt file (bad signature)"),
+            (encoded[:4] + bytes([255]) + encoded[5:], b"unsupported format version 255"),
+            (encoded[:-1], b"file is truncated"),
+            (encoded + b"!", b"1 unexpected trailing byte(s)"),
+            (encoded[:-3] + bytes([encoded[-3] ^ 1]) + encoded[-2:], b"checksum mismatch"),
+            (encoded[:20] + bytes([encoded[20] ^ 0x55]) + encoded[21:], b"error: "),
+        )
+        for damaged, fragment in cases:
+            with self.subTest(fragment=fragment):
+                path = self.root / "damaged.adpt"
+                path.write_bytes(damaged)
+                run = self.run_codec("decode", path, "-o", self.root / "damaged.out")
+                self.assert_failure(run, fragment)
+                self.assertFalse((self.root / "damaged.out").exists())
+                self.assertEqual(run.stdout, b"")
+        path = self.root / "text.adpt"
+        path.write_bytes(encoded)
+        self.assert_failure(self.run_codec("decode", path, "--max-output", "1000"), b"declared size", b"exceeds the limit 1000")
+        self.assert_failure(self.run_codec("decode", path, "--max-memory", "1000"), b"memory budget exceeded")
+        self.assert_failure(self.run_codec("decode", self.root / "absent.adpt"), b"absent.adpt: No such file or directory")
+        self.assert_failure(self.run_codec("encode", self.root / "absent.bin"), b"absent.bin: No such file or directory")
+        self.assert_failure(self.run_codec("info", self.root / "absent.adpt"), b"absent.adpt: No such file or directory")
+
+    def test_info_describes_every_kind_of_file(self) -> None:
+        expectations = {
+            "text.adpt": (b"format          adapt container version 13", b"declared bytes  49152", b"class history   8 bytes", b"contexts        all but field, record", b"profile         normal"),
+            "text-fast.adpt": (b"format          adapt container version 14", b"contexts        o2, o4", b"profile         fast"),
+            "text-max.adpt": (b"format          adapt container version 15", b"profile         max"),
+            "records.adpt": (b"record period   192 bytes", b"class history   none", b"contexts        all"),
+            "segmented.adpt": (b"segments        2", b"declared bytes  300000"),
+            "empty.adpt": (b"declared bytes  0", b"file bytes      21"),
+        }
+        for name, lines in expectations.items():
+            with self.subTest(name=name):
+                path = VECTORS / name
+                run = self.run_codec("info", path)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                for line in lines:
+                    self.assertIn(line, run.stdout)
+                self.assertIn(b"file bytes      %d" % path.stat().st_size, run.stdout)
+                self.assertRegex(run.stdout, rb"crc32           [0-9a-f]{8}\n")
+                # a stream is read to its end for the same report
+                piped = self.run_codec("info", "-", data=path.read_bytes())
+                self.assertEqual(piped.returncode, 0, piped.stderr)
+                self.assertEqual(piped.stdout, run.stdout)
+
+    def test_info_refuses_what_it_cannot_describe(self) -> None:
+        encoded = (VECTORS / "segmented.adpt").read_bytes()
+        cases = (
+            (encoded[:6], b"cannot read header: failed to fill whole buffer"),
+            (b"RIFF" + encoded[4:], b"not an adapt file (bad signature)"),
+            (encoded[:15], b"file is truncated"),
+            (encoded[:-13] + bytes(4) + encoded[-13 + 4:], b"invalid block"),
+            (encoded[:-13] + b"\x02" + encoded[-12:], b"invalid block"),
+        )
+        for damaged, fragment in cases:
+            with self.subTest(fragment=fragment):
+                path = self.root / "damaged.adpt"
+                path.write_bytes(damaged)
+                self.assert_failure(self.run_codec("info", path), fragment)
+                self.assert_failure(self.run_codec("info", "-", data=damaged), fragment)
+        # a file with a record period, cut inside the period bytes
+        period = (VECTORS / "records.adpt").read_bytes()
+        (self.root / "cut.adpt").write_bytes(period[:9])
+        self.assert_failure(self.run_codec("info", self.root / "cut.adpt"), b"cannot read header")
+
+    def test_encode_switches_and_reports(self) -> None:
+        text = VECTORS / "text.bin"
+        # a file to standard output, and the profiles' version bytes
+        for flags, version in (((), 13), (("--fast",), 14), (("--max",), 15)):
+            with self.subTest(flags=flags):
+                run = self.run_codec("encode", text, "-o", "-", *flags)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertEqual(run.stdout[:4], b"ADPT")
+                self.assertEqual(run.stdout[4], version)
+                self.assertRegex(run.stderr, rb"^49152 bytes -> \d+ bytes \(\d+\.\d\d%\), not verified")
+        # segments from a file and from a pipe, with their reports
+        run = self.run_codec("encode", VECTORS / "segmented.bin", "-o", "-", "--threads", "2", "--segment-bytes", "262144")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b", 2 segments on 1 thread\n", run.stderr)
+        self.assertEqual(run.stdout, (VECTORS / "segmented.adpt").read_bytes())
+        run = self.run_codec("encode", "-", "--threads", "2", "--segment-bytes", "262144", data=(VECTORS / "segmented.bin").read_bytes())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b"2 segments on 1 thread (a pipe is read in order)", run.stderr)
+        decoded = self.run_codec("decode", "-", data=run.stdout)
+        self.assertEqual(decoded.stdout, (VECTORS / "segmented.bin").read_bytes())
+        # a budget below the smallest model is refused before any output
+        run = self.run_codec("encode", text, "-o", self.root / "tiny.adpt", "--max-memory", "1000")
+        self.assert_failure(run, b"error: memory budget exceeded")
+        self.assertFalse((self.root / "tiny.adpt").exists())
+        # the proof alongside with segments, and the empty input
+        run = self.run_codec("encode", VECTORS / "segmented.bin", "-o", self.root / "seg.adpt", "--threads", "2", "--segment-bytes", "262144", "--verify")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b", verified, 2 segments on 1 thread", run.stderr)
+        empty = self.root / "empty.bin"
+        empty.write_bytes(b"")
+        run = self.run_codec("encode", empty, "-o", "-", "--verify")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, (VECTORS / "empty.adpt").read_bytes())
+        self.assertIn(b"0 bytes -> 21 bytes (0.00%), verified", run.stderr)
 
 
 if __name__ == "__main__":
