@@ -8,14 +8,15 @@ frames the input in 256 KiB blocks, each modelled, stored-and-observed, or
 stored-and-skipped, and ends with the original length and its CRC-32. The
 implementation is C99 with nothing beyond the C standard library (POSIX
 threads for the encoder's optional proof). Byte streams use format versions
-13 (normal), 14 (fast) and 15 (max); named files and folders use versions
-16, 17 and 18 respectively to carry filesystem metadata. The decoder reads
+19 (normal), 20 (fast) and 21 (max); named files and folders use versions
+22, 23 and 24 respectively to carry filesystem metadata. The decoder reads
 all six versions. The CLI uses native filesystem APIs to restore metadata.
 
 The code began as an integer-for-integer port of a Rust crate and keeps that
-crate's layout and names; since format 13 it defines its own format and
-refuses the crate's versions 10–12. The header of
-[adapt.h](adpat/c/adapt.h) records what changed.
+crate's layout and names; since format 13 it defines its own format, and a
+release reads only the versions it writes (the crate's 10–12 and this
+codec's 13–18 are refused). The header of [adapt.h](adpat/c/adapt.h) records
+what changed.
 
 ## Layout
 
@@ -76,25 +77,29 @@ and reserved headroom. `-0` … `-9` set the budget to what xz takes to compress
 at the same preset — 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset
 below the smallest model raised to it — and `-9` (674 MiB) is the default:
 memory buys the context table, the table buys ratio, and neither costs time
-(on 100 MB of enwik8: 64 MiB → 21,221,772 bytes, 674 MiB → 19,943,347).
+(on 100 MB of enwik8: 64 MiB → 20,703,181 bytes, 674 MiB → 19,519,006;
+`--max` at 674 MiB → 18,831,629, at 1 GiB → 18,563,312).
 `--max-memory <bytes>` overrides any preset and bounds that allocation, which
 chooses the model. Models shrink only to their supported minimum: **1 MiB is
-insufficient**. `--help` prints the minimum normal single-model budget; an
-insufficient budget fails before publication and reports required and allowed
-bytes. Verification and segments can require more. A decoder holds the same
-model, so a file made at `-9` needs about 370 MB to decode; `decode` allocates
-whatever the container's header names — the container alone decodes (`FMT-6`
-in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)) — and `--max-memory` is the one
+insufficient**. `--help` prints the minimum single-model budget of the normal
+and the max profile (about 27 and 70 MiB); an insufficient budget fails before
+publication and reports required and allowed bytes. Verification and segments
+can require more. A decoder holds the same model, so a file made at `-9` needs
+about 650 MB to decode; `decode` allocates whatever the container's header
+names — the container alone decodes (`FMT-6` in
+[docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)) — and `--max-memory` is the one
 cap that can refuse a valid container; the format bounds what a header can
-name at about 1.2 GiB (the largest tables and window). `--max-output`
+name at about 2.1 GiB (the largest tables and window). `--max-output`
 (default 1 GiB) caps the bytes `decode` writes. Folder encoding additionally
 retains an entry/path inventory, and restoration retains pending directory
 metadata; this CLI bookkeeping is outside the codec's working-memory bound.
 
-- `--fast` writes the fast profile (version 14 or 17): two hashed contexts, one
-  arbiter, about three times the decoding speed for about a twelfth more
-  bytes. `--max` writes the max profile (version 15 or 18): more contexts and run
-  memories, fewer bytes for about twice the time in the same memory.
+- `--fast` writes the fast profile (version 20 or 23): two hashed contexts, one
+  arbiter, about three times the decoding speed for about an eighth more
+  bytes. `--max` writes the max profile (version 21 or 24): ten more contexts,
+  run memories and a wider second estimation stage, fewer bytes for about
+  three times the time; its smallest model is larger (`--help` prints both
+  minimums), so the low presets clamp higher under `--max`.
 - `--verify` proves the output as it is written, with a second model
   decoding every block, when the budget holds two models; for a file
   written to a file it falls back to a second pass with one. Encoding skips
@@ -246,8 +251,8 @@ class code, recall size and context-set code, window size and flags), an
 optional 2-byte record period, an optional metadata extension, blocks, an
 optional segment table, and a 13-byte trailer. The constants that pin it are the `ADAPT_*` macros at the
 top of [adapt.h](adpat/c/adapt.h); a change to any of them is a new version.
-Versions 13, 14 and 15 are the normal, fast and max byte-stream profiles.
-Versions 16, 17 and 18 use the same predictors and append a 32-byte extension
+Versions 19, 20 and 21 are the normal, fast and max byte-stream profiles.
+Versions 22, 23 and 24 use the same predictors and append a 32-byte extension
 after the record period (or fixed header when absent):
 
 | Bytes | Field (little-endian) |
@@ -262,8 +267,8 @@ stream starts with `ADPTARC2`, and each entry's existing kind/path/length or
 link-target header is followed by the same 28-byte metadata record, before
 file content. Entry metadata is covered by the outer payload CRC-32.
 `ADPTARC1` archives remain readable. Older codec releases do not read
-versions 16–18. The byte-oriented library encoders still emit versions
-13–15; `adapt_header_add_metadata()` adds the extension and
+versions 22–24. The byte-oriented library encoders still emit versions
+19–21; `adapt_header_add_metadata()` adds the extension and
 `adapt_read_metadata()` reads it. Use `adapt_header_len()` for the actual
 container header size; `adapt_sizes_header_bytes()` gives the base encoder
 header size without metadata.

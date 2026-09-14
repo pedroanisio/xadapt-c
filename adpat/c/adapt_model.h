@@ -9,8 +9,8 @@
  *
  * Began as a port of the Rust crate in `../src`, and is kept in the same
  * order and under the same names so the two can be read side by side;
- * where format versions 13 to 15 depart from the crate's 10 to 12 is
- * said in adapt.h and at each place below:
+ * where this port's formats (13 onward, now 19 to 24) depart from the
+ * crate's 10 to 12 is said in adapt.h and at each place below:
  *
  *   state.rs     the bit-history state machine and the learned map
  *   coder.rs     the binary arithmetic encoder and decoder
@@ -102,7 +102,7 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
  * --------------------------------------------------------------------- */
 
 #define TABLE_LOG_MIN 10
-#define TABLE_LOG_MAX 24
+#define TABLE_LOG_MAX 26
 #define MATCH_LOG_MIN 10
 #define MATCH_LOG_MAX 24
 #define WINDOW_LOG_MIN 16
@@ -119,7 +119,7 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
 #define CELL_LIMIT 255u
 #define MAP_LIMIT 255u
 #define MIXER_RATE_MAX 192
-#define MIXER_RATE_MIN 20
+#define MIXER_RATE_MIN 8
 #define MIXER_DECAY 96
 #define MIXER_COUNT_MAX 4095
 #define MIXER_SKIP 8
@@ -128,11 +128,15 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
  * bytes fill the line, and a claim inspects it once. */
 #define WAYS 4
 
-/* The hashed context kinds: ten every profile may run, then four the
- * max profile adds — the previous word with the current one, the first
- * and third bytes back, the byte history that followed the order-2
- * context, and the high nibbles of the last four bytes. */
-#define HASHED 14
+/* The hashed context kinds: ten every profile may run, then ten the max
+ * profile adds — the previous word with the current one, the first and
+ * third bytes back, the byte history that followed the order-2 context,
+ * the high nibbles of the last four bytes, the markup nesting (open [[
+ * and {{, the tag being read or last read), orders 5 and 8, the word
+ * with its case folded, the last three words, and the word with the
+ * classes of the three bytes before it. Each was measured on its own
+ * against the profile without it, on 16 MiB of enwik8. */
+#define HASHED 20
 #define BASE_HASHED 10
 #define H_O1 0
 #define H_O2 1
@@ -148,8 +152,16 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
 #define H_SPARSE2 11
 #define H_INDIRECT 12
 #define H_NIBBLES 13
+#define H_NEST 14
+#define H_O5 15
+#define H_O8 16
+#define H_WORDLC 17
+#define H_WORD3 18
+#define H_WORDC 19
 /* The kinds only the max profile runs, as a mask over the hashed kinds. */
-#define MAX_KINDS (1u << H_WORD2 | 1u << H_SPARSE2 | 1u << H_INDIRECT | 1u << H_NIBBLES)
+#define MAX_KINDS                                                                                                   \
+    (1u << H_WORD2 | 1u << H_SPARSE2 | 1u << H_INDIRECT | 1u << H_NIBBLES | 1u << H_NEST | 1u << H_O5 | 1u << H_O8 | \
+     1u << H_WORDLC | 1u << H_WORD3 | 1u << H_WORDC)
 /* Run memories: order-2 and the word for every profile; the max profile
  * adds order-1, -3, -4 and -6, keyed by the hashes their blocks are. */
 #define RUNS 6
@@ -180,11 +192,11 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
  * the parts it runs. */
 
 /* A set that keeps hashed contexts a and b: the contexts it leaves out. */
-#define KEEP2(a, b) ((uint16_t)(((1u << HASHED) - 1) & ~(1u << (a) | 1u << (b))))
+#define KEEP2(a, b) ((uint32_t)(((1u << HASHED) - 1) & ~(1u << (a) | 1u << (b))))
 /* The fast profile's context sets, two hashed contexts apiece so every
  * set costs the decoder the same: order-2 and class, order-2 and order-4,
  * order-1 and order-2. */
-static const uint16_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(H_O2, H_O4), KEEP2(H_O1, H_O2)};
+static const uint32_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(H_O2, H_O4), KEEP2(H_O1, H_O2)};
 /* Blocks of the fast profile's direct order-1 memory: 256 contexts of 32
  * nibble blocks, 128 KiB, read like the order-0 memory with no hash. */
 #define O1_BLOCKS (256 * 32)
@@ -206,10 +218,19 @@ static const uint16_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
 #define LANES(fast, max) (RUN_BASE(fast, max) + RUNS_OF(max) + 2 + 1)
 #define MIXER_SETS (3 * 8 * 256)
 #define MIXER2_SETS (3 * 2 * 256)
-#define FINAL_INPUTS 3
+/* The third and fourth first-layer arbiters, keyed by eight bits of the
+ * order-2 hash and of the word hash with the partial byte: measured
+ * 1.5 % on text, where two more (order-3, the recalled byte) lost it. */
+#define MIXER3_SETS (256 * 256)
+#define MIXER4_SETS (256 * 256)
+/* The final arbiter's inputs: the four verdicts and a bias. */
+#define FINAL_INPUTS 5
 #define FINAL_SETS (3 * 2 * 256)
 #define APM_BUCKETS 33
 #define APM_CONTEXTS (1u << 16)
+/* Rows of the second estimation stage: the max profile keys it by ten
+ * bits of the order-2 hash, the normal profile by eight. */
+#define APM2_CONTEXTS(max) ((max) ? (1u << 18) : (1u << 16))
 #define BLOCK 16
 /* Bytes of a line the record context remembers. */
 #define ROW_MAX 4096
@@ -220,10 +241,10 @@ static const uint16_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
 /* The class-history widths a file may choose, by header code. */
 static const uint32_t CLASS_WIDTHS[3] = {0, 8, 21};
 /* The bit of a context-set mask that leaves out both run models as well. */
-#define NO_RUNS (1u << 15)
+#define NO_RUNS (1u << 31)
 /* The context sets a file may choose, by header code: a mask of hashed
  * contexts the model leaves out (see CONTEXT_SETS in model.rs). */
-static const uint16_t CONTEXT_SETS[ADAPT_CONTEXT_SETS] = {
+static const uint32_t CONTEXT_SETS[ADAPT_CONTEXT_SETS] = {
     0,
     1 << H_RECORD | 1 << H_FIELD,
     1 << H_RECORD | 1 << H_FIELD | 1 << H_SPARSE,
@@ -235,7 +256,8 @@ static const uint16_t CONTEXT_SETS[ADAPT_CONTEXT_SETS] = {
 };
 /* The hashed contexts by name, in slot order, for reports. */
 static const char *const CONTEXT_NAMES[HASHED] = {"o1",    "o2",     "o3",       "o4",     "o6",    "word",  "field",
-                                                   "sparse", "record", "class",   "word2",  "sparse2", "indirect", "nibbles"};
+                                                   "sparse", "record", "class",   "word2",  "sparse2", "indirect", "nibbles",
+                                                   "nest",   "o5",     "o8",      "wordlc", "word3",   "wordc"};
 
 /* ------------------------------------------------------------------------
  * container.rs — constants
@@ -779,6 +801,13 @@ typedef struct model {
     uint64_t word_prev;
     /* What followed each order-2 context the last two times. */
     uint16_t followed[1 << 16];
+    /* markup nesting: open [[ and {{ counts, inside a <tag>, the tag's name
+     * hash while inside it (fixed once the name ends) and the last one
+     * closed */
+    uint32_t nest_link, nest_tmpl, nest_intag;
+    uint64_t nest_tag, nest_last;
+    /* the case-folded word, and the word before the previous one */
+    uint64_t word_lc, word_prev2;
     /* runs: tag << 16 | count << 8 | byte, directly indexed */
     uint32_t *rtab;
     uint32_t rtag[RUNS];
@@ -804,6 +833,12 @@ typedef struct model {
     int32_t *weights2;
     size_t wset2;
     int32_t pmix2;
+    int32_t *weights3;
+    size_t wset3;
+    int32_t pmix3;
+    int32_t *weights4;
+    size_t wset4;
+    int32_t pmix4;
     arbiter_final *wfinal;
     int32_t stf[FINAL_INPUTS];
     size_t wsetf;
@@ -811,6 +846,11 @@ typedef struct model {
     uint16_t (*apm)[APM_BUCKETS];
     size_t apm_ctx;
     size_t apm_j;
+    /* the second estimation stage, keyed by an order-2 hash and the
+     * partial byte, averaged with the first: 2^18 rows */
+    uint16_t (*apm2)[APM_BUCKETS];
+    size_t apm2_ctx;
+    size_t apm2_j;
     /* the current line's bytes and the previous line's, for the record context */
     uint8_t *row;
     uint8_t *prow;
@@ -854,11 +894,14 @@ static inline size_t model_layout(model *m, uint8_t *base, adapt_sizes sizes) {
     } while (0)
     ADAPT_PLACE(table, uint8_t *, ((size_t)1 << sizes.table_log) * BLOCK, 4096);
     ADAPT_PLACE(apm, uint16_t(*)[APM_BUCKETS], APM_CONTEXTS * sizeof(*m->apm), 4096);
+    ADAPT_PLACE(apm2, uint16_t(*)[APM_BUCKETS], APM2_CONTEXTS(sizes.max) * sizeof(*m->apm2), 4096);
     ADAPT_PLACE(mtab, uint32_t *, ((size_t)1 << sizes.match_log) * sizeof(uint32_t), 4096);
     ADAPT_PLACE(rtab, uint32_t *, (size_t)RUNS_OF(sizes.max) * RUN_SLOTS * sizeof(uint32_t), 4096);
     ADAPT_PLACE(hist, uint8_t *, (size_t)1 << sizes.window_log, 4096);
     ADAPT_PLACE(weights, int32_t *, MIXER_SETS * (size_t)ARBITER_STRIDE(sizes.fast, sizes.max) * sizeof(int32_t), 64);
     ADAPT_PLACE(weights2, int32_t *, MIXER2_SETS * (size_t)ARBITER_STRIDE(0, sizes.max) * sizeof(int32_t), 64);
+    ADAPT_PLACE(weights3, int32_t *, MIXER3_SETS * (size_t)ARBITER_STRIDE(0, sizes.max) * sizeof(int32_t), 4096);
+    ADAPT_PLACE(weights4, int32_t *, MIXER4_SETS * (size_t)ARBITER_STRIDE(0, sizes.max) * sizeof(int32_t), 4096);
     ADAPT_PLACE(wfinal, arbiter_final *, FINAL_SETS * sizeof(arbiter_final), 64);
     ADAPT_PLACE(row, uint8_t *, ROW_MAX, 64);
     ADAPT_PLACE(prow, uint8_t *, ROW_MAX, 64);
@@ -990,6 +1033,20 @@ static inline void start_byte(model *m, int fast) {
                          ? mix64((c & 0xFFFF) | (uint64_t)m->followed[c & 0xFFFF] << 16 | ((uint64_t)16 << 56))
                          : 0;
     hk[H_NIBBLES] = m->on[H_NIBBLES] ? mix64((c & 0xF0F0F0F0ull) | ((uint64_t)18 << 56)) : 0;
+    hk[H_NEST] = m->on[H_NEST]
+                     ? mix64((uint64_t)(m->nest_link & 3) | (uint64_t)(m->nest_tmpl & 3) << 2 | (uint64_t)m->nest_intag << 4 |
+                             ((m->nest_intag ? m->nest_tag : m->nest_last) & 0xFFFFFF) << 8 | (c & 0xFF) << 32 |
+                             ((uint64_t)19 << 56))
+                     : 0;
+    hk[H_O5] = m->on[H_O5] ? mix64((c & 0xFFFFFFFFFFull) | ((uint64_t)5 << 56)) : 0;
+    hk[H_O8] = m->on[H_O8] ? mix64(c ^ ((uint64_t)20 << 56)) : 0;
+    hk[H_WORDLC] = m->on[H_WORDLC] ? mix64((m->word_lc != 0 ? m->word_lc : (c & 0xFF)) ^ ((uint64_t)22 << 56)) : 0;
+    hk[H_WORD3] = m->on[H_WORD3] ? mix64((m->word_prev2 * 0x9E3779B97F4A7C15ull + m->word_prev) ^
+                                         (m->word != 0 ? m->word : (c & 0xFF)) ^ ((uint64_t)23 << 56))
+                                 : 0;
+    hk[H_WORDC] = m->on[H_WORDC] ? mix64((m->word != 0 ? m->word : (c & 0xFF)) ^ (uint64_t)(m->classes & 0x1FF) << 40 ^
+                                         ((uint64_t)24 << 56))
+                                 : 0;
     for (i = 0; i < m->hashed; i++) {
         m->h[i] = hk[m->kind[i]];
     }
@@ -1051,10 +1108,41 @@ static inline void end_byte(model *m, uint8_t b, int fast) {
     /* the order-2 context before this byte, and what followed it */
     m->followed[(m->c8 >> 8) & 0xFFFF] = (uint16_t)(m->followed[(m->c8 >> 8) & 0xFFFF] << 8 | b);
     if (!is_word_byte(b) && m->word != 0) {
+        m->word_prev2 = m->word_prev;
         m->word_prev = m->word;
     }
     m->word = is_word_byte(b) ? mix64(m->word ^ ((uint64_t)b + 1)) + b : 0;
+    {
+        uint8_t lc = (uint8_t)((b >= 'A' && b <= 'Z') ? b + 32 : b);
+        m->word_lc = is_word_byte(b) ? mix64(m->word_lc ^ ((uint64_t)lc + 1)) + lc : 0;
+    }
     m->classes = (m->classes << 3) | byte_class(b);
+    {
+        /* markup nesting: wiki links and templates by their brackets, a tag
+         * by its angle brackets, its name the word after '<' */
+        uint8_t prev = (uint8_t)(m->c8 >> 8);
+        if (b == '[' && prev == '[' && m->nest_link < 3) {
+            m->nest_link++;
+        } else if (b == ']' && prev == ']' && m->nest_link > 0) {
+            m->nest_link--;
+        } else if (b == '{' && prev == '{' && m->nest_tmpl < 3) {
+            m->nest_tmpl++;
+        } else if (b == '}' && prev == '}' && m->nest_tmpl > 0) {
+            m->nest_tmpl--;
+        } else if (b == '<') {
+            m->nest_intag = 1;
+            m->nest_tag = 0;
+        } else if (b == '>') {
+            if (m->nest_intag) {
+                m->nest_last = m->nest_tag;
+            }
+            m->nest_intag = 0;
+        } else if (m->nest_intag && m->nest_tag != 0xFFFFFFFF && is_word_byte(b)) {
+            m->nest_tag = mix64(m->nest_tag ^ ((uint64_t)b + 1)) + b;
+        } else if (m->nest_intag && (b == ' ' || b == '/')) {
+            m->nest_tag = m->nest_tag != 0 ? m->nest_tag : 0xFFFFFFFF; /* the name is complete */
+        }
+    }
     if (fast) {
         /* neither the field nor the record context: no line to track */
         goto recall;
@@ -1216,13 +1304,24 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     /* second arbiter: weights by the previous byte */
     m->wset2 = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (size_t)(m->c8 & 0xFF);
     m->pmix2 = m->squashed[dot(m->weights2 + m->wset2 * ARBITER_STRIDE(0, max), m->st, LANES(0, max)) + 2047];
+    /* third and fourth arbiters: by eight bits of the order-2 hash (slot 1
+     * holds order-2 under every set) and of the word hash, each with the
+     * partial byte */
+    m->wset3 = ((size_t)(m->h[1] >> 48) & 0xFF) * 256 + (m->c0 & 255);
+    m->pmix3 = m->squashed[dot(m->weights3 + m->wset3 * ARBITER_STRIDE(0, max), m->st, LANES(0, max)) + 2047];
+    m->wset4 = ((size_t)(mix64(m->word + 1) >> 48) & 0xFF) * 256 + (m->c0 & 255);
+    m->pmix4 = m->squashed[dot(m->weights4 + m->wset4 * ARBITER_STRIDE(0, max), m->st, LANES(0, max)) + 2047];
     /* final arbiter: weights by the partial byte */
     m->stf[0] = st[m->pmix];
     m->stf[1] = st[m->pmix2];
-    m->stf[2] = 256;
+    m->stf[2] = st[m->pmix3];
+    m->stf[3] = st[m->pmix4];
+    m->stf[4] = 256;
     m->wsetf = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (m->c0 & 255);
     m->pfinal = m->squashed[dot(m->wfinal[m->wsetf].w, m->stf, FINAL_INPUTS) + 2047];
-    /* secondary estimation keyed by the previous byte and the partial byte */
+    /* secondary estimation keyed by the previous byte and the partial
+     * byte, and a second stage keyed by an order-2 hash with the partial
+     * byte, averaged; three parts of it to one of the arbiters' verdict */
     s = st[m->pfinal] + 2048;
     j = ((size_t)s >> 7) & 31;
     w = s & 127;
@@ -1233,6 +1332,15 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     a = row[j];
     b = row[j + 1];
     papm = (a * (128 - w) + b * w) >> 11;
+    {
+        size_t ctx2 = (((size_t)(mix64((m->c8 & 0xFFFF) | ((uint64_t)21 << 56)) >> 46) & 0x3FF) << 8 | m->c0) &
+                      (APM2_CONTEXTS(max) - 1);
+        const uint16_t *row2 = m->apm2[ctx2];
+        int32_t papm2 = ((int32_t)row2[j] * (128 - w) + (int32_t)row2[j + 1] * w) >> 11;
+        m->apm2_ctx = ctx2;
+        m->apm2_j = j;
+        papm = (papm + papm2 + 1) >> 1;
+    }
     p = (m->pfinal + 3 * papm + 2) >> 2;
     if (p < 1) {
         p = 1;
@@ -1275,12 +1383,23 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
     }
     if (!fast) {
         int32_t *w2 = m->weights2 + m->wset2 * ARBITER_STRIDE(0, max);
+        int32_t *w3 = m->weights3 + m->wset3 * ARBITER_STRIDE(0, max);
+        int32_t *w4 = m->weights4 + m->wset4 * ARBITER_STRIDE(0, max);
         train(w2, w2 + LANES(0, max), m->st, LANES(0, max), target - m->pmix2, m->mixer_rate);
+        train(w3, w3 + LANES(0, max), m->st, LANES(0, max), target - m->pmix3, m->mixer_rate);
+        train(w4, w4 + LANES(0, max), m->st, LANES(0, max), target - m->pmix4, m->mixer_rate);
         train(m->wfinal[m->wsetf].w, &m->wfinal[m->wsetf].n, m->stf, FINAL_INPUTS, target - m->pfinal, m->mixer_rate);
-        /* secondary estimation: move both neighbours toward the outcome */
+        /* secondary estimation: move both neighbours toward the outcome,
+         * in both stages */
         g = (int32_t)(bit << 16) + (int32_t)(bit << APM_RATE) - (int32_t)bit * 2;
         row = m->apm[m->apm_ctx & (APM_CONTEXTS - 1)];
         j = m->apm_j & 31;
+        v = row[j] + ((g - row[j]) >> APM_RATE);
+        row[j] = (uint16_t)(v < 65535 ? v : 65535);
+        v = row[j + 1] + ((g - row[j + 1]) >> APM_RATE);
+        row[j + 1] = (uint16_t)(v < 65535 ? v : 65535);
+        row = m->apm2[m->apm2_ctx & (APM2_CONTEXTS(max) - 1)];
+        j = m->apm2_j & 31;
         v = row[j] + ((g - row[j]) >> APM_RATE);
         row[j] = (uint16_t)(v < 65535 ? v : 65535);
         v = row[j + 1] + ((g - row[j + 1]) >> APM_RATE);
@@ -1418,9 +1537,9 @@ static inline model *model_new(adapt_sizes sizes) {
     m->max = sizes.max != 0;
     m->period = sizes.period;
     {
-        uint16_t set = m->fast ? FAST_SETS[sizes.set_code] : CONTEXT_SETS[sizes.set_code];
+        uint32_t set = m->fast ? FAST_SETS[sizes.set_code] : CONTEXT_SETS[sizes.set_code];
         /* the max profile's kinds run only under it */
-        uint16_t dropped = set | (sizes.class_code == 0 ? (1u << H_CLASS) : 0) | (m->max ? 0 : MAX_KINDS);
+        uint32_t dropped = set | (sizes.class_code == 0 ? (1u << H_CLASS) : 0) | (m->max ? 0 : MAX_KINDS);
         m->hashed = 0;
         for (i = 0; i < HASHED; i++) {
             m->on[i] = (dropped >> i & 1) == 0;
@@ -1450,18 +1569,22 @@ static inline model *model_new(adapt_sizes sizes) {
             }
             w[lanes] = 0;
         }
-        for (i = 0; i < MIXER2_SETS; i++) {
-            int32_t *w = m->weights2 + i * (lanes2 + 1);
+        for (i = 0; i < MIXER2_SETS + MIXER3_SETS + MIXER4_SETS; i++) {
+            int32_t *w = i < MIXER2_SETS ? m->weights2 + i * (lanes2 + 1)
+                         : i < MIXER2_SETS + MIXER3_SETS ? m->weights3 + (i - MIXER2_SETS) * (lanes2 + 1)
+                                                         : m->weights4 + (i - MIXER2_SETS - MIXER3_SETS) * (lanes2 + 1);
             for (j = 0; j < lanes2; j++) {
                 w[j] = initial_weight(j, 0, m->max);
             }
             w[lanes2] = 0;
         }
     }
+    /* the final arbiter starts as the mean of its four verdicts */
     for (i = 0; i < FINAL_SETS; i++) {
-        m->wfinal[i].w[0] = 1 << 15;
-        m->wfinal[i].w[1] = 1 << 15;
-        m->wfinal[i].w[2] = 0;
+        for (j = 0; j < FINAL_INPUTS - 1; j++) {
+            m->wfinal[i].w[j] = (1 << 16) / (FINAL_INPUTS - 1);
+        }
+        m->wfinal[i].w[FINAL_INPUTS - 1] = 0;
         m->wfinal[i].n = 0;
     }
     for (j = 0; j < APM_BUCKETS; j++) {
@@ -1470,8 +1593,13 @@ static inline model *model_new(adapt_sizes sizes) {
     for (i = 0; i < APM_CONTEXTS; i++) {
         memcpy(m->apm[i], apm_row, sizeof(apm_row));
     }
+    for (i = 0; i < APM2_CONTEXTS(m->max); i++) {
+        memcpy(m->apm2[i], apm_row, sizeof(apm_row));
+    }
     m->pmix = 2048;
     m->pmix2 = 2048;
+    m->pmix3 = 2048;
+    m->pmix4 = 2048;
     m->pfinal = 2048;
     m->c0 = 1;
     m->bitpos = 0;
@@ -1695,7 +1823,8 @@ static inline adapt_status read_block(const uint8_t *src, size_t len, size_t *po
  * profile. */
 static inline uint64_t side_table_bytes(int fast, int max) {
     return (uint64_t)RUNS_OF(max) * RUN_SLOTS * 4 + (uint64_t)MIXER_SETS * ARBITER_STRIDE(fast, max) * 4 +
-           (uint64_t)MIXER2_SETS * ARBITER_STRIDE(0, max) * 4 + (uint64_t)FINAL_SETS * (FINAL_INPUTS + 1) * 4 + 2 * ROW_MAX;
+           (uint64_t)(MIXER2_SETS + MIXER3_SETS + MIXER4_SETS) * ARBITER_STRIDE(0, max) * 4 +
+           (uint64_t)FINAL_SETS * (FINAL_INPUTS + 1) * 4 + 2 * ROW_MAX;
 }
 
 /* Bytes one block's workspace takes: the block, its coded form, the framed

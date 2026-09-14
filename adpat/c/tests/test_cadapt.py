@@ -17,13 +17,13 @@ from pathlib import Path
 
 CADAPT = Path(__file__).resolve().parent.parent / "build" / "cadapt"
 VECTORS = Path(__file__).resolve().parent / "vectors"
-LOW_MEMORY = str(16 << 20)
+LOW_MEMORY = str(32 << 20)
 SOURCE = b"optional verification\n" * 128
 
 
 def payload_stream(container: bytes) -> bytes:
     """Remove only validated filesystem metadata for legacy stream comparisons."""
-    if container[4] not in (16, 17, 18):
+    if container[4] not in (22, 23, 24):
         return container
     base = 8 + (2 if container[7] & 0x80 else 0)
     assert zlib.crc32(container[:base + 28]) == int.from_bytes(container[base + 28:base + 32], "little")
@@ -267,7 +267,7 @@ class MetadataTest(CodecTest):
     def test_metadata_damage_is_rejected_without_publishing(self):
         encoded = self.run_codec("encode", self.source, "-o", "-")
         self.assertEqual(encoded.returncode, 0, encoded.stderr)
-        self.assertIn(encoded.stdout[4], (16, 17, 18))
+        self.assertIn(encoded.stdout[4], (22, 23, 24))
         damaged = bytearray(encoded.stdout)
         metadata_at = 8 + (2 if damaged[7] & 0x80 else 0)
         damaged[metadata_at] ^= 1
@@ -588,6 +588,13 @@ class PresetTest(unittest.TestCase):
         r = self.run_codec("encode", self.source, "-o", out, "--no-verify", "-9", "-0")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.table_log(out), logs["-0"])
+        # a preset below the max profile's larger floor is raised to that
+        out = self.root / "max0.adpt"
+        r = self.run_codec("encode", self.source, "-o", out, "--no-verify", "-0", "--max")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        decoded = self.run_codec("decode", out, "-o", "-")
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        self.assertEqual(decoded.stdout, self.source.read_bytes())
         # a preset is an encode option only
         r = self.run_codec("decode", out, "-o", "-", "-9")
         self.assertEqual(r.returncode, 2, r.stderr)
@@ -831,10 +838,10 @@ class CommandTest(CodecTest):
 
     def test_info_describes_every_kind_of_file(self) -> None:
         expectations = {
-            "text.adpt": (b"format          adapt container version 13", b"declared bytes  49152", b"class history   8 bytes", b"contexts        all but field, record", b"profile         normal"),
-            "text-fast.adpt": (b"format          adapt container version 14", b"contexts        o2, o4", b"profile         fast"),
-            "text-max.adpt": (b"format          adapt container version 15", b"profile         max"),
-            "records.adpt": (b"record period   192 bytes", b"class history   none", b"contexts        all"),
+            "text.adpt": (b"format          adapt container version 19", b"declared bytes  49152", b"class history   8 bytes", b"contexts        all but field, record", b"profile         normal"),
+            "text-fast.adpt": (b"format          adapt container version 20", b"contexts        o2, o4", b"profile         fast"),
+            "text-max.adpt": (b"format          adapt container version 21", b"profile         max"),
+            "records.adpt": (b"record period   192 bytes", b"class history   21 bytes", b"contexts        all"),
             "segmented.adpt": (b"segments        2", b"declared bytes  300000"),
             "empty.adpt": (b"declared bytes  0", b"file bytes      21"),
         }
@@ -875,7 +882,7 @@ class CommandTest(CodecTest):
     def test_encode_switches_and_reports(self) -> None:
         text = VECTORS / "text.bin"
         # a file to standard output, and the profiles' version bytes
-        for flags, version in (((), 16), (("--fast",), 17), (("--max",), 18)):
+        for flags, version in (((), 22), (("--fast",), 23), (("--max",), 24)):
             with self.subTest(flags=flags):
                 run = self.run_codec("encode", text, "-o", "-", *flags)
                 self.assertEqual(run.returncode, 0, run.stderr)

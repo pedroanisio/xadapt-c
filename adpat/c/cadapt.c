@@ -437,8 +437,9 @@ static int sparse_map(const char *path, uint64_t size, adapt_extent **extents, u
  * Verification is opt-in, and segment coding runs on one thread. */
 static void print_usage(FILE *stream) {
     adapt_sizes minimum_sizes;
-    adapt_error minimum_error;
+    adapt_error minimum_error, minimum_max_error;
     (void)adapt_sizes_for_input(1, 0, 0, &minimum_sizes, &minimum_error);
+    (void)adapt_sizes_for_input_max(1, 0, 0, &minimum_sizes, &minimum_max_error);
     fprintf(stream,
             "cadapt — the adapt self-adaptive lossless codec, in C\n"
             "\n"
@@ -454,19 +455,20 @@ static void print_usage(FILE *stream) {
             "Existing output files are kept unless --force is given. --fast writes the\n"
             "fast profile, which decodes about three times faster for about a twelfth\n"
             "more bytes; --max the max profile, which writes\n"
-            "fewer bytes for about twice the time in the same memory; the default is\n"
+            "fewer bytes for about three times the time in the same memory; the default is\n"
             "the normal profile. Normal/fast/max streams use versions %u/%u/%u;\n"
             "named files and folders include metadata in versions %u/%u/%u.\n"
             "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
             "preset: 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset below the\n"
-            "smallest model raised to it; -9 is the default, since memory buys ratio\n"
+            "smallest model of the profile raised to it; -9 is the default, since memory buys ratio\n"
             "and costs no time here, and decode takes the model's memory as the header\n"
             "names it. For encode, --max-memory <bytes> (default %llu) bounds codec\n"
             "model/window/workspace allocations. Folder path and metadata bookkeeping\n"
             "is additional.\n"
             "Models shrink only to their supported minimum; lower budgets fail\n"
             "before output is published and report the required bytes. The minimum\n"
-            "normal single-model budget is %llu bytes; verification/segments may need more.\n"
+            "normal single-model budget is %llu bytes, the max profile's %llu;\n"
+            "verification/segments may need more.\n"
             "Named files and folders preserve modes and access/modification timestamps.\n"
             "encode skips round-trip verification by default. --verify proves its output\n"
             "as it writes it when the budget holds two models, or, for a file written\n"
@@ -482,7 +484,7 @@ static void print_usage(FILE *stream) {
             ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
             ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_METADATA_MAX_VERSION,
             (unsigned long long)ADAPT_DEFAULT_MAX_MEMORY,
-            (unsigned long long)minimum_error.detail,
+            (unsigned long long)minimum_error.detail, (unsigned long long)minimum_max_error.detail,
             (unsigned long long)ADAPT_SEGMENT_BYTES, (unsigned long long)ADAPT_BLOCK_BYTES);
 }
 
@@ -584,7 +586,8 @@ static const uint64_t PRESET_MIB[10] = {3, 9, 17, 32, 48, 94, 94, 186, 370, 674}
 static const char *const PRESET_FLAGS[10] = {"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9"};
 
 /* The budget a preset names: the last preset given, or -9; a preset below
- * the smallest model is raised to it. 0 when no preset flag is present. */
+ * the smallest model of the profile in force is raised to it. 0 when no
+ * preset flag is present. */
 static uint64_t preset_budget(const args *a) {
     uint64_t budget = 0;
     int i, p;
@@ -598,7 +601,11 @@ static uint64_t preset_budget(const args *a) {
     if (budget != 0) {
         adapt_sizes floor;
         adapt_error error;
-        (void)adapt_sizes_for_input(1, 0, 0, &floor, &error);
+        if (has_flag(a, "--max")) {
+            (void)adapt_sizes_for_input_max(1, 0, 0, &floor, &error);
+        } else {
+            (void)adapt_sizes_for_input(1, 0, 0, &floor, &error);
+        }
         if (error.status == ADAPT_ERROR_MEMORY_LIMIT && budget < error.detail) {
             budget = error.detail;
         }

@@ -325,11 +325,11 @@ def inspect_container(path: Path) -> dict[str, Any]:
             return data
 
         header = read(8)
-        if header[:4] != b"ADPT" or header[4] not in (13, 14, 15, 16, 17, 18):
+        if header[:4] != b"ADPT" or header[4] not in (19, 20, 21, 22, 23, 24):
             raise ValueError("unsupported container header")
         period = int.from_bytes(read(2), "little") if header[7] & 0x80 else 0
         filesystem_metadata = None
-        if header[4] in (16, 17, 18):
+        if header[4] in (22, 23, 24):
             metadata = read(32)
             checksum_input = header + (period.to_bytes(2, "little") if header[7] & 0x80 else b"") + metadata[:28]
             if zlib.crc32(checksum_input) != int.from_bytes(metadata[28:], "little"):
@@ -606,7 +606,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--output", type=Path, default=ROOT / "bench/results", help="parent for a new, unique session")
     run.add_argument("--profiles", nargs="+", choices=("normal", "fast", "max"), default=["normal", "fast", "max"])
     run.add_argument("--repeats", type=positive_int, default=1)
-    run.add_argument("--memory", nargs="+", type=byte_count, default=[64 * MIB], metavar="BYTES")
+    run.add_argument("--memory", nargs="+", type=byte_count, default=[674 * MIB], metavar="BYTES")
     run.add_argument("--threads", nargs="+", type=positive_int, default=[1])
     run.add_argument("--segment-bytes", type=byte_count, default=16 * MIB)
     run.add_argument("--verify", action="store_true", help="include the encoder's optional round-trip proof in timing")

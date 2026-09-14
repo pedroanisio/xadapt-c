@@ -21,8 +21,8 @@ make
 python3 -B bench/telemetry.py run
 ```
 
-The default matrix runs normal, fast, and max once each, sequentially, with a
-64 MiB model budget and verification off. Each invocation creates a fresh session
+The default matrix runs normal, fast, and max once each, sequentially, with the
+codec's default 674 MiB model budget (`cadapt -9`) and verification off. Each invocation creates a fresh session
 under `bench/results/`. Full-corpus runs may take several minutes per profile.
 No benchmark runs during `make` or `make check`.
 

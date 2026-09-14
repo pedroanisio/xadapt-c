@@ -35,6 +35,11 @@
 /* Bytes of the first block the encoder codes under each class-history
  * width before choosing one for the file. */
 #define CLASS_SAMPLE ((size_t)1 << 15)
+/* A lean context set must code the sample this fraction smaller than the
+ * full set to be considered, and the whole first block this fraction
+ * smaller to be kept. */
+#define SET_MARGIN(size) ((size) - (size) / 512)
+#define PROOF_MARGIN(size) ((size) - (size) / 256)
 /* Coded bytes a sample must produce before its ranking of the widths
  * counts. */
 #define CLASS_EVIDENCE 2048
@@ -180,7 +185,7 @@ static uint8_t clamp_u8(unsigned v, uint8_t lo, uint8_t hi) {
 uint8_t adapt_table_log_for(uint64_t length) {
     unsigned b = bits(length);
     uint8_t sweet = clamp_u8(b + 5, 18, 20);
-    uint8_t grown = clamp_u8(b > 3 ? b - 3 : 0, 18, TABLE_LOG_MAX);
+    uint8_t grown = clamp_u8(b > 2 ? b - 2 : 0, 18, TABLE_LOG_MAX);
     return sweet > grown ? sweet : grown;
 }
 
@@ -500,7 +505,7 @@ static size_t code_block(model *m, const uint8_t *block, size_t n, uint8_t *code
     return payload;
 }
 
-static unsigned popcount16(uint16_t x) {
+static unsigned popcount16(uint32_t x) {
     unsigned n = 0;
     while (x != 0) {
         n += x & 1;
@@ -534,12 +539,15 @@ static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_cod
  * declines the class context and keeps every other. Then the context sets
  * on the same sample, family by family — the text family (sets 1, 2, 6)
  * drops record and field first, the binary family (3, 4, 5, 7) word and
- * field first, and a family whose head cannot beat the full set by a
- * thousandth is not pursued; a block no longer than two samples tries the
- * two heads only. The set that codes the sample smallest wins, ties to
- * fewer contexts then the lower code; a lean choice on a long block is
- * proved on the whole block against the full set and reverts when it
- * loses. */
+ * field first, and a family whose head cannot beat the full set by
+ * SET_MARGIN of the sample is not pursued; a block no longer than two
+ * samples tries the two heads only. The set that codes the sample smallest
+ * wins, ties to fewer contexts then the lower code; a lean choice on a
+ * long block is proved on the whole block against the full set and
+ * reverts unless it wins there by PROOF_MARGIN. The margins are what a
+ * sample can be trusted for: measured on 16 MiB of enwik8, a lean set that
+ * won its 32 KiB sample by a hair and its 256 KiB block by less than a
+ * thousandth lost the whole file by seven. */
 static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
                                  uint8_t *class_out, uint8_t *set_out, uint16_t *period_out, adapt_error *error) {
     size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
@@ -578,10 +586,10 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     full = coded_len[class_code];
     /* The fast profile's sets all cost the decoder the same, so every one
      * is tried and the smallest taken, on the terms below: it must beat
-     * the first set by a thousandth of the sample, and a choice on a
+     * the first set by SET_MARGIN of the sample, and a choice on a
      * block longer than two samples is proved on the block. */
     if (sizes.fast) {
-        choice_size = full - full / 1024;
+        choice_size = SET_MARGIN(full);
         choice_code = 0;
         for (code = 1; code < ADAPT_FAST_SETS; code++) {
             size_t size;
@@ -605,7 +613,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
             if (status != ADAPT_OK) {
                 return status;
             }
-            if (lean > whole) {
+            if (lean > PROOF_MARGIN(whole)) {
                 set_code = 0;
             }
         }
@@ -613,7 +621,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         *set_out = set_code;
         return ADAPT_OK;
     }
-    choice_size = full - full / 1024;
+    choice_size = SET_MARGIN(full);
     choice_contexts = HASHED + 1;
     choice_code = 0;
     {
@@ -638,7 +646,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
                     return status;
                 }
                 contexts = HASHED + 1 - popcount16(CONTEXT_SETS[code]);
-                beats = size <= full - full / 1024;
+                beats = size <= SET_MARGIN(full);
                 better = size < choice_size ||
                          (size == choice_size && (contexts < choice_contexts || (contexts == choice_contexts && code < choice_code)));
                 if (better) {
@@ -663,7 +671,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         if (status != ADAPT_OK) {
             return status;
         }
-        if (lean > whole) {
+        if (lean > PROOF_MARGIN(whole)) {
             set_code = 0;
         }
     }

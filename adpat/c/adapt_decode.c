@@ -170,7 +170,7 @@ uint32_t adapt_class_width(adapt_sizes sizes) {
 }
 
 void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len) {
-    uint16_t mask = sizes.set_code < ADAPT_CONTEXT_SETS ? CONTEXT_SETS[sizes.set_code] : 0;
+    uint32_t mask = sizes.set_code < ADAPT_CONTEXT_SETS ? CONTEXT_SETS[sizes.set_code] : 0;
     /* the max profile's kinds are not the normal profile's to drop */
     size_t kinds = sizes.max ? HASHED : BASE_HASHED;
     size_t i, at = 0;
@@ -193,11 +193,12 @@ void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len) {
 
 uint64_t adapt_model_bytes(adapt_sizes sizes) {
     return ((uint64_t)1 << sizes.table_log) * 16 + (sizes.fast ? O1_BYTES : 0) + ((uint64_t)1 << sizes.match_log) * 4 +
-           (uint64_t)(1 << 16) * 33 * 2 + side_table_bytes(sizes.fast, sizes.max) + ((uint64_t)1 << sizes.window_log);
+           (uint64_t)(APM_CONTEXTS + APM2_CONTEXTS(sizes.max)) * APM_BUCKETS * 2 + side_table_bytes(sizes.fast, sizes.max) +
+           ((uint64_t)1 << sizes.window_log);
 }
 
 void adapt_fast_contexts(adapt_sizes sizes, char *buf, size_t len) {
-    uint16_t mask = sizes.set_code < ADAPT_FAST_SETS ? FAST_SETS[sizes.set_code] : 0;
+    uint32_t mask = sizes.set_code < ADAPT_FAST_SETS ? FAST_SETS[sizes.set_code] : 0;
     size_t i, at = 0;
     if (len == 0) {
         return;
