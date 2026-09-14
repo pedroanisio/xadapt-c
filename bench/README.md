@@ -57,6 +57,30 @@ if any run fails or the session is incomplete.
 sequentially; a verifier thread can run when `--verify` is enabled. The sampled
 thread count shows actual process threads.
 
+## Locked floors and the CI gate
+
+`ratio_floor.json` holds the floors locked in `LOCKS.md` (2026-09-14): the
+largest container and lowest throughput `cadapt encode --max --allocation
+context` may produce on the first 8 MiB of enwik8 (the CI proxy), the first
+16 MiB (pre-merge), full enwik8 and full enwik9 (release). `check_ratio_floor.py`
+encodes a fixture with the current binary, refuses inputs whose size or MD5
+differ from the locked ones, gates size exactly, gates throughput on the
+reference host or relative to `--baseline-binary` elsewhere (and says so when it
+cannot), and with `--verify` decodes and compares byte for byte.
+
+```sh
+make gate                                   # 8 MiB proxy, encode + verify, < 120 s
+make ratio-floor                            # full enwik8 (static/corpus/enwik8 unzipped)
+make ratio-floor FLOOR_ARGS='--fixture enwik8=static/corpus/enwik8 --fixture enwik9=/path/enwik9'
+python3 -B bench/check_ratio_floor.py --fixture enwik8-8MiB=build/enwik8-8MiB \
+    --baseline-binary /path/to/locked-commit/cadapt   # any host: relative throughput
+python3 -B -m unittest discover -s bench -p 'test_check_ratio_floor.py'
+```
+
+Exit 0 means every requested floor holds, 1 that a floor is broken, 2 that the
+check could not run. The proxy cannot see the allocation policy (identical
+bytes below 32 MiB), which is why the full floors exist.
+
 ## Plot all runs
 
 ```sh
