@@ -230,6 +230,58 @@ static void test_sizes(void) {
           ADAPT_FAST_TABLE_LOG_MAX);
 }
 
+/* The fast profile's sizes are the normal profile's fit, transformed
+ * (adapt_sizes_fast) rather than fitted under the fast model's own bound,
+ * so `--fast` stays within a budget `encode` accepts only while the fast
+ * model at any sizes is no larger than the normal one: pinned here over
+ * every size the format allows, and as the promise a caller sees, so a
+ * change to the fast model that outgrows the normal one is caught before
+ * a budget starts being refused for the fast profile alone. */
+static void test_fast_fits_where_normal_fits(void) {
+    adapt_sizes s, floor;
+    adapt_error error;
+    uint64_t least, budget;
+    int outgrown = 0, invalid = 0, refused = 0, over = 0, triples = 0, budgets = 0;
+    memset(&floor, 0, sizeof(floor));
+    floor.table_log = 10;
+    floor.match_log = 10;
+    floor.window_log = 16;
+    least = adapt_encode_memory_bound(floor);
+    memset(&s, 0, sizeof(s));
+    for (s.table_log = 10; s.table_log <= 22; s.table_log++) {
+        for (s.match_log = 10; s.match_log <= 24; s.match_log++) {
+            for (s.window_log = 16; s.window_log <= 30; s.window_log++) {
+                adapt_sizes f = adapt_sizes_fast(s);
+                if (!adapt_sizes_valid(s)) {
+                    continue;
+                }
+                triples++;
+                invalid += !adapt_sizes_valid(f);
+                outgrown += adapt_encode_memory_bound(f) > adapt_encode_memory_bound(s) ||
+                            adapt_verified_memory_bound(f) > adapt_verified_memory_bound(s);
+            }
+        }
+    }
+    CHECK(triples > 2000);
+    CHECK(invalid == 0);
+    CHECK(outgrown == 0);
+    /* every budget from the smallest model's up, in steps: the fit, then
+     * the fast transform, still within the budget */
+    for (budget = least; budget < least + ((uint64_t)4 << 20); budget += 4096) {
+        adapt_sizes fit, fast;
+        budgets++;
+        if (adapt_sizes_for_input(1, 30000, budget, &fit, &error) != ADAPT_OK) {
+            refused++;
+            continue;
+        }
+        fast = adapt_sizes_fast(fit);
+        over += adapt_encode_memory_bound(fast) > budget || !adapt_sizes_valid(fast) || fast.table_log > ADAPT_FAST_TABLE_LOG_MAX;
+    }
+    CHECK(budgets > 1000);
+    CHECK(refused == 0);
+    CHECK(over == 0);
+}
+
 /* ---- round trips ------------------------------------------------------- */
 
 static void roundtrip(const uint8_t *data, size_t n, uint8_t expect_method, int verified) {
@@ -1208,6 +1260,7 @@ int main(int argc, char **argv) {
     test_vector("hello.adpt", "hello.bin");
     test_vector("abc.adpt", "abc.bin");
     test_sizes();
+    test_fast_fits_where_normal_fits();
     test_roundtrips();
     test_streams();
     test_verified_blocks();
