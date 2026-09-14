@@ -1,0 +1,14 @@
+system,input_bytes,input_extent,compressed_or_adjusted_bytes,value_kind,bits_per_input_byte,accounting,relative_reduction_from_cadapt_max_percent,comparison_scope,source
+cadapt normal,100000000,full enwik8,21508175,local measured archive,1.720654,archive; no external model,-0.8138633027070963,full input; resource/accounting differences remain,enwik8-baseline.json
+cadapt fast,100000000,full enwik8,23674129,local measured archive,1.89393032,archive; no external model,-10.966197960387337,full input; resource/accounting differences remain,enwik8-baseline.json
+cadapt max,100000000,full enwik8,21334541,local measured archive,1.70676328,archive; no external model,0.0,full input; resource/accounting differences remain,enwik8-baseline.json
+2x target,100000000,full enwik8,10667270,computed target,0.8533816,archive plus all new decoder dependencies,50.000002343617325,full input; resource/accounting differences remain,enwik8-baseline.json
+cmix v21,100000000,full enwik8,14623723,author-reported archive,1.16989784,archive; different memory and CPU budget,31.455178716992314,full input; resource/accounting differences remain,https://www.byronknoll.com/cmix.html
+NNCP 2023-10-21,100000000,full enwik8,14915298,author-reported archive,1.19322384,archive; different neural compute budget,30.088498271418164,full input; resource/accounting differences remain,https://bellard.org/nncp/
+Midicoth,100000000,full enwik8,21914998,paper-reported archive,1.75319984,no pretrained model claimed; not locally reproduced,-2.7207381682127663,full input; resource/accounting differences remain,https://arxiv.org/html/2603.08771v3
+StateSMix,100000000,full enwik8,26622640,paper-reported archive,2.1298112,online model; large tables; not locally reproduced,-24.786560910778444,full input; resource/accounting differences remain,https://arxiv.org/html/2605.02904v1
+L3TC-800K ACR,100000000,full enwik8,17280000,implied by rounded reported 17.28%,1.3824,payload plus FP16 model; tokenizer/package cost not established,19.004585099815362,full input; resource/accounting differences remain,https://arxiv.org/html/2412.16642v2
+L3TC-3.2M payload,100000000,full enwik8,13810000,implied by rounded reported 13.81%,1.1048,model excluded; ACR is 20.23%,,not a whole-file size comparison,https://arxiv.org/html/2412.16642v2
+Nacrith,100000000,full enwik8,11737280,paper-reported archive,0.9389824,approximately 500 MB pretrained weights excluded,,not a whole-file size comparison,https://arxiv.org/html/2602.19626v1
+FineZip arithmetic coding,,first 10 MB of enwik8; paper label,,reported ratio 0.0797,0.6376,pretrained Llama-3-8B; verify adapter accounting,,not a whole-file size comparison,https://arxiv.org/html/2409.17141v1
+DLM rANS,,first 10 MB of enwik8; paper label,,reported ratio 0.127,1.016,pretrained diffusion model excluded,,not a whole-file size comparison,https://arxiv.org/html/2608.11249v1
