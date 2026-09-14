@@ -1427,7 +1427,11 @@ typedef struct memory_source {
 static int memory_source_read(void *context, uint8_t *buf, size_t len, size_t *got) {
     memory_source *r = context;
     size_t n = r->len - r->pos < len ? r->len - r->pos : len;
-    memcpy(buf, r->src + r->pos, n);
+    /* An empty source may be NULL, which may not be offset or handed to
+     * memcpy even for zero bytes. */
+    if (n != 0) {
+        memcpy(buf, r->src + r->pos, n);
+    }
     r->pos += n;
     *got = n;
     return 0;
