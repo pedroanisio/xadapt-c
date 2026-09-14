@@ -1,0 +1,36 @@
+{
+  "schema": "cadapt.build-manifest.v1",
+  "version": "0.12.0",
+  "commit": "e2ce8ec788e4a52c1d178a618a95c4ea2de53d62",
+  "generated_at": "2026-09-14T18:01:08+00:00",
+  "sources": {
+    "adpat/c/adapt.h": "3dd270fff3ed877224135013f1541a64f59babb7062c77468f57f65494bebab2",
+    "adpat/c/adapt_model.h": "37c762c383dac146cf3cb3a358d99a820d46a8ebf1e1f25bcb3406b2c22adab8",
+    "adpat/c/adapt_decode.c": "2ab95e3e61c2c340bc483057e34082b84936c58e3d455afe2ec3183bb19e653f",
+    "adpat/c/adapt_encode.c": "efcd311a5df552d5b81500f2ec9ec4d901892d67e7b2ca798de3d90cf15a4259",
+    "adpat/c/adapt_archive.c": "089f77084f6fde6d824e2946cb494912daf52909ea3fe8ef389061778d04339f",
+    "adpat/c/cadapt.c": "9d879424f5cfd8e3cdd466dbdec3fcc3d43d775e993a0a908a16690849882ba6"
+  },
+  "makefile_sha256": "fb495c9c8691a2d4c1d2f66695087493f9eadd6dd1c68d686a9699697dbf5956",
+  "toolchain": {
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "cc_command": "cc",
+    "cflags": "-std=c99 -O3 -Wall -Wextra -Wpedantic -Werror -DADAPT_THREADS -pthread",
+    "ldflags": "",
+    "make": "GNU Make 4.3"
+  },
+  "host": {
+    "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.39",
+    "machine": "x86_64"
+  },
+  "outputs": {
+    "adpat/c/build/cadapt": {
+      "sha256": "2e0236a7344ba1966e08aa37ebdd0a913d95b1d0b1d9bcd3e7e137898acfbaf4",
+      "bytes": 231664
+    },
+    "adpat/c/build/libadapt.a": {
+      "sha256": "8db7b18159c98bcd5756bce223672cd2aa8d7fb5065794a37b4013c82e505fde",
+      "bytes": 191956
+    }
+  }
+}
