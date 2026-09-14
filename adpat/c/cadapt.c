@@ -155,8 +155,8 @@ static void print_usage(FILE *stream) {
             "cadapt — the adapt self-adaptive lossless codec, in C\n"
             "\n"
             "usage:\n"
-            "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [--max-memory <bytes>]\n"
-            "                [--threads <n>] [--segment-bytes <bytes>]\n"
+            "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -9]\n"
+            "                [--max-memory <bytes>] [--threads <n>] [--segment-bytes <bytes>]\n"
             "  cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]\n"
             "  cadapt info   <file>\n"
             "  cadapt --version\n"
@@ -169,6 +169,10 @@ static void print_usage(FILE *stream) {
             "fewer bytes for about twice the time in the same memory; the default is\n"
             "the normal profile. Normal/fast/max streams use versions %u/%u/%u;\n"
             "named files and folders include metadata in versions %u/%u/%u.\n"
+            "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
+            "preset: 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset below the\n"
+            "smallest model raised to it; -9 is the default, since memory buys ratio\n"
+            "and costs no time here, and a decoder needs the model's memory again.\n"
             "--max-memory <bytes> (default %llu) bounds codec model/window/workspace\n"
             "allocations. Folder path and metadata bookkeeping is additional.\n"
             "Models shrink only to their supported minimum; lower budgets fail\n"
@@ -192,6 +196,7 @@ static void print_usage(FILE *stream) {
 
 /* Exit codes, as the Rust command line uses them. */
 enum { EXIT_OTHER = 1, EXIT_USAGE = 2 };
+
 
 static int usage_error(const char *fmt, const char *arg) {
     fputs("error: ", stderr);
@@ -279,6 +284,34 @@ static const char *value_of(const args *a, const char *name) {
         }
     }
     return NULL;
+}
+
+/* The encode presets -0 to -9: xz's compression-side memory, in MiB, at the
+ * same numbers, so that a user of xz reads them as before. */
+static const uint64_t PRESET_MIB[10] = {3, 9, 17, 32, 48, 94, 94, 186, 370, 674};
+static const char *const PRESET_FLAGS[10] = {"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9"};
+
+/* The budget a preset names: the last preset given, or -9; a preset below
+ * the smallest model is raised to it. 0 when no preset flag is present. */
+static uint64_t preset_budget(const args *a) {
+    uint64_t budget = 0;
+    int i, p;
+    for (i = 0; i < a->nflags && i < 8; i++) {
+        for (p = 0; p < 10; p++) {
+            if (strcmp(a->flags[i], PRESET_FLAGS[p]) == 0) {
+                budget = PRESET_MIB[p] << 20;
+            }
+        }
+    }
+    if (budget != 0) {
+        adapt_sizes floor;
+        adapt_error error;
+        (void)adapt_sizes_for_input(1, 0, 0, &floor, &error);
+        if (error.status == ADAPT_ERROR_MEMORY_LIMIT && budget < error.detail) {
+            budget = error.detail;
+        }
+    }
+    return budget;
 }
 
 static int reject_unknown(const args *a, const char *const *known) {
@@ -1647,7 +1680,8 @@ static int input_length(FILE *file, uint64_t *length) {
 
 static int encode_command(int argc, char **argv) {
     static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", NULL};
-    static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", NULL};
+    static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", "-0", "-1", "-2", "-3",
+                                        "-4",      "-5",       "-6",          "-7",     "-8",    "-9", NULL};
     args a;
     const char *input, *o, *text, *how;
     char *output = NULL;
@@ -1728,6 +1762,10 @@ static int encode_command(int argc, char **argv) {
     }
     if (output == NULL) {
         return other_error(input, "memory allocation failed");
+    }
+    /* a preset names the budget; an explicit --max-memory overrides it */
+    if (preset_budget(&a) != 0) {
+        max_memory = preset_budget(&a);
     }
     text = value_of(&a, "--max-memory");
     if (text != NULL && !parse_bytes(text, &max_memory)) {

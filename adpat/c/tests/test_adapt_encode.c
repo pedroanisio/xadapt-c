@@ -207,7 +207,11 @@ static void test_sizes(void) {
     CHECK(adapt_table_log_for((32u << 20) - 1) == 22 && adapt_table_log_for(32u << 20) == 23);
     CHECK(adapt_table_log_for(64u << 20) == 24 && adapt_table_log_for(100000000) == 24);
     CHECK(adapt_table_log_for((uint64_t)1 << 40) == 24);
+    /* the default budget, xz -9's, holds the largest table and a window
+     * over the whole input; 64 MiB, the old default, holds neither */
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK(s.table_log == 24 && s.match_log == 20 && s.window_log == 27);
+    CHECK_STATUS(adapt_sizes_for_input(1, 100000000, (uint64_t)64 << 20, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20 && s.match_log == 20 && s.window_log == 24);
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, (uint64_t)256 << 20, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 22 && s.match_log == 20 && s.window_log == 27);

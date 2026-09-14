@@ -60,7 +60,7 @@ strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
 ## Command line
 
 ```
-cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max]
+cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -9]
               [--max-memory <bytes>] [--threads <n>] [--segment-bytes <bytes>]
 cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
 cadapt info   <file>
@@ -71,7 +71,14 @@ cadapt --version
 `-o`, `encode` writes `<input>.adpt` and `decode` strips that suffix (or
 appends `.out`). An existing output is kept unless `--force` is given. Both
 directions stream: codec working memory is the model, window, block workspace
-and reserved headroom. `--max-memory` (default 64 MiB) bounds that allocation.
+and reserved headroom. `-0` … `-9` set the budget to what xz takes to compress
+at the same preset — 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset
+below the smallest model raised to it — and `-9` (674 MiB) is the default:
+memory buys the context table, the table buys ratio, and neither costs time
+(on 100 MB of enwik8: 64 MiB → 21,221,772 bytes, 674 MiB → 19,943,347). A
+decoder holds the same model, so a file made at `-9` needs about 370 MB to
+decode; the decoder's default budget is the same 674 MiB. `--max-memory
+<bytes>` overrides any preset and bounds that allocation.
 Models shrink only to their supported minimum: **1 MiB is insufficient**.
 `--help` prints the minimum normal single-model budget; an insufficient
 budget fails before publication and reports required and allowed bytes.

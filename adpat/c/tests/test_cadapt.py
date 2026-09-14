@@ -4,6 +4,7 @@ exact messages and reports each command gives, the bytes `info` describes,
 and the file a pipe and a file encode to."""
 
 import os
+import random
 import re
 import stat
 import subprocess
@@ -407,6 +408,66 @@ class FolderTest(unittest.TestCase):
         self.assertEqual(encoded.returncode, 1, encoded.stderr)
         self.assertIn(b"not a directory, a regular file or a symbolic link", encoded.stderr)
         self.assertFalse((self.root / "x.adpt").exists())
+
+
+class PresetTest(unittest.TestCase):
+    """-0 .. -9 name xz's compression memory; -9 is the default; an explicit
+    --max-memory overrides a preset."""
+
+    def setUp(self) -> None:
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        self.source = self.root / "source.txt"
+        # text with enough variety that the table size shows in the bytes
+        rng = random.Random(7)
+        words = [f"w{rng.randrange(3000)}" for _ in range(60000)]
+        self.source.write_bytes(" ".join(words).encode())
+
+    def run_codec(self, *args, data=None):
+        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=60)
+
+    def table_log(self, container: Path) -> int:
+        info = self.run_codec("info", container)
+        self.assertEqual(info.returncode, 0, info.stderr)
+        line = next(l for l in info.stdout.decode().splitlines() if l.startswith("context table"))
+        return int(line.split("2^")[1].split()[0])
+
+    def test_default_is_minus_nine_and_explicit_memory_overrides(self) -> None:
+        plain = self.root / "plain.adpt"
+        nine = self.root / "nine.adpt"
+        small = self.root / "small.adpt"
+        for out, flags in ((plain, ()), (nine, ("-9",)), (small, ("-9", "--max-memory", LOW_MEMORY))):
+            r = self.run_codec("encode", self.source, "-o", out, "--no-verify", *flags)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(plain.read_bytes(), nine.read_bytes())
+        self.assertLess(self.table_log(small), self.table_log(nine))
+        self.assertGreater(small.stat().st_size, nine.stat().st_size)
+
+    def test_presets_order_the_model_and_the_lowest_clamp_to_the_floor(self) -> None:
+        logs = {}
+        for preset in ("-0", "-1", "-3", "-6", "-9"):
+            out = self.root / f"p{preset[1]}.adpt"
+            r = self.run_codec("encode", self.source, "-o", out, "--no-verify", preset)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            logs[preset] = self.table_log(out)
+            decoded = self.run_codec("decode", out, "-o", "-")
+            self.assertEqual(decoded.returncode, 0, decoded.stderr)
+            self.assertEqual(decoded.stdout, self.source.read_bytes())
+        self.assertEqual(logs["-0"], logs["-1"])  # both below the floor: the smallest model
+        self.assertLessEqual(logs["-1"], logs["-3"])
+        self.assertLessEqual(logs["-3"], logs["-6"])
+        self.assertLessEqual(logs["-6"], logs["-9"])
+        self.assertLess(logs["-0"], logs["-9"])
+        # the last preset given wins
+        out = self.root / "last.adpt"
+        r = self.run_codec("encode", self.source, "-o", out, "--no-verify", "-9", "-0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.table_log(out), logs["-0"])
+        # a preset is an encode option only
+        r = self.run_codec("decode", out, "-o", "-", "-9")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn(b"-9", r.stderr)
 
 
 class SurfaceTest(unittest.TestCase):

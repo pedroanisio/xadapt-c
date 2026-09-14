@@ -716,7 +716,7 @@ static void test_limits(void) {
     adapt_limits limits = adapt_default_limits();
     uint64_t bound;
     CHECK(limits.max_output == ((uint64_t)1 << 30));
-    CHECK(limits.max_memory == ((uint64_t)64 << 20));
+    CHECK(limits.max_memory == ADAPT_DEFAULT_MAX_MEMORY && limits.max_memory == ((uint64_t)674 << 20));
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
     bound = adapt_decode_memory_bound(sizes);
     CHECK(bound > adapt_model_bytes(sizes));
