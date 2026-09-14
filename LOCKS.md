@@ -2,6 +2,57 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-14 — enwik8 and enwik9 with `--max --allocation context` are floors: size and throughput may only improve
+
+**Decision.** The operator's measurements of `cadapt encode --max --allocation
+context` on this host (AMD Ryzen 5 5600X) are locked as floors:
+
+| Input | Container | Wall time | Throughput |
+|---|---:|---:|---:|
+| enwik8 (100,000,000 B, md5 `a1fa5ffd…b36a`) | **18,564,510 B** (18.56 %) | 263 s | 380,228 B/s |
+| enwik9 (1,000,000,000 B, md5 `e206c345…a12d`) | **155,906,798 B** (15.59 %) | 3,123 s | 320,205 B/s |
+
+A change that makes either container larger by one byte, or the throughput
+lower by more than the 10 % tolerance recorded in `bench/ratio_floor.json`, is
+a regression and does not ship. The floors are checked by
+`bench/check_ratio_floor.py` (`make ratio-floor`), which also refuses to run
+against any input whose size or MD5 differs from the locked one.
+
+**CI proxy.** No CI gate may run longer than 120 s, and the full inputs take
+minutes and an hour, so CI gates on a proxy: the first 8 MiB of enwik8
+(md5 `237766a9…0458`), locked at **1,716,715 B** and 36.58 s (measured under
+load; about 22 s quiet), run by `make gate` in encode-plus-verify form. A 16 MiB
+prefix (md5 `01d6ef7e…48a4`, **3,340,447 B**, 62.76 s) is locked for pre-merge
+use. Calibration on 2026-09-14 across three configurations (default, `--max`,
+`--max --allocation context`) showed the prefixes preserve the configurations'
+ordering from 1 MiB up and approach the full-file gap by 16–32 MiB (default is
++3.65 % on the full file, +2.2 % at 8 MiB, +2.9 % at 16 MiB).
+
+**Why.** The two numbers are the codec's public position: #31 of 224 on LTCB's
+enwik9-plus-decompressor ranking, #20 of 215 on the enwik8 column
+(`research/ltcb-tables.md`). Time matters as much as size for the product goal
+(ratio first, at speeds people will use), so both are locked.
+
+**Consequences.**
+- The proxy is blind to the allocation policy: on every prefix up to 32 MiB
+  `--allocation context` and plain `--max` produce byte-identical output. The
+  267,119-byte gain that policy delivers on full enwik8 is guarded only by the
+  full floors, so `make ratio-floor` runs before any release, and the enwik9
+  floor on demand.
+- Throughput is host-bound. On the reference host it is gated against the
+  locked figure; elsewhere `--baseline-binary` gates it relative to a build of
+  the locked commit run in the same job, and without a baseline the checker
+  prints the throughput and states that it is not gated. Size is gated
+  everywhere.
+- The locked proxy times were measured while five encoders and a paq8px job
+  shared the host; they are lenient floors, to be re-locked from a quiet run.
+- Raising a floor is a new entry here, with the run that justifies it.
+
+**Status.** Locked 2026-09-14. The enwik8 container was decoded byte-exact by
+the frozen baseline decoder (`research/current-baseline.md`); the enwik9
+container's decode verification was in progress when this entry was written
+and its result is recorded in `research/ltcb-local-entries.csv`.
+
 ## 2026-09-14 — The encoder's memory profile follows xz
 
 **Decision.** `cadapt encode` takes presets `-0` … `-9` with xz's
