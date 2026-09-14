@@ -1,5 +1,5 @@
 /*
- * adapt.h — the adapt codec, format versions 19 through 24, in C99 with
+ * adapt.h — the adapt codec, format versions 19 through 52, in C99 with
  * nothing beyond the C standard library (and POSIX threads for the
  * encoder's proof, when built with ADAPT_THREADS).
  *
@@ -104,9 +104,32 @@ extern "C" {
 #define ADAPT_METADATA_VERSION 22u
 #define ADAPT_METADATA_FAST_VERSION 23u
 #define ADAPT_METADATA_MAX_VERSION 24u
+/* Experimental causal profiles: rates, sparse and retained. Their metadata
+ * variants add three, as the legacy profiles do. No external state. */
+#define ADAPT_ADAPTIVE_VERSION 25u
+#define ADAPT_ADAPTIVE_LAST_VERSION 27u
+#define ADAPT_ADAPTIVE_METADATA_VERSION 28u
+#define ADAPT_ADAPTIVE_METADATA_LAST_VERSION 30u
+/* BMP24 residual transform with normal/rates/sparse/retained predictors.
+ * Twelve little-endian bytes (pixel offset, width, row count) follow the
+ * optional period. Metadata variants add four to the raw version. */
+#define ADAPT_BMP_VERSION 31u
+#define ADAPT_BMP_LAST_VERSION 34u
+#define ADAPT_BMP_METADATA_VERSION 35u
+#define ADAPT_BMP_METADATA_LAST_VERSION 38u
+/* The same experiments over the max predictor, with distinct wire IDs. */
+#define ADAPT_MAX_ADAPTIVE_VERSION 39u
+#define ADAPT_MAX_ADAPTIVE_LAST_VERSION 41u
+#define ADAPT_MAX_ADAPTIVE_METADATA_VERSION 42u
+#define ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION 44u
+#define ADAPT_MAX_BMP_VERSION 45u
+#define ADAPT_MAX_BMP_LAST_VERSION 48u
+#define ADAPT_MAX_BMP_METADATA_VERSION 49u
+#define ADAPT_MAX_BMP_METADATA_LAST_VERSION 52u
+#define ADAPT_BMP_BYTES 12u
 #define ADAPT_METADATA_BYTES 28u
 #define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)
-#define ADAPT_HEADER_MAX_BYTES (ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES + ADAPT_METADATA_HEADER_BYTES)
+#define ADAPT_HEADER_MAX_BYTES (ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES + ADAPT_BMP_BYTES + ADAPT_METADATA_HEADER_BYTES)
 
 /* POSIX permission bits and signed Unix seconds plus nanoseconds. ctime
  * and creation time are filesystem-managed and are not reconstructed. */
@@ -125,7 +148,7 @@ int adapt_metadata_read(const uint8_t *data, adapt_metadata *metadata);
 
 /* The fixed eight-byte header identifies whether metadata follows. */
 int adapt_header_has_metadata(const uint8_t *header);
-/* Extend a valid legacy header into out, returning its full length or 0.
+/* Extend a valid header without metadata into out, returning its full length or 0.
  * The input and output must not overlap. */
 size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_metadata *metadata,
                                  uint8_t *out, size_t cap);
@@ -268,13 +291,38 @@ typedef struct adapt_sizes {
      * (ADAPT_ARCHIVE_FLAG). Set by the caller who codes one;
      * adapt_sizes_for_input leaves it 0. Any profile may carry it. */
     uint8_t archive;
+    /* 0 legacy; 1 fast/slow calibration; 2 adds sparse contexts; 3 adds
+     * retained calibration. Composes with max; mutually exclusive with fast. */
+    uint8_t adaptive;
+    /* Request BMP24 transform on encode (parameters are detected); parsed
+     * descriptor on decode. Exclusive with fast, archive and x86. */
+    uint8_t bmp;
+    uint32_t bmp_offset, bmp_width, bmp_rows;
 } adapt_sizes;
+
+/* Probe a BMP24 header without decoding text or modifying sizes on failure. */
+int adapt_bmp_probe(const uint8_t *prefix, size_t length, adapt_sizes *sizes);
+
+/* Fit an experimental profile, including its additional state, to budget.
+ * mode is 0..3 (0 chooses the normal profile). */
+adapt_status adapt_sizes_for_input_adaptive(int length_known, uint64_t length, uint64_t max_memory,
+                                           unsigned mode, adapt_sizes *sizes, adapt_error *error);
+adapt_status adapt_sizes_for_threads_adaptive(uint64_t length, uint64_t max_memory, uint64_t threads,
+                                             uint64_t segment_bytes, unsigned mode,
+                                             adapt_sizes *sizes, adapt_error *error);
+
+/* Adaptive sizing over the max predictor; mode 0 preserves plain max. */
+adapt_status adapt_sizes_for_input_max_adaptive(int length_known, uint64_t length, uint64_t max_memory,
+                                               unsigned mode, adapt_sizes *sizes, adapt_error *error);
+adapt_status adapt_sizes_for_threads_max_adaptive(uint64_t length, uint64_t max_memory, uint64_t threads,
+                                                 uint64_t segment_bytes, unsigned mode,
+                                                 adapt_sizes *sizes, adapt_error *error);
 
 /* Context sets a file may choose, by header code. */
 #define ADAPT_CONTEXT_SETS 8u
 
 /* The bytes the header of a file whose fixed header is `fixed` occupies:
- * fixed part, optional period, and metadata extension for versions 16--18.
+ * fixed part, optional period, BMP descriptor and filesystem metadata.
  * `fixed` must contain at least ADAPT_HEADER_BYTES bytes. */
 size_t adapt_header_len(const uint8_t *fixed);
 /* Base byte-stream encoder header size, excluding filesystem metadata. */
@@ -379,6 +427,18 @@ adapt_status adapt_sizes_for_threads(uint64_t length, uint64_t max_memory, uint6
 /* adapt_sizes_for_threads for the max profile. */
 adapt_status adapt_sizes_for_threads_max(uint64_t length, uint64_t max_memory, uint64_t threads, uint64_t segment_bytes,
                                          adapt_sizes *sizes, adapt_error *error);
+
+/* Rebalance valid, already fitted sizes toward context capacity, then grow
+ * the recall window with the remaining budget. All other fields are preserved.
+ * Known input targets adapt_table_log_for(length); unknown input targets the
+ * format maximum. Segmented known inputs target one segment and account for
+ * every requested worker. Unknown input preserves the two-model reservation
+ * used by adapt_sizes_for_input. Failure leaves *sizes unchanged. This changes
+ * only existing header fields: no decoder policy or external state is needed.
+ * Call before attaching transform flags whose workspace was reserved separately. */
+adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, uint64_t max_memory,
+                                            uint64_t threads, uint64_t segment_bytes,
+                                            adapt_sizes *sizes, adapt_error *error);
 
 /* What a coding pass did: original bytes, container bytes, the checksum
  * of the original, and the segments the file has. */

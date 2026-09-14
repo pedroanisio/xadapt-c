@@ -1,17 +1,19 @@
 {
   "schema": "cadapt.build-manifest.v1",
   "version": "0.12.0",
-  "commit": "2c6549d1a6ef8fd3f5536bd5daac80b16d457d1e",
-  "generated_at": "2026-09-14T19:16:27+00:00",
+  "commit": "912f21c95fd194530d80885f34f8872c846234f8",
+  "generated_at": "2026-09-14T19:45:18+00:00",
   "sources": {
-    "adpat/c/adapt.h": "09f37a95de41ab507adc89e0a6d1477a82551c3cd4993d2d5557f1710182cd01",
-    "adpat/c/adapt_model.h": "20a325ceea6f2b6f33e854488d87002fd5bb5dc40c23a2fd60c0fc7b3b4731aa",
-    "adpat/c/adapt_decode.c": "7f7c26572d6607cb836222e1bb294ab1ba873d7c36417eb41a5771def590a375",
-    "adpat/c/adapt_encode.c": "62f0d07f2047452045ca6b0e49ec9749f05ae5c040f93b7dc9759e0a9b6d6322",
+    "adpat/c/adapt.h": "5ff7a8794ce679bf5d889cf35861d25f7ac7e62f7a17a8ef7245a005ef32e7a0",
+    "adpat/c/adapt_adaptive.h": "d21a75f99b8d19400819a538becd7b459673de4fef8e2b889e5423fdb17fb5c7",
     "adpat/c/adapt_archive.c": "089f77084f6fde6d824e2946cb494912daf52909ea3fe8ef389061778d04339f",
-    "adpat/c/cadapt.c": "8253b601a263d544dab31448673db601dfb57a93f1250e86ed329dd4efcce68f"
+    "adpat/c/adapt_bmp.h": "1c2517ba6a05ee609afde4292c1afabb94452f23d97aac90531d31dcca083d96",
+    "adpat/c/adapt_decode.c": "239eee4e6fc0b36a8817dbe12217f080e91154a5492581603d1493d84d3fc129",
+    "adpat/c/adapt_encode.c": "57fe95d6c49ef6369e82fe8ae818a5cf62093663b55c106625edb4f3f4bc581b",
+    "adpat/c/adapt_model.h": "a0bdd432f3c576454e0ab039e5272fcb7bbc365ed2cb343f7350c1a942c7b012",
+    "adpat/c/cadapt.c": "abcc6c7129b9dfa48eb5b5517bf7cfcfa60bb1ac759739ef2ad064b4f83ccaad"
   },
-  "makefile_sha256": "fb495c9c8691a2d4c1d2f66695087493f9eadd6dd1c68d686a9699697dbf5956",
+  "makefile_sha256": "ec702dc90855d110274a2b320506c7db3a4afaa9de79165b532ba91125e713dc",
   "toolchain": {
     "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
     "cc_command": "cc",
@@ -25,12 +27,12 @@
   },
   "outputs": {
     "adpat/c/build/cadapt": {
-      "sha256": "bc77916e6fb66535e385d312b1a85cf908fef8fc536ab4dc087d133930ca51b1",
-      "bytes": 227568
+      "sha256": "3a76d07bb8210e1a907669a34f32f6449e02c2506646f9885849439fa8bb3ae0",
+      "bytes": 334968
     },
     "adpat/c/build/libadapt.a": {
-      "sha256": "e0b9b8d0228e8402f7bdfeca20a3171685d65fa20fbe0139845e7be8f98fb1a9",
-      "bytes": 188628
+      "sha256": "9d9bd2ab434afe123d45143a992242f80fa269ca4a90774cc791c5ca7509cd60",
+      "bytes": 288842
     }
   }
 }

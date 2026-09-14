@@ -31,6 +31,101 @@ class TelemetryTest(unittest.TestCase):
         self.source = self.root / "source.bin"
         self.source.write_bytes(b"Telemetry should preserve failed runs.\n" * 128)
 
+    def test_adaptive_versions_and_measurement_profiles(self) -> None:
+        output = self.root / "adaptive-history"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = telemetry.main([
+                "run", "--binary", str(CADAPT), "--corpus", str(self.source),
+                "--output", str(output), "--profiles", "rates", "sparse", "retained", "auto", "--no-plots",
+            ])
+        self.assertEqual(rc, 0)
+        records = telemetry.load_runs([output])
+        self.assertEqual([r["codec"]["format_version"] for r in records[:3]], [28, 29, 30])
+        self.assertEqual([r["codec"]["adaptive_profile"] for r in records[:3]], ["rates", "sparse", "retained"])
+        self.assertTrue(all(r["status"] == "ok" for r in records))
+
+    def test_search_trace_requires_every_candidate_and_correct_winner(self) -> None:
+        import adaptive_experiment
+
+        trace = (
+            "adaptive trial max-normal: 105 bytes\n"
+            "adaptive trial max-rates: 107 bytes\n"
+            "adaptive trial max-sparse skipped: memory\n"
+            "adaptive trial max-retained: 104 bytes\n"
+            "adaptive selected max-retained: 104 bytes\n"
+        )
+        trials = adaptive_experiment.check_search_trace(trace, "max", False, 104)
+        self.assertEqual(len(trials), 4)
+        self.assertEqual(trials[2]["skipped"], "memory")
+        for invalid in (
+            trace.replace("adaptive trial max-rates: 107 bytes\n", ""),
+            trace.replace("max-rates", "max-normal"),
+            trace.replace("selected max-retained: 104", "selected max-rates: 104"),
+            trace.replace("selected max-retained: 104", "selected max-retained: 108"),
+        ):
+            with self.subTest(trace=invalid), self.assertRaises(ValueError):
+                adaptive_experiment.check_search_trace(invalid, "max", False, 104)
+
+
+    def test_max_search_experiment_accounts_for_all_trials(self) -> None:
+        import adaptive_experiment
+
+        output = self.root / "max-search"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = adaptive_experiment.main([
+                "--baseline", str(CADAPT), "--binary", str(CADAPT),
+                "--output", str(output), "--corpora", str(self.source),
+                "--base-profile", "max", "--search-only", "--memory", str(128 << 20),
+            ])
+        result = json.loads((output / "results.json").read_text())
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["expected_runs"], 2)
+        self.assertEqual(result["base_profile"], "max")
+        self.assertTrue(result["complete"])
+        self.assertEqual(len(result["runs"][1]["candidate_trials"]), 4)
+        self.assertTrue(result["comparisons"][0]["auto_equals_smallest"])
+        self.assertTrue(all(r["codec"]["base_profile"] == "max" for r in result["runs"]))
+
+    def test_external_corpus_experiment_preserves_complete_accounting(self) -> None:
+        import adaptive_experiment
+
+        output = self.root / "external-experiment"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = adaptive_experiment.main([
+                "--baseline", str(CADAPT), "--binary", str(CADAPT),
+                "--output", str(output), "--corpora", str(self.source),
+            ])
+        result = json.loads((output / "results.json").read_text())
+        self.assertEqual(rc, 0)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["expected_runs"], 5)
+        self.assertEqual(set(result["fixtures"]), {self.source.name})
+        self.assertTrue(result["comparisons"][0]["auto_equals_smallest"])
+        self.assertTrue(all(r["restoration"]["byte_exact"] for r in result["runs"]))
+        other = self.root / "other"
+        other.mkdir()
+        duplicate = other / self.source.name
+        duplicate.write_bytes(b"different")
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as failed:
+            adaptive_experiment.main([
+                "--baseline", str(CADAPT), "--binary", str(CADAPT),
+                "--output", str(self.root / "duplicate-experiment"),
+                "--corpora", str(self.source), str(duplicate),
+            ])
+        self.assertEqual(failed.exception.code, 2)
+
+    def test_experiment_rejects_a_file_restored_in_place_of_an_empty_directory(self) -> None:
+        import adaptive_experiment
+
+        source, restored = self.root / "folder", self.root / "restored"
+        (source / "empty").mkdir(parents=True)
+        restored.mkdir()
+        (restored / "empty").write_bytes(b"")
+        expected = adaptive_experiment.manifest(source)
+        adaptive_experiment.reset_metadata(restored, expected)
+        result = adaptive_experiment.compare_restoration(source, restored, expected)
+        self.assertFalse(all(result.values()))
+
     def test_byte_units_and_nonfinite_arguments(self) -> None:
         self.assertEqual(telemetry.byte_count("64MiB"), 64 << 20)
         self.assertEqual(telemetry.byte_count("262144"), 262144)
@@ -203,6 +298,8 @@ class TelemetryTest(unittest.TestCase):
                     "--output",
                     str(output),
                     "--verify",
+                    "--memory",
+                    str(256 << 20),
                     "--threads",
                     "2",
                     "--segment-bytes",

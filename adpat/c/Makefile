@@ -36,17 +36,17 @@ BUILD   ?= build
 
 LIB   = $(BUILD)/libadapt.a
 BIN   = $(BUILD)/cadapt
-TESTS = $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive
+TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive
 
 all: $(LIB) $(BIN)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/adapt_decode.o: adapt_decode.c adapt.h adapt_model.h | $(BUILD)
+$(BUILD)/adapt_decode.o: adapt_decode.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ adapt_decode.c
 
-$(BUILD)/adapt_encode.o: adapt_encode.c adapt.h adapt_model.h | $(BUILD)
+$(BUILD)/adapt_encode.o: adapt_encode.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ adapt_encode.c
 
 $(BUILD)/adapt_archive.o: adapt_archive.c adapt.h | $(BUILD)
@@ -79,7 +79,11 @@ $(BUILD)/test_adapt_encode: $(BUILD)/test_adapt_encode.o $(LIB)
 $(BUILD)/test_adapt_archive: $(BUILD)/test_adapt_archive.o $(LIB)
 	$(CC) $(CFLAGS) -o $@ $(BUILD)/test_adapt_archive.o $(LIB) $(LDFLAGS)
 
+$(BUILD)/test_adapt_adaptive: tests/test_adapt_adaptive.c adapt.h adapt_adaptive.h adapt_bmp.h $(LIB)
+	$(CC) $(CFLAGS) -o $@ tests/test_adapt_adaptive.c $(LIB) $(LDFLAGS)
+
 test: $(TESTS)
+	$(BUILD)/test_adapt_adaptive
 	$(BUILD)/test_adapt_decode tests/vectors
 	$(BUILD)/test_adapt_encode tests/vectors
 	$(BUILD)/test_adapt_archive
@@ -101,10 +105,11 @@ COVUNITS = adapt_decode adapt_encode adapt_archive cadapt
 coverage:
 	rm -rf $(COV)
 	$(MAKE) BUILD=$(COV) CFLAGS="$(COVFLAGS)" LDFLAGS="--coverage" all $(COV)/test_adapt_decode \
-	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive
+	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive $(COV)/test_adapt_adaptive
 	$(COV)/test_adapt_decode tests/vectors
 	$(COV)/test_adapt_encode tests/vectors
 	$(COV)/test_adapt_archive
+	$(COV)/test_adapt_adaptive
 	$(PYTHON) -B tests/test_cadapt.py "$(abspath $(COV))/cadapt"
 	cd $(COV) && for u in $(COVUNITS); do gcov -b -c --json-format -o . $$u.o > /dev/null && gunzip -f $$u.gcov.json.gz; done
 	$(PYTHON) -B check-gcov.py $(foreach u,$(COVUNITS),$(COV)/$(u).gcov.json)

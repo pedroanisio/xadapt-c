@@ -325,13 +325,19 @@ def inspect_container(path: Path) -> dict[str, Any]:
             return data
 
         header = read(8)
-        if header[:4] != b"ADPT" or header[4] not in (19, 20, 21, 22, 23, 24):
+        if header[:4] != b"ADPT" or header[4] not in range(19, 53):
             raise ValueError("unsupported container header")
         period = int.from_bytes(read(2), "little") if header[7] & 0x80 else 0
+        bmp_descriptor = read(12) if (31 <= header[4] <= 38 or 45 <= header[4] <= 52) else b""
+        bmp = None
+        if bmp_descriptor:
+            bmp = dict(zip(("offset", "width", "rows"), (int.from_bytes(bmp_descriptor[i:i + 4], "little") for i in (0, 4, 8))))
+            if bmp["offset"] < 54 or not (0 < bmp["width"] <= 0x7fffffff and 0 < bmp["rows"] <= 0x7fffffff):
+                raise ValueError("invalid BMP descriptor")
         filesystem_metadata = None
-        if header[4] in (22, 23, 24):
+        if header[4] in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52):
             metadata = read(32)
-            checksum_input = header + (period.to_bytes(2, "little") if header[7] & 0x80 else b"") + metadata[:28]
+            checksum_input = header + (period.to_bytes(2, "little") if header[7] & 0x80 else b"") + bmp_descriptor + metadata[:28]
             if zlib.crc32(checksum_input) != int.from_bytes(metadata[28:], "little"):
                 raise ValueError("metadata header checksum mismatch")
             filesystem_metadata = dict(
@@ -345,8 +351,21 @@ def inspect_container(path: Path) -> dict[str, Any]:
                     filesystem_metadata["atime_nanoseconds"] >= 1_000_000_000 or
                     filesystem_metadata["mtime_nanoseconds"] >= 1_000_000_000):
                 raise ValueError("invalid filesystem metadata")
+        version = header[4]
+        max_profile = version in (21, 24) or version >= 39
+        normalized = version - 14 if version >= 39 else version
+        if bmp:
+            adaptive = ("normal", "rates", "sparse", "retained")[(normalized - 31) % 4]
+        elif 25 <= normalized <= 30:
+            adaptive = ("rates", "sparse", "retained")[(normalized - 25) % 3]
+        else:
+            adaptive = None
         result: dict[str, Any] = dict(
-            format_version=header[4],
+            format_version=version,
+            base_profile="max" if max_profile else "fast" if version in (20, 23) else "normal",
+            adaptive_profile=adaptive,
+            bmp_transform=bmp,
+            transform_metadata_bytes=len(bmp_descriptor),
             filesystem_metadata=filesystem_metadata,
             metadata_bytes=32 if filesystem_metadata is not None else 0,
             context_table_bytes=16 << (header[5] & 31),
@@ -409,8 +428,14 @@ def run_one(
     directory.mkdir()
     output = directory / "encoded.adpt"
     command = [str(binary), "encode", str(corpus), "-o", str(output), "--max-memory", str(config["memory_bytes"])]
-    if config["profile"] != "normal":
-        command.append("--" + config["profile"])
+    profile = config["profile"]
+    if profile.endswith("-bmp"):
+        command += ["--transform", "bmp"]
+        profile = profile[:-4]
+    if profile in ("rates", "sparse", "retained", "auto"):
+        command += ["--adaptive", profile]
+    elif profile != "normal":
+        command.append("--" + profile)
     if config["verify"]:
         command.append("--verify")
     if config["threads"] > 1:
@@ -604,7 +629,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--corpus", type=Path, default=ROOT / "static/corpus/enwik8.zip")
     run.add_argument("--member", default="enwik8", help="member to read when the corpus is a ZIP")
     run.add_argument("--output", type=Path, default=ROOT / "bench/results", help="parent for a new, unique session")
-    run.add_argument("--profiles", nargs="+", choices=("normal", "fast", "max"), default=["normal", "fast", "max"])
+    run.add_argument("--profiles", nargs="+", choices=("normal", "fast", "max", "rates", "sparse", "retained", "auto", "normal-bmp", "rates-bmp", "sparse-bmp", "retained-bmp"), default=["normal", "fast", "max"])
     run.add_argument("--repeats", type=positive_int, default=1)
     run.add_argument("--memory", nargs="+", type=byte_count, default=[674 * MIB], metavar="BYTES")
     run.add_argument("--threads", nargs="+", type=positive_int, default=[1])

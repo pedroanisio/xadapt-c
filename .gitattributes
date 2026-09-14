@@ -1,3 +1,6 @@
 # The committed vectors are byte-exact fixtures: no end-of-line conversion
 # on any checkout, and no whitespace warnings on their text-like sources.
 adpat/c/tests/vectors/* binary
+
+# Matplotlib emits trailing spaces in SVG paths; retain the recorded artifact.
+research/current-baseline-results.svg -whitespace

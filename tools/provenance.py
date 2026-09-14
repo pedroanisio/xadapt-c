@@ -43,7 +43,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CODEC = ROOT / "adpat" / "c"
-SOURCES = ["adapt.h", "adapt_model.h", "adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "cadapt.c"]
+SOURCES = sorted(path.name for path in CODEC.iterdir() if path.suffix in (".c", ".h"))
 OUTPUTS = ["cadapt", "libadapt.a"]
 COPYRIGHT = "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
 LICENCE = "MIT"

@@ -8,6 +8,7 @@ import random
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -23,11 +24,11 @@ SOURCE = b"optional verification\n" * 128
 
 def payload_stream(container: bytes) -> bytes:
     """Remove only validated filesystem metadata for legacy stream comparisons."""
-    if container[4] not in (22, 23, 24):
+    if container[4] not in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52):
         return container
-    base = 8 + (2 if container[7] & 0x80 else 0)
+    base = 8 + (2 if container[7] & 0x80 else 0) + (12 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 0)
     assert zlib.crc32(container[:base + 28]) == int.from_bytes(container[base + 28:base + 32], "little")
-    return container[:4] + bytes([container[4] - 3]) + container[5:base] + container[base + 32:]
+    return container[:4] + bytes([container[4] - (4 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 3)]) + container[5:base] + container[base + 32:]
 
 
 class CodecTest(unittest.TestCase):
@@ -63,6 +64,194 @@ class CodecTest(unittest.TestCase):
         self.assertEqual(run.returncode, 1, run.stderr)
         for fragment in fragments:
             self.assertIn(fragment, run.stderr)
+
+
+class AllocationTest(CodecTest):
+    def test_context_policy_roundtrips_and_search(self):
+        for profile in ((), ("--fast",), ("--max",), ("--max", "--adaptive", "rates"),
+                        ("--adaptive", "auto"), ("--threads", "2")):
+            with self.subTest(profile=profile):
+                encoded = self.run_codec("encode", self.source, "-o", "-", "--allocation", "context", *profile)
+                self.assertEqual(encoded.returncode, 0, encoded.stderr)
+                self.assertIn(b"not verified", encoded.stderr)
+                decoded = self.run_codec("decode", "-", data=encoded.stdout)
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                self.assertEqual(decoded.stdout, SOURCE)
+        pipe = self.run_codec("encode", "-", "--allocation", "context", "--verify", data=SOURCE)
+        self.assertEqual(pipe.returncode, 0, pipe.stderr)
+        self.assertNotIn(b"not verified", pipe.stderr)
+        decoded = self.run_codec("decode", "-", data=pipe.stdout)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        self.assertEqual(decoded.stdout, SOURCE)
+
+    def test_context_policy_bmp_candidates_and_folder(self):
+        width, height = 17, 13
+        stride = (width * 3 + 3) & ~3
+        pixels = bytes((i // 3 + i // stride) & 255 for i in range(stride * height))
+        data = (b"BM" + struct.pack("<IHHI", 54 + len(pixels), 7, 11, 54) +
+                struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(pixels), 0, 0, 0, 0) + pixels)
+        self.source.write_bytes(data)
+        sizes = []
+        for mode in ((), ("--adaptive", "rates"), ("--adaptive", "sparse"), ("--adaptive", "retained")):
+            for transform in ((), ("--transform", "bmp")):
+                run = self.run_codec("encode", self.source, "-o", "-", "--max", "--allocation", "context", *mode, *transform)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                sizes.append(len(run.stdout))
+                decoded = self.run_codec("decode", "-", data=run.stdout)
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                self.assertEqual(decoded.stdout, data)
+        auto = self.run_codec("encode", self.source, "-o", "-", "--max", "--allocation", "context", "--adaptive", "auto", "--verify")
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(len(auto.stdout), min(sizes))
+        folder = self.root / "folder"
+        (folder / "empty").mkdir(parents=True)
+        (folder / "file").write_bytes(SOURCE)
+        archive, restored = self.root / "folder.adpt", self.root / "restored"
+        run = self.run_codec("encode", folder, "-o", archive, "--allocation", "context", "--threads", "2", "--verify")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        run = self.run_codec("decode", archive, "-o", restored)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual((restored / "file").read_bytes(), SOURCE)
+        self.assertTrue((restored / "empty").is_dir())
+
+    def test_invalid_policy_and_explicit_default(self):
+        bad = self.run_codec("encode", self.source, "-o", "-", "--allocation", "unknown")
+        self.assert_usage_error(bad, b"--allocation")
+        default = self.run_codec("encode", self.source, "-o", "-")
+        explicit = self.run_codec("encode", self.source, "-o", "-", "--allocation", "window")
+        self.assertEqual(default.returncode, 0, default.stderr)
+        self.assertEqual(explicit.returncode, 0, explicit.stderr)
+        self.assertEqual(default.stdout, explicit.stdout)
+
+
+class AdaptiveTest(CodecTest):
+    def test_bmp_transform_preserves_padding_headers_and_partial_pixels(self):
+        width, height = 509, 193
+        stride = (width * 3 + 3) & ~3
+        pixels = bytearray(random.Random(917).randbytes(stride * height))
+        for y in range(height):
+            for x in range(width):
+                value = (x + y) & 255
+                pixels[y * stride + x * 3:y * stride + x * 3 + 3] = bytes((value, value, value))
+        data = (b"BM" + struct.pack("<IHHI", 54 + len(pixels), 19, 37, 54) +
+                struct.pack("<IiiHHIIiiII", 40, width, -height, 1, 24, 0, len(pixels), 0, 0, 0, 0) + pixels + b"trailing bytes")
+        self.source.write_bytes(data)
+        sizes = []
+        for profile in (None, "rates", "sparse", "retained"):
+            args = () if profile is None else ("--adaptive", profile)
+            for transform in ((), ("--transform", "bmp")):
+                run = self.run_codec("encode", self.source, "-o", "-", "--verify", *args, *transform)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                sizes.append(len(run.stdout))
+                if transform:
+                    self.assertIn(run.stdout[4], (35, 36, 37, 38))
+                decoded = self.run_codec("decode", "-", data=run.stdout)
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                self.assertEqual(decoded.stdout, data)
+        auto = self.run_codec("encode", self.source, "-o", "-", "--adaptive", "auto")
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(len(auto.stdout), min(sizes))
+        self.assertIn(b"bmp", auto.stderr)
+        self.source.write_bytes(b"not a BMP")
+        self.assert_failure(self.run_codec("encode", self.source, "--transform", "bmp"), b"invalid header")
+        self.assert_usage_error(self.run_codec("encode", self.source, "--transform", "png"), b"--transform")
+
+    def test_max_adaptive_and_bmp_search(self):
+        width, height = 17, 13
+        stride = (width * 3 + 3) & ~3
+        pixels = bytes((i // 3 + i // stride) & 255 for i in range(stride * height))
+        data = (b"BM" + struct.pack("<IHHI", 54 + len(pixels), 7, 11, 54) +
+                struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(pixels), 0, 0, 0, 0) + pixels)
+        self.source.write_bytes(data)
+        sizes = []
+        for mode in (None, "rates", "sparse", "retained"):
+            args = () if mode is None else ("--adaptive", mode)
+            for transform in ((), ("--transform", "bmp")):
+                run = self.run_codec("encode", self.source, "-o", "-", "--max", "--verify", *args, *transform)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                sizes.append(len(run.stdout))
+                if transform:
+                    self.assertIn(run.stdout[4], range(49, 53))
+                elif mode:
+                    self.assertIn(run.stdout[4], range(42, 45))
+                decoded = self.run_codec("decode", "-", data=run.stdout)
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                self.assertEqual(decoded.stdout, data)
+                raw = self.run_codec("decode", "-", data=payload_stream(run.stdout))
+                self.assertEqual(raw.returncode, 0, raw.stderr)
+                self.assertEqual(raw.stdout, data)
+        auto = self.run_codec("encode", self.source, "-o", "-", "--max", "--adaptive", "auto", "--verify")
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(len(auto.stdout), min(sizes))
+        self.assertIn(b"max", auto.stderr)
+        segmented = self.run_codec("encode", "-", "--max", "--adaptive", "retained", "--threads", "2", data=SOURCE)
+        self.assertEqual(segmented.returncode, 0, segmented.stderr)
+        decoded = self.run_codec("decode", "-", data=segmented.stdout)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        self.assertEqual(decoded.stdout, SOURCE)
+
+    def test_profiles_metadata_and_determinism(self):
+        for mode, version in (("rates", 28), ("sparse", 29), ("retained", 30)):
+            output = self.root / "coded.adpt"
+            run = self.run_codec("encode", self.source, "-o", output, "--force", "--adaptive", mode)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertIn(b"not verified", run.stderr)
+            encoded = output.read_bytes()
+            self.assertEqual(encoded[4], version)
+            decoded = self.run_codec("decode", output, "-o", "-")
+            self.assertEqual(decoded.returncode, 0, decoded.stderr)
+            self.assertEqual(decoded.stdout, SOURCE)
+            info = self.run_codec("info", output)
+            self.assertIn(mode.encode(), info.stdout)
+            verified = self.run_codec("encode", self.source, "-o", output, "--force", "--adaptive", mode, "--verify")
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            self.assertIn(b", verified", verified.stderr)
+            self.assertEqual(payload_stream(encoded), payload_stream(output.read_bytes()))
+
+    def test_auto_selects_smallest_complete_container_and_pipe_verifies(self):
+        lengths = []
+        for mode in (None, "rates", "sparse", "retained", "auto"):
+            args = () if mode is None else ("--adaptive", mode)
+            run = self.run_codec("encode", self.source, "-o", "-", "--max-memory", str(64 << 20), *args)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            lengths.append(len(run.stdout))
+        self.assertEqual(lengths[-1], min(lengths[:-1]))
+        run = self.run_codec("encode", "-", "--adaptive", "auto", "--verify", "--max-memory", str(28 << 20), data=SOURCE)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b", verified", run.stderr)
+        self.assertIn(b"skipped: memory", run.stderr)
+        decoded = self.run_codec("decode", "-", data=run.stdout)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        self.assertEqual(decoded.stdout, SOURCE)
+
+    def test_invalid_profiles_and_memory(self):
+        for extra in (("--adaptive", "bad"), ("--adaptive", "rates", "--fast")):
+            self.assert_usage_error(self.run_codec("encode", self.source, *extra), b"--adaptive")
+        self.assert_failure(self.run_codec("encode", self.source, "--adaptive", "retained", "--max-memory", str(1 << 20)), b"memory")
+
+    def test_segment_reset_stored_bytes_and_folder(self):
+        data = random.Random(23).randbytes(262144) + SOURCE * 100
+        for mode in ("rates", "sparse", "retained"):
+            run = self.run_codec("encode", "-", "--adaptive", mode, "--threads", "2", "--segment-bytes", "262144", data=data)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            decoded = self.run_codec("decode", "-", data=run.stdout)
+            self.assertEqual(decoded.returncode, 0, decoded.stderr)
+            self.assertEqual(decoded.stdout, data)
+        folder = self.root / "folder"
+        (folder / "nested").mkdir(parents=True)
+        (folder / "nested" / "bytes").write_bytes(bytes(range(256)) * 10)
+        os.chmod(folder / "nested" / "bytes", 0o641)
+        os.utime(folder / "nested" / "bytes", ns=(1000000123, 2000000456))
+        output = self.root / "folder.adpt"
+        run = self.run_codec("encode", folder, "-o", output, "--adaptive", "auto", "--verify")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        restored = self.root / "restored"
+        decoded = self.run_codec("decode", output, "-o", restored)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        entry = restored / "nested" / "bytes"
+        self.assertEqual(entry.read_bytes(), bytes(range(256)) * 10)
+        self.assertEqual(stat.S_IMODE(entry.stat().st_mode), 0o641)
+        self.assertEqual(entry.stat().st_mtime_ns, 2000000456)
 
 
 class VerificationTest(CodecTest):
@@ -554,7 +743,7 @@ class PresetTest(unittest.TestCase):
     def table_log(self, container: Path) -> int:
         info = self.run_codec("info", container)
         self.assertEqual(info.returncode, 0, info.stderr)
-        line = next(l for l in info.stdout.decode().splitlines() if l.startswith("context table"))
+        line = next(row for row in info.stdout.decode().splitlines() if row.startswith("context table"))
         return int(line.split("2^")[1].split()[0])
 
     def test_default_is_minus_nine_and_explicit_memory_overrides(self) -> None:

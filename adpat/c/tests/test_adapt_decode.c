@@ -518,9 +518,9 @@ static void test_framing(void) {
     file[4] = 4;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
-    file[4] = ADAPT_METADATA_MAX_VERSION + 1;
+    file[4] = ADAPT_MAX_BMP_METADATA_LAST_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_METADATA_MAX_VERSION + 1);
+    CHECK(error.detail == ADAPT_MAX_BMP_METADATA_LAST_VERSION + 1);
     /* 0.8.0's normal profile, version 6, is refused like every version no file was published in */
     file[4] = 6;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);

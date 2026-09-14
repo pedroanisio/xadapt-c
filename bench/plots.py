@@ -12,7 +12,11 @@ from typing import Any
 
 from telemetry import SAMPLE_FIELDS, atomic_json, export_csv, load_runs
 
-COLORS = {"normal": "#0072B2", "fast": "#009E73", "max": "#D55E00"}
+COLORS = {
+    "normal": "#0072B2", "fast": "#009E73", "max": "#D55E00",
+    "rates": "#6F42C1", "sparse": "#A66700", "retained": "#CC79A7", "auto": "#333B4A",
+    "normal-bmp": "#0099B4", "rates-bmp": "#8874C2", "sparse-bmp": "#B6894A", "retained-bmp": "#AD477A",
+}
 OVERVIEW = [
     "elapsed_seconds",
     "throughput_mib_s",
@@ -86,7 +90,7 @@ def plot_runs(paths: list[Path], output: Path) -> list[Path]:
             }
         )
         samples = [read_samples(record) for record in records]
-        colors = [COLORS[record["config"]["profile"]] for record in records]
+        colors = [COLORS.get(record["config"]["profile"], "#64748B") for record in records]
         indices = list(range(1, len(records) + 1))
         keys = sorted({key for record in records for key in record["metrics"]})
         metrics = [key for key in OVERVIEW if key in keys] + [key for key in keys if key not in OVERVIEW]
@@ -243,7 +247,12 @@ th{position:sticky;top:0;background:#eaf0f6}small{color:#45566d}button{padding:8
 """
     succeeded = sum(record["status"] == "ok" for record in records)
     document += f"<p>{len(records)} recorded runs · {succeeded} successful · {len(records) - succeeded} failed or unfinished.</p>"
-    document += """<p>Each run remains separate. Blue: normal; green: fast; orange: max. Hatched bars mark unsuccessful runs.
+    legend = " · ".join(
+        f'<span style="color:{COLORS.get(profile, "#64748B")}">{html.escape(profile)}</span>'
+        for profile in dict.fromkeys(record["config"]["profile"] for record in records)
+    )
+    document += f"<p>Profiles: {legend}.</p>"
+    document += """<p>Each run remains separate. Hatched bars mark unsuccessful runs.
 Missing readings are n/a. Timings include verification only where Verify is true; full corpora and prefixes are identified below.</p>
 <p><a href="runs.csv" download>Download all run metrics (CSV)</a></p>
 <section><h2>Run details</h2><label for="filter">Filter run table </label><input id="filter" type="search" placeholder="Profile, status, corpus or run ID">

@@ -10,13 +10,20 @@ implementation is C99 with nothing beyond the C standard library (POSIX
 threads for the encoder's optional proof). Byte streams use format versions
 19 (normal), 20 (fast) and 21 (max); named files and folders use versions
 22, 23 and 24 respectively to carry filesystem metadata. The decoder reads
-all six versions. The CLI uses native filesystem APIs to restore metadata.
+all six versions. Experimental profiles also use versions 25–52 for
+causal adaptive predictors and a reversible BMP24 transform. The CLI uses
+native filesystem APIs to restore metadata.
+
+The [experimental implementation report](research/causal-byte-implementation.md)
+specifies the new algorithms, format versions, limits and measurement protocol.
+The [current-source results](research/current-baseline.md) record a 1.42%
+enwik8 improvement at the default max-profile budget with `--allocation context`,
+plus the measured limits of the predictor and BMP experiments.
 
 The code began as an integer-for-integer port of a Rust crate and keeps that
-crate's layout and names; since format 13 it defines its own format, and a
-release reads only the versions it writes (the crate's 10–12 and this
-codec's 13–18 are refused). The header of [adapt.h](adpat/c/adapt.h) records
-what changed.
+crate's layout and names; since format 13 it defines its own format and
+refuses versions 10–18. The header of
+[adapt.h](adpat/c/adapt.h) records what changed.
 
 ## Layout
 
@@ -79,20 +86,18 @@ directions stream: codec working memory is the model, window, block workspace
 and reserved headroom. `-0` … `-9` set the budget to what xz takes to compress
 at the same preset — 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset
 below the smallest model raised to it — and `-9` (674 MiB) is the default:
-memory buys the context table, the table buys ratio, and neither costs time
-(on 100 MB of enwik8: 64 MiB → 20,703,181 bytes, 674 MiB → 19,519,006;
-`--max` at 674 MiB → 18,831,629, at 1 GiB → 18,563,312).
+the budget controls table and window capacity
+(see the [current measurements](research/current-baseline.md)).
 `--max-memory <bytes>` overrides any preset and bounds that allocation, which
 chooses the model. Models shrink only to their supported minimum: **1 MiB is
-insufficient**. `--help` prints the minimum single-model budget of the normal
-and the max profile (about 27 and 70 MiB); an insufficient budget fails before
-publication and reports required and allowed bytes. Verification and segments
-can require more. A decoder holds the same model, so a file made at `-9` needs
-about 650 MB to decode; `decode` allocates whatever the container's header
-names — the container alone decodes (`FMT-6` in
+insufficient**. `--help` prints the normal and max single-model minimums
+(about 27 and 70 MiB). An insufficient budget fails before publication and
+reports required and allowed bytes. Verification and segments can require
+more. A decoder holds the same model and window; `decode` allocates whatever
+the container's header names — the container alone decodes (`FMT-6` in
 [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)) — and `--max-memory` is the one
-cap that can refuse a valid container; the format bounds what a header can
-name at about 2.1 GiB (the largest tables and window). `--max-output`
+memory cap that can refuse a valid container; the format also bounds table
+and window sizes. `--max-output`
 (default 1 GiB) caps the bytes `decode` writes. Folder encoding additionally
 retains an entry/path inventory, and restoration retains pending directory
 metadata; this CLI bookkeeping is outside the codec's working-memory bound.
@@ -108,6 +113,28 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   written to a file it falls back to a second pass with one. Encoding skips
   the proof by default and says so on stderr; `--no-verify` skips it
   explicitly.
+- `--allocation context` spends the budget on the context table before growing
+  the recall window. `--allocation window` is the unchanged default. Both use
+  existing header fields and compose with the profiles and candidate search.
+  Either allocation can produce a larger file; choose from measured complete
+  containers. More of the allowed memory can be used by the context policy.
+- `--adaptive rates|sparse|retained` selects experimental causal predictors:
+  fast/slow calibration, then sparse byte contexts, then retained calibration
+  states. These compose with `--max`. Each adds 2,837,272 bytes of model state on the tested platform,
+  charged to the memory budget. These profiles can increase size or runtime.
+- `--adaptive auto` spools the input once and tries the chosen base profile plus all three
+  adaptive profiles that fit the budget. For eligible BMP24 files it also
+  tries their transformed variants, retaining the smallest complete container
+  including metadata. It uses up to eight sequential encodes and temporary
+  disk space for the source plus two containers. Verification remains opt-in;
+  `auto --verify` checks the selected container with one model, including
+  for pipes. This is a finite candidate search, not a global optimality claim.
+- `--transform bmp` explicitly selects reversible color differences and
+  horizontal residuals for uncompressed 24-bit BMP files. It combines with
+  normal, max or an explicit adaptive profile and preserves headers, row padding,
+  tails and boundary pixels. It adds a 12-byte descriptor and a 256 KiB encoder
+  workspace reservation. Automatic selection tries this transform on whole
+  BMP inputs; embedded images inside folders/PDF/EPUB are not transformed.
 - `--threads <n>` with `n ≥ 2` cuts the input into segments of
   `--segment-bytes` (default 16 MiB, whole 256 KiB blocks) that each start
   the model afresh. This implementation codes and decodes the segments in
@@ -294,10 +321,9 @@ after the record period (or fixed header when absent):
 | 4 | CRC-32 of the entire header through the preceding metadata fields |
 
 For folders, the extension holds the root metadata. The decoded archive
-stream starts with `ADPTARC2`, and each entry's existing kind/path/length or
-link-target header is followed by the same 28-byte metadata record, before
-file content. Entry metadata is covered by the outer payload CRC-32.
-`ADPTARC1` archives remain readable. Older codec releases do not read
+stream starts with `ADPTARC3`, carrying metadata and extended attributes,
+hard links and sparse extents. Earlier `ADPTARC1` and `ADPTARC2` archive streams
+remain readable. Entry metadata is covered by the outer payload CRC-32. Older codec releases do not read
 versions 22–24. The byte-oriented library encoders still emit versions
 19–21; `adapt_header_add_metadata()` adds the extension and
 `adapt_read_metadata()` reads it. Use `adapt_header_len()` for the actual

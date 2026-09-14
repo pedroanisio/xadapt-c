@@ -34,6 +34,8 @@
 #define ADAPT_MODEL_H
 
 #include "adapt.h"
+#include "adapt_adaptive.h"
+#include "adapt_bmp.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -179,14 +181,14 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
 #define INPUTS (CTX_LANES(1) * (1 + HASHED) + RUNS + 2 + 1)
 
 /* ---- profiles ----
- * Format version ADAPT_FORMAT_VERSION (13) is the normal profile: the
+ * Format version ADAPT_FORMAT_VERSION (19) is the normal profile: the
  * model as written, with the contexts a file keeps chosen per file.
- * ADAPT_FAST_VERSION (14) is the fast profile: two hashed contexts chosen
+ * ADAPT_FAST_VERSION (20) is the fast profile: two hashed contexts chosen
  * per file from FAST_SETS, a direct order-1 memory, the word run, recall,
  * order-0 and the first arbiter keyed by the word run's state, no second
  * or final arbiter and no estimation stage, over a table of at most
  * ADAPT_FAST_TABLE_LOG_MAX blocks (the crate's `Model<FAST>`).
- * ADAPT_MAX_VERSION (15) is the max profile, described at adapt.h and
+ * ADAPT_MAX_VERSION (21) is the max profile, described at adapt.h and
  * under the `max` flag below. predict() and update() are compiled once
  * per profile with `fast` and `max` constants, so a profile pays only for
  * the parts it runs. */
@@ -865,6 +867,7 @@ typedef struct model {
      * allocated, and its length, for model_free. */
     void *arena_base;
     size_t arena_len;
+    adaptive_model *adaptive;
 } model;
 
 static inline void model_free(model *m) {
@@ -878,6 +881,7 @@ static inline void model_free(model *m) {
         free(m->arena_base);
 #endif
     }
+    free(m->adaptive);
     free(m);
 }
 
@@ -1210,6 +1214,7 @@ static inline void skip_bytes(model *m, const uint8_t *bytes, size_t len) {
     size_t i;
     for (i = 0; i < len; i++) {
         uint8_t b = bytes[i];
+        if (m->adaptive != NULL) adaptive_observe_byte(m->adaptive, b);
         m->hist[(size_t)m->n & m->hmask] = b;
         m->n += 1;
         m->c8 = (m->c8 << 8) | b;
@@ -1496,6 +1501,11 @@ static inline model *model_new(adapt_sizes sizes) {
     if (m == NULL) {
         return NULL;
     }
+    if (sizes.adaptive) {
+        m->adaptive = malloc(sizeof(*m->adaptive));
+        if (m->adaptive == NULL) { model_free(m); return NULL; }
+        adaptive_init(m->adaptive, sizes.adaptive);
+    }
     state_table_init(&m->states);
     /* stretch: the inverse of squash, by table */
     pi = 0;
@@ -1613,12 +1623,22 @@ static inline model *model_new(adapt_sizes sizes) {
  * container.rs — the block methods
  * --------------------------------------------------------------------- */
 
+static ADAPT_MULTIVERSION uint32_t predict_adaptive(model *m) {
+    uint32_t base = m->max ? predict_impl(m, 0, 1) : predict_impl(m, 0, 0);
+    return adaptive_predict(m->adaptive, base, m->stretch[base], m->squashed, m->c8, m->c0, m->bitpos);
+}
+static ADAPT_MULTIVERSION void update_adaptive(model *m, uint32_t bit) {
+    adaptive_update(m->adaptive, bit);
+    if (m->max) update_impl(m, bit, 0, 1);
+    else update_impl(m, bit, 0, 0);
+}
+
 /* The per-bit pair of the model's profile, chosen once per block. */
 typedef uint32_t (*predict_fn)(model *m);
 typedef void (*update_fn)(model *m, uint32_t bit);
 #define ADAPT_PROFILE(m, predict_p, update_p)                                                   \
-    predict_fn predict_p = (m)->fast ? predict_fast : ((m)->max ? predict_max : predict);      \
-    update_fn update_p = (m)->fast ? update_fast : ((m)->max ? update_max : update)
+    predict_fn predict_p = (m)->adaptive ? predict_adaptive : (m)->fast ? predict_fast : ((m)->max ? predict_max : predict);      \
+    update_fn update_p = (m)->adaptive ? update_adaptive : (m)->fast ? update_fast : ((m)->max ? update_max : update)
 
 /* Decode `raw` bytes of one modeled block. */
 static inline void decode_bytes(model *m, arith *d, size_t raw, uint8_t *out) {
@@ -1730,7 +1750,8 @@ static inline int sizes_valid(adapt_sizes s) {
            s.class_code < 3 && s.set_code < ADAPT_CONTEXT_SETS && s.fast <= 1 &&
            (!s.fast || s.set_code < ADAPT_FAST_SETS) && s.period != 1 && s.period <= ADAPT_PERIOD_MAX &&
            (!s.fast || s.period == 0) && s.segmented <= 1 && s.max <= 1 && !(s.fast && s.max) && s.x86 <= 1 &&
-           s.archive <= 1;
+           s.archive <= 1 && s.adaptive <= 3 && (!s.adaptive || !s.fast) &&
+           s.bmp <= 1 && (!s.bmp || (!s.fast && !s.x86 && !s.archive));
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {

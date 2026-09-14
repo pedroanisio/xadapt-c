@@ -61,14 +61,27 @@ def units(
     library units that inline it, as gcov reports an inlined header; the
     archive unit stands alone. The command line's report comes last."""
     return [
-        report({"adapt_decode.c": decode, "adapt_model.h": header}),
-        report({"adapt_encode.c": encode, "adapt_model.h": header}),
+        report({"adapt_decode.c": decode, "adapt_model.h": header, "adapt_adaptive.h": (0, 0), "adapt_bmp.h": (0, 0)}),
+        report({"adapt_encode.c": encode, "adapt_model.h": header, "adapt_adaptive.h": (0, 0), "adapt_bmp.h": (0, 0)}),
         report({"adapt_archive.c": archive}),
         report({"cadapt.c": cli}),
     ]
 
 
 class GateTest(unittest.TestCase):
+    def test_new_algorithm_headers_are_required_and_counted(self) -> None:
+        for header in ("adapt_adaptive.h", "adapt_bmp.h"):
+            evidence = units((50, 50), (50, 50), (90, 100))
+            for unit in evidence:
+                unit["files"] = [entry for entry in unit["files"] if entry["file"] != header]
+            code, _, error = self.run_gate(*self.write_units(evidence))
+            self.assertEqual(code, 1)
+            self.assertIn(header, error)
+            evidence[0]["files"].extend(report({header: (0, 200)})["files"])
+            code, output, _ = self.run_gate(*self.write_units(evidence))
+            self.assertEqual(code, 1)
+            self.assertIn("LOW library", output)
+
     def setUp(self) -> None:
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
