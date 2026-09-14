@@ -1,0 +1,2 @@
+# Optional: collecting telemetry and running the build checks use the standard library.
+matplotlib>=3.7,<4
