@@ -144,6 +144,58 @@ class VerificationTest(CodecTest):
                 self.assertEqual(legacy.returncode, 0, legacy.stderr)
                 self.assertEqual(stat.S_IMODE(decoded.stat().st_mode), mode)
 
+    def test_decode_allocates_what_the_header_declares(self) -> None:
+        """FMT-6: a valid container decodes by default whatever model its
+        header names, above any default budget; only an explicit
+        --max-memory can refuse it. A stored block reproduces its bytes
+        under any model sizes, so a header rewritten to larger tables and
+        window still checks out."""
+        def renamed(name, table_log, window_log):
+            original = (VECTORS / name).read_bytes()
+            header = bytearray(original[:8])
+            header[5] = (header[5] & 0xE0) | table_log
+            header[7] = (header[7] & 0xE0) | window_log
+            path = self.root / f"{name}-{table_log}-{window_log}.adpt"
+            path.write_bytes(bytes(header) + original[8:])
+            return path
+
+        # above the 674 MiB default: the largest tables and window the format
+        # allows, on the empty container, whose decode allocates no model at
+        # all — the budget check on the header is what the rule is about
+        largest = renamed("empty.adpt", 23, 30)
+        info = self.run_codec("info", largest)
+        self.assertEqual(info.returncode, 0, info.stderr)
+        self.assertIn(b"context table   2^23 blocks", info.stdout)
+        self.assertIn(b"window          2^30 bytes", info.stdout)
+        run = self.run_codec("decode", largest, "-o", "-")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, b"")
+        capped = self.run_codec("decode", largest, "-o", "-", "--max-memory", str(674 << 20))
+        self.assertEqual(capped.returncode, 1, capped.stderr)
+        self.assertIn(b"memory budget exceeded: need ", capped.stderr)
+        # a real decode of a model the encoder's old default did not hold
+        want = (VECTORS / "hello.bin").read_bytes()
+        large = renamed("hello.adpt", 22, 26)
+        info = self.run_codec("info", large)
+        self.assertEqual(info.returncode, 0, info.stderr)
+        self.assertIn(b"context table   2^22 blocks", info.stdout)
+        self.assertIn(b"window          2^26 bytes", info.stdout)
+        run = self.run_codec("decode", large, "-o", "-")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, want)
+        run = self.run_codec("decode", "-", data=large.read_bytes())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, want)
+        capped = self.run_codec("decode", large, "-o", "-", "--max-memory", str(64 << 20))
+        self.assertEqual(capped.returncode, 1, capped.stderr)
+        self.assertIn(b"memory budget exceeded: need ", capped.stderr)
+        self.assertIn(b", limit 67108864", capped.stderr)
+        self.assertEqual(capped.stdout, b"")
+        # the cap that holds it decodes; the original still decodes under the default
+        run = self.run_codec("decode", large, "-o", "-", "--max-memory", str(256 << 20))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, want)
+
     def test_conflicting_verification_flags_are_rejected_before_output(self) -> None:
         for flags in (("--verify", "--no-verify"), ("--no-verify", "--verify")):
             with self.subTest(flags=flags):

@@ -172,9 +172,10 @@ static void print_usage(FILE *stream) {
             "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
             "preset: 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset below the\n"
             "smallest model raised to it; -9 is the default, since memory buys ratio\n"
-            "and costs no time here, and a decoder needs the model's memory again.\n"
-            "--max-memory <bytes> (default %llu) bounds codec model/window/workspace\n"
-            "allocations. Folder path and metadata bookkeeping is additional.\n"
+            "and costs no time here, and decode takes the model's memory as the header\n"
+            "names it. For encode, --max-memory <bytes> (default %llu) bounds codec\n"
+            "model/window/workspace allocations. Folder path and metadata bookkeeping\n"
+            "is additional.\n"
             "Models shrink only to their supported minimum; lower budgets fail\n"
             "before output is published and report the required bytes. The minimum\n"
             "normal single-model budget is %llu bytes; verification/segments may need more.\n"
@@ -182,7 +183,10 @@ static void print_usage(FILE *stream) {
             "encode skips round-trip verification by default. --verify proves its output\n"
             "as it writes it when the budget holds two models, or, for a file written\n"
             "to a file, in a second pass with one. --no-verify explicitly skips this proof.\n"
-            "decode also accepts --max-output <bytes> (default 1 GiB).\n"
+            "decode allocates the model its input's header names, whatever the size\n"
+            "(FMT-6: the container alone decodes); --max-memory <bytes> caps that and\n"
+            "refuses a container needing more, and --max-output <bytes> (default 1 GiB)\n"
+            "caps the bytes written.\n"
             "--threads <n> (default 1) with n of two or more cuts the input into segments\n"
             "of --segment-bytes (default %llu, whole blocks of %llu) that start the\n"
             "model afresh, the file the crate's threads write; this port codes and\n"
@@ -1411,6 +1415,11 @@ static int decode_command(int argc, char **argv) {
     stream in = {NULL, 0}, out = {NULL, 0};
     staged stage = {NULL, NULL};
     adapt_stats stats;
+    /* FMT-6: the container alone decodes. Its header names the model, and
+     * the model is allocated as named; --max-memory below is the one cap
+     * that can refuse a valid container. The format bounds what a header
+     * can name (the largest tables and window, about 1.2 GiB). */
+    limits.max_memory = UINT64_MAX;
     adapt_error error;
     adapt_status status;
     uint64_t threads;

@@ -75,17 +75,20 @@ and reserved headroom. `-0` … `-9` set the budget to what xz takes to compress
 at the same preset — 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset
 below the smallest model raised to it — and `-9` (674 MiB) is the default:
 memory buys the context table, the table buys ratio, and neither costs time
-(on 100 MB of enwik8: 64 MiB → 21,221,772 bytes, 674 MiB → 19,943,347). A
-decoder holds the same model, so a file made at `-9` needs about 370 MB to
-decode; the decoder's default budget is the same 674 MiB. `--max-memory
-<bytes>` overrides any preset and bounds that allocation.
-Models shrink only to their supported minimum: **1 MiB is insufficient**.
-`--help` prints the minimum normal single-model budget; an insufficient
-budget fails before publication and reports required and allowed bytes.
-Verification and segments can require more. A decoder needs the model sizes
-the container declares. Folder encoding additionally retains an entry/path
-inventory, and restoration retains pending directory metadata; this CLI
-bookkeeping is outside the codec's working-memory bound.
+(on 100 MB of enwik8: 64 MiB → 21,221,772 bytes, 674 MiB → 19,943,347).
+`--max-memory <bytes>` overrides any preset and bounds that allocation, which
+chooses the model. Models shrink only to their supported minimum: **1 MiB is
+insufficient**. `--help` prints the minimum normal single-model budget; an
+insufficient budget fails before publication and reports required and allowed
+bytes. Verification and segments can require more. A decoder holds the same
+model, so a file made at `-9` needs about 370 MB to decode; `decode` allocates
+whatever the container's header names — the container alone decodes (`FMT-6`
+in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)) — and `--max-memory` is the one
+cap that can refuse a valid container; the format bounds what a header can
+name at about 1.2 GiB (the largest tables and window). `--max-output`
+(default 1 GiB) caps the bytes `decode` writes. Folder encoding additionally
+retains an entry/path inventory, and restoration retains pending directory
+metadata; this CLI bookkeeping is outside the codec's working-memory bound.
 
 - `--fast` writes the fast profile (version 14 or 17): two hashed contexts, one
   arbiter, about three times the decoding speed for about a twelfth more
