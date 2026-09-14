@@ -1081,9 +1081,12 @@ static void test_x86_transform(void) {
     data[1] = 'Z';
     CHECK_STATUS(adapt_encode(data, 64, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
     CHECK((out[7] & ADAPT_X86_FLAG) != 0);
-    CHECK_STATUS(adapt_decode(out, out_len, adapt_default_limits(), &coded, &at, &error), ADAPT_OK);
-    CHECK(at == 64 && memcmp(coded, data, 64) == 0);
-    adapt_free(coded);
+    {
+        uint8_t *back = NULL;
+        CHECK_STATUS(adapt_decode(out, out_len, adapt_default_limits(), &back, &at, &error), ADAPT_OK);
+        CHECK(at == 64 && memcmp(back, data, 64) == 0);
+        adapt_free(back);
+    }
     adapt_free(out);
     /* one byte of signature, or one short of it, is none */
     CHECK_STATUS(adapt_encode(data, 1, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
@@ -1093,6 +1096,7 @@ static void test_x86_transform(void) {
     CHECK_STATUS(adapt_encode(data, 3, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
     CHECK((out[7] & ADAPT_X86_FLAG) == 0);
     adapt_free(out);
+    free(coded);
     free(data);
 }
 

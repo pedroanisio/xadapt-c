@@ -8,12 +8,20 @@
 #                   branch gate: 80 % for the library, 60 % for the CLI
 #   make check      build the library and CLI, then run C and Python tests
 #                   and the coverage gate
+#   make sanitize   the C suites under AddressSanitizer and
+#                   UndefinedBehaviorSanitizer, every fault fatal
 #   make clean
 #
 # Outputs go to build/ here (git-ignored, as the crate's target/ is), where
 # the benchmark looks for cadapt; BUILD= chooses another directory. CC and
 # CFLAGS are honoured; the defaults are the strictest the code is written
-# for.
+# for. Two switches worth adding to CFLAGS on another platform:
+# -DADAPT_NO_MULTIVERSION builds the per-bit path for the baseline
+# instruction set only (the default on x86-64 compiles it twice and binds
+# the variant through an ifunc, which wants a glibc-style loader);
+# -DADAPT_NO_HUGEPAGES allocates the model's tables with calloc instead of
+# an anonymous mapping. The coverage gate needs GCC and its gcov; the
+# sanitizer run needs clang (SANITIZER_CC= names another compiler).
 
 CC      ?= cc
 AR      ?= ar
@@ -101,7 +109,19 @@ coverage:
 	cd $(COV) && for u in $(COVUNITS); do gcov -b -c --json-format -o . $$u.o > /dev/null && gunzip -f $$u.gcov.json.gz; done
 	$(PYTHON) -B check-gcov.py $(foreach u,$(COVUNITS),$(COV)/$(u).gcov.json)
 
-clean:
-	rm -rf $(BUILD) $(COV)
+# The sanitized build, likewise beside the ordinary one: the C suites under
+# AddressSanitizer (leaks included) and UndefinedBehaviorSanitizer, with
+# every report fatal, so a fault fails the run rather than printing.
+SANITIZE_BUILD  ?= $(BUILD)-sanitize
+SANITIZER_CC    ?= clang
+SANITIZE_CFLAGS ?= -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+                   -Wall -Wextra -Wpedantic -Werror $(THREADS)
 
-.PHONY: all test coverage check clean
+sanitize:
+	rm -rf $(SANITIZE_BUILD)
+	$(MAKE) BUILD=$(SANITIZE_BUILD) CC=$(SANITIZER_CC) CFLAGS="$(SANITIZE_CFLAGS)" test
+
+clean:
+	rm -rf $(BUILD) $(COV) $(SANITIZE_BUILD)
+
+.PHONY: all test coverage sanitize check clean
