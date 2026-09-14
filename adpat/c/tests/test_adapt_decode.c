@@ -1024,6 +1024,8 @@ int main(int argc, char **argv) {
     test_vector("text-max.adpt", "text.bin");
     test_vector("records.adpt", "records.bin");
     test_vector("segmented.adpt", "segmented.bin");
+    test_vector("cyrillic.adpt", "cyrillic.bin");
+    test_vector("cjk.adpt", "cjk.bin");
     test_stream_failures();
     test_framing();
     test_segmented_framing();

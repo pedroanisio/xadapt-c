@@ -1346,6 +1346,12 @@ int main(int argc, char **argv) {
     test_vector_profile("text-max.adpt", "text.bin", 2);
     test_vector_profile("records.adpt", "records.bin", 0);
     test_vector_segments("segmented.adpt", "segmented.bin", 2, ADAPT_BLOCK_BYTES);
+    /* FMT-8: two scripts that are three and two bytes a character, pinned
+     * like the Latin text */
+    test_vector("cyrillic.adpt", "cyrillic.bin");
+    test_vector("cjk.adpt", "cjk.bin");
+    test_vector_profile("cyrillic.adpt", "cyrillic.bin", 0);
+    test_vector_profile("cjk.adpt", "cjk.bin", 0);
     test_sizes();
     test_fast_fits_where_normal_fits();
     test_roundtrips();

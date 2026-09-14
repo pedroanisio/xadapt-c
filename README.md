@@ -206,8 +206,10 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   enwik8, the Wikipedia excerpt the benchmark uses, CC BY-SA) chooses a
   class width and a context set, in all three profiles; `records` (a
   synthetic raw RGB image) a record period; `segmented` (300,000 bytes of
-  enwik8) two segments. Regenerate byte-stream vectors with the library
-  encoder and their explicit sizes/profile/segment settings after a
+  enwik8) two segments; `cyrillic` and `cjk` (32 KiB of Russian and Chinese
+  Wikipedia text from the corpus rows below) two scripts of two and three
+  bytes a character (`FMT-8`). Regenerate byte-stream vectors with the
+  library encoder and their explicit sizes/profile/segment settings after a
   deliberate format change, never to make a test pass. Named CLI inputs
   now include metadata and are unsuitable as metadata-free golden vectors.
 - **Every script, measured** (`FMT-8`): the corpus holds six rows of about
