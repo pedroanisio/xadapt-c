@@ -341,11 +341,14 @@ static int staged_open(staged *s, const char *target, int force) {
         memcpy(path + dir_len, name, (size_t)n + 1);
         /* Exclusive creation rejects every existing entry, including a
          * dangling symlink. Only a file we created may be written or
-         * discarded; probing first cannot establish that ownership. */
+         * discarded; probing first cannot establish that ownership. The
+         * mode is a new file's, 0666 less the umask, since the staged
+         * file becomes the target by name and keeps the mode it was
+         * created with. */
 #ifdef _WIN32
         fd = _open(path, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
 #else
-        fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
 #endif
         if (fd < 0) {
             int e = errno;

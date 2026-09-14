@@ -2,6 +2,7 @@
 compiled CLI."""
 
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -9,11 +10,14 @@ import unittest
 from pathlib import Path
 
 CADAPT = Path(__file__).resolve().parent.parent / "build" / "cadapt"
+VECTORS = Path(__file__).resolve().parent / "vectors"
 LOW_MEMORY = str(16 << 20)
 SOURCE = b"optional verification\n" * 128
 
 
-class VerificationTest(unittest.TestCase):
+class CodecTest(unittest.TestCase):
+    """A scratch directory with the source written, and the codec runner."""
+
     def setUp(self) -> None:
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
@@ -21,13 +25,32 @@ class VerificationTest(unittest.TestCase):
         self.source = self.root / "source.bin"
         self.source.write_bytes(SOURCE)
 
-    def run_codec(self, *args, data=None):
+    def run_codec(self, *args, data=None, umask=None):
         return subprocess.run(
             [str(CADAPT), *map(str, args)],
             input=data,
             capture_output=True,
-            timeout=30,
+            timeout=60,
+            preexec_fn=None if umask is None else (lambda: os.umask(umask)),
         )
+
+    def assert_usage_error(self, run, *fragments: bytes) -> None:
+        """Exit 2, the named fragments on stderr, the usage text after them,
+        nothing on stdout."""
+        self.assertEqual(run.returncode, 2, run.stderr)
+        for fragment in fragments:
+            self.assertIn(fragment, run.stderr)
+        self.assertIn(b"usage:", run.stderr)
+        self.assertEqual(run.stdout, b"")
+
+    def assert_failure(self, run, *fragments: bytes) -> None:
+        """Exit 1 and the named fragments on stderr."""
+        self.assertEqual(run.returncode, 1, run.stderr)
+        for fragment in fragments:
+            self.assertIn(fragment, run.stderr)
+
+
+class VerificationTest(CodecTest):
 
     def assert_roundtrip(self, encoded):
         decoded = self.run_codec("decode", "-", data=encoded)
@@ -85,6 +108,24 @@ class VerificationTest(unittest.TestCase):
         self.assertEqual(explicit.returncode, 0, explicit.stderr)
         self.assertIn(b"not verified (--no-verify)", explicit.stderr)
         self.assertEqual(plain.stdout, explicit.stdout)
+
+    def test_published_files_take_the_mode_the_umask_leaves(self) -> None:
+        """A staged output is published with the permissions any other
+        tool would give a new file: 0666 less the umask, not the staging
+        file's private mode."""
+        for umask, mode in ((0o022, 0o644), (0o002, 0o664), (0o077, 0o600)):
+            with self.subTest(umask=oct(umask)):
+                encoded = self.root / f"mode-{umask:o}.adpt"
+                decoded = self.root / f"mode-{umask:o}.bin"
+                for args, path in (
+                    (("encode", self.source, "-o", encoded), encoded),
+                    (("decode", encoded, "-o", decoded), decoded),
+                    (("encode", self.source, "-o", encoded, "--force"), encoded),
+                ):
+                    run = self.run_codec(*args, umask=umask)
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), mode, f"{args} left {path} at {oct(path.stat().st_mode)}")
+                self.assertEqual(decoded.read_bytes(), SOURCE)
 
     def test_conflicting_verification_flags_are_rejected_before_output(self) -> None:
         for flags in (("--verify", "--no-verify"), ("--no-verify", "--verify")):
