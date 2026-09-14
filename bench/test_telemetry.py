@@ -15,6 +15,7 @@ import tempfile
 import time
 import unittest
 import zipfile
+import zlib
 from pathlib import Path
 
 import telemetry
@@ -175,7 +176,7 @@ class TelemetryTest(unittest.TestCase):
                 self.assertNotIn("compression_percent", record["metrics"])
             else:
                 self.assertEqual(record["codec"]["declared_bytes"], self.source.stat().st_size)
-                self.assertEqual(record["codec"]["format_version"], 14)
+                self.assertEqual(record["codec"]["format_version"], 17)
         session_path = next(output.glob("*/session.json"))
         session = json.loads(session_path.read_text())
         self.assertTrue(session["complete"])
@@ -211,7 +212,7 @@ class TelemetryTest(unittest.TestCase):
             )
         self.assertEqual(rc, 0)
         records = telemetry.load_runs([output])
-        self.assertEqual([record["codec"]["format_version"] for record in records], [13, 14, 15])
+        self.assertEqual([record["codec"]["format_version"] for record in records], [16, 17, 18])
         for record in records:
             self.assertTrue(record["config"]["verify"])
             self.assertEqual(record["codec"]["segments"], 2)
@@ -224,7 +225,7 @@ class TelemetryTest(unittest.TestCase):
         self.assertIn("no run.json records", error.getvalue())
 
     def test_profiles_and_segment_framing(self) -> None:
-        for profile, version in (([], 13), (["--fast"], 14), (["--max"], 15)):
+        for profile, version in (([], 16), (["--fast"], 17), (["--max"], 18)):
             with self.subTest(version=version):
                 output = self.root / f"{version}.adpt"
                 subprocess.run(
@@ -234,6 +235,8 @@ class TelemetryTest(unittest.TestCase):
                 )
                 metadata = telemetry.inspect_container(output)
                 self.assertEqual(metadata["format_version"], version)
+                self.assertEqual(metadata["metadata_bytes"], 32)
+                self.assertEqual(metadata["filesystem_metadata"]["mode"], self.source.stat().st_mode & 0o7777)
                 self.assertFalse(metadata["x86_transform"])
                 self.assertFalse(metadata["archive"])
                 self.assertEqual(metadata["crc32"], telemetry.fingerprint(self.source)["crc32"])
@@ -248,6 +251,31 @@ class TelemetryTest(unittest.TestCase):
         output.write_bytes(output.read_bytes()[:-1])
         with self.assertRaises(ValueError):
             telemetry.inspect_container(output)
+
+    def test_metadata_header_corruption_and_truncation_fail_closed(self) -> None:
+        output = self.root / "metadata.adpt"
+        subprocess.run([str(CADAPT), "encode", str(self.source), "-o", str(output)],
+                       check=True, capture_output=True)
+        encoded = output.read_bytes()
+        base = 8 + (2 if encoded[7] & 0x80 else 0)
+        damaged = bytearray(encoded)
+        damaged[base] ^= 1
+        output.write_bytes(damaged)
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            telemetry.inspect_container(output)
+        for offset, value in ((0, 0o10000), (12, 1_000_000_000), (24, 1_000_000_000)):
+            with self.subTest(offset=offset):
+                damaged = bytearray(encoded)
+                damaged[base + offset:base + offset + 4] = value.to_bytes(4, "little")
+                damaged[base + 28:base + 32] = zlib.crc32(damaged[:base + 28]).to_bytes(4, "little")
+                output.write_bytes(damaged)
+                with self.assertRaisesRegex(ValueError, "invalid filesystem metadata"):
+                    telemetry.inspect_container(output)
+        for end in range(base, base + 32):
+            with self.subTest(end=end):
+                output.write_bytes(encoded[:end])
+                with self.assertRaisesRegex(ValueError, "truncated"):
+                    telemetry.inspect_container(output)
 
     def test_unknown_history_schema_fails_closed(self) -> None:
         bad = self.root / "run.json"

@@ -27,8 +27,35 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len) {
  * container.rs — framing
  * --------------------------------------------------------------------- */
 
+int adapt_header_has_metadata(const uint8_t *header) {
+    return header != NULL && header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION;
+}
+
 size_t adapt_header_len(const uint8_t *fixed) {
-    return ADAPT_HEADER_BYTES + ((fixed[7] & ADAPT_PERIOD_FLAG) ? ADAPT_PERIOD_BYTES : 0);
+    return ADAPT_HEADER_BYTES + ((fixed[7] & ADAPT_PERIOD_FLAG) ? ADAPT_PERIOD_BYTES : 0) +
+           (adapt_header_has_metadata(fixed) ? ADAPT_METADATA_HEADER_BYTES : 0);
+}
+
+size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_metadata *metadata,
+                                 uint8_t *out, size_t cap) {
+    adapt_sizes sizes;
+    uint32_t crc;
+    size_t total, i;
+    if (header == NULL || out == NULL || adapt_read_header(header, len, &sizes, NULL) != ADAPT_OK ||
+        adapt_header_has_metadata(header) || len != adapt_header_len(header)) {
+        return 0;
+    }
+    total = len + ADAPT_METADATA_HEADER_BYTES;
+    if (cap < total || !adapt_metadata_write(metadata, out + len)) {
+        return 0;
+    }
+    memcpy(out, header, len);
+    out[4] = (uint8_t)(header[4] + ADAPT_METADATA_VERSION - ADAPT_FORMAT_VERSION);
+    crc = adapt_crc32(out, total - 4);
+    for (i = 0; i < 4; i++) {
+        out[total - 4 + i] = (uint8_t)(crc >> (8 * i));
+    }
+    return total;
 }
 
 size_t adapt_sizes_header_bytes(adapt_sizes sizes) {
@@ -45,6 +72,7 @@ int adapt_segment_bytes_valid(uint64_t segment_bytes) {
 
 adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *sizes, adapt_error *error) {
     adapt_sizes s;
+    uint8_t version;
     if (header == NULL || sizes == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
     }
@@ -54,12 +82,31 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     if (memcmp(header, "ADPT", 4) != 0) {
         return fail(error, ADAPT_ERROR_BAD_MAGIC, 0, 0);
     }
+    version = header[4];
+    if (adapt_header_has_metadata(header)) {
+        size_t n = adapt_header_len(header), i;
+        uint32_t crc = 0;
+        adapt_metadata metadata;
+        if (len < n) {
+            return fail(error, ADAPT_ERROR_TRUNCATED, 0, 0);
+        }
+        for (i = 0; i < 4; i++) {
+            crc |= (uint32_t)header[n - 4 + i] << (8 * i);
+        }
+        if (crc != adapt_crc32(header, n - 4)) {
+            return fail(error, ADAPT_ERROR_CHECKSUM, 0, 0);
+        }
+        if (!adapt_metadata_read(header + n - ADAPT_METADATA_HEADER_BYTES, &metadata)) {
+            return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
+        }
+        version = (uint8_t)(version - ADAPT_METADATA_VERSION + ADAPT_FORMAT_VERSION);
+    }
     s.max = 0;
-    if (header[4] == ADAPT_FORMAT_VERSION) {
+    if (version == ADAPT_FORMAT_VERSION) {
         s.fast = 0;
-    } else if (header[4] == ADAPT_FAST_VERSION) {
+    } else if (version == ADAPT_FAST_VERSION) {
         s.fast = 1;
-    } else if (header[4] == ADAPT_MAX_VERSION) {
+    } else if (version == ADAPT_MAX_VERSION) {
         s.fast = 0;
         s.max = 1;
     } else {
@@ -88,6 +135,23 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     }
     *sizes = s;
     return fail(error, ADAPT_OK, 0, 0);
+}
+
+adapt_status adapt_read_metadata(const uint8_t *header, size_t len, adapt_metadata *metadata, adapt_error *error) {
+    adapt_sizes sizes;
+    adapt_status status;
+    if (metadata == NULL) {
+        return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
+    }
+    status = adapt_read_header(header, len, &sizes, error);
+    if (status != ADAPT_OK) {
+        return status;
+    }
+    if (!adapt_header_has_metadata(header)) {
+        return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
+    }
+    (void)adapt_metadata_read(header + adapt_header_len(header) - ADAPT_METADATA_HEADER_BYTES, metadata);
+    return ADAPT_OK;
 }
 
 adapt_status adapt_read_trailer(const uint8_t *trailer, uint64_t *length, uint32_t *crc32, adapt_error *error) {
@@ -167,7 +231,7 @@ adapt_limits adapt_default_limits(void) {
 
 adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
                                  adapt_limits limits, adapt_stats *stats, adapt_error *error) {
-    uint8_t header[ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES];
+    uint8_t header[ADAPT_HEADER_MAX_BYTES];
     uint8_t block_header[ADAPT_BLOCK_HEADER_BYTES];
     adapt_sizes sizes;
     adapt_status status;
@@ -446,7 +510,7 @@ adapt_status adapt_decode(const uint8_t *file, size_t file_len, adapt_limits lim
     if (status != ADAPT_OK) {
         return status;
     }
-    pos = adapt_sizes_header_bytes(sizes);
+    pos = adapt_header_len(file);
     counter_init(&segments, sizes.segmented);
     for (;;) {
         uint8_t method;
@@ -542,7 +606,7 @@ adapt_status adapt_declared_len(const uint8_t *file, size_t file_len, uint64_t *
     if (status != ADAPT_OK) {
         return status;
     }
-    if (file_len < adapt_sizes_header_bytes(sizes) + ADAPT_TRAILER_BYTES) {
+    if (file_len < adapt_header_len(file) + ADAPT_TRAILER_BYTES) {
         return fail(error, ADAPT_ERROR_TRUNCATED, 0, 0);
     }
     return adapt_read_trailer(file + file_len - ADAPT_TRAILER_BYTES, length, &crc, error);

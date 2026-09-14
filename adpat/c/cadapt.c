@@ -35,7 +35,7 @@
  * link(), so publishing there needs --force, which renames instead.
  */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200112L
+#define _POSIX_C_SOURCE 200809L
 #endif
 #if !defined(_WIN32) && !defined(_FILE_OFFSET_BITS)
 #define _FILE_OFFSET_BITS 64
@@ -55,6 +55,7 @@
 #include <direct.h>
 #include <io.h>
 #include <process.h>
+#include <sys/utime.h>
 #define cadapt_getpid _getpid
 #define cadapt_fseek _fseeki64
 #define cadapt_ftell _ftelli64
@@ -68,11 +69,88 @@ typedef long long cadapt_off;
 typedef off_t cadapt_off;
 #endif
 
-#define CADAPT_VERSION "0.11.0"
+#define CADAPT_VERSION "0.12.0"
+
+/* Capture before reading a file or traversing a directory, which can change
+ * its access time. Archive links are examined without following them. */
+static int metadata_read_path(const char *path, int nofollow, adapt_metadata *m) {
+#ifdef _WIN32
+    struct _stat64 st;
+    (void)nofollow;
+    if (_stat64(path, &st) != 0) {
+        return errno != 0 ? errno : EIO;
+    }
+    m->atime_seconds = st.st_atime;
+    m->mtime_seconds = st.st_mtime;
+    m->atime_nanoseconds = m->mtime_nanoseconds = 0;
+#else
+    struct stat st;
+    if ((nofollow ? lstat(path, &st) : stat(path, &st)) != 0) {
+        return errno != 0 ? errno : EIO;
+    }
+#ifdef __APPLE__
+    m->atime_seconds = st.st_atimespec.tv_sec;
+    m->atime_nanoseconds = (uint32_t)st.st_atimespec.tv_nsec;
+    m->mtime_seconds = st.st_mtimespec.tv_sec;
+    m->mtime_nanoseconds = (uint32_t)st.st_mtimespec.tv_nsec;
+#else
+    m->atime_seconds = st.st_atim.tv_sec;
+    m->atime_nanoseconds = (uint32_t)st.st_atim.tv_nsec;
+    m->mtime_seconds = st.st_mtim.tv_sec;
+    m->mtime_nanoseconds = (uint32_t)st.st_mtim.tv_nsec;
+#endif
+#endif
+    m->mode = (uint32_t)st.st_mode & 07777u;
+    return 0;
+}
+
+static int metadata_apply(const char *path, int symlink_entry, const adapt_metadata *m) {
+    adapt_metadata restored;
+    int rc;
+#ifdef _WIN32
+    struct __utimbuf64 times;
+    if (symlink_entry || m->atime_nanoseconds != 0 || m->mtime_nanoseconds != 0) {
+        return ENOTSUP;
+    }
+    times.actime = m->atime_seconds;
+    times.modtime = m->mtime_seconds;
+    if (_utime64(path, &times) != 0 || _chmod(path, (int)(m->mode & (_S_IREAD | _S_IWRITE))) != 0) {
+        return errno;
+    }
+#else
+    struct timespec times[2];
+    times[0].tv_sec = (time_t)m->atime_seconds;
+    times[0].tv_nsec = (long)m->atime_nanoseconds;
+    times[1].tv_sec = (time_t)m->mtime_seconds;
+    times[1].tv_nsec = (long)m->mtime_nanoseconds;
+    if ((int64_t)times[0].tv_sec != m->atime_seconds || (int64_t)times[1].tv_sec != m->mtime_seconds) {
+        return ERANGE;
+    }
+    if (utimensat(AT_FDCWD, path, times, symlink_entry ? AT_SYMLINK_NOFOLLOW : 0) != 0 ||
+        (!symlink_entry && chmod(path, (mode_t)m->mode) != 0)) {
+        return errno;
+    }
+#endif
+    /* Filesystems may silently clamp dates or round away precision even
+     * when their setter succeeds. Refuse publication if fidelity was lost. */
+    rc = metadata_read_path(path, symlink_entry, &restored);
+    if (rc != 0) {
+        return rc;
+    }
+    if (restored.mode != m->mode || restored.atime_seconds != m->atime_seconds ||
+        restored.atime_nanoseconds != m->atime_nanoseconds || restored.mtime_seconds != m->mtime_seconds ||
+        restored.mtime_nanoseconds != m->mtime_nanoseconds) {
+        return ENOTSUP;
+    }
+    return 0;
+}
 
 /* Format numbers and memory defaults come from the codec constants.
  * Verification is opt-in, and segment coding runs on one thread. */
 static void print_usage(FILE *stream) {
+    adapt_sizes minimum_sizes;
+    adapt_error minimum_error;
+    (void)adapt_sizes_for_input(1, 0, 0, &minimum_sizes, &minimum_error);
     fprintf(stream,
             "cadapt — the adapt self-adaptive lossless codec, in C\n"
             "\n"
@@ -86,13 +164,17 @@ static void print_usage(FILE *stream) {
             "<input> or <output> may be '-' for standard input or output. Without -o,\n"
             "encode writes <input>.adpt and decode strips that suffix (or appends .out).\n"
             "Existing output files are kept unless --force is given. --fast writes the\n"
-            "fast profile (format version %u), which decodes about three times faster\n"
-            "for about a twelfth more bytes; --max the max profile (%u), which writes\n"
+            "fast profile, which decodes about three times faster for about a twelfth\n"
+            "more bytes; --max the max profile, which writes\n"
             "fewer bytes for about twice the time in the same memory; the default is\n"
-            "the normal profile (%u).\n"
-            "Both encode and decode stream, so an input of any length takes the memory\n"
-            "of the model and its window; --max-memory <bytes> (default %llu) bounds\n"
-            "that, and a smaller budget means a smaller model, never a refused input.\n"
+            "the normal profile. Normal/fast/max streams use versions %u/%u/%u;\n"
+            "named files and folders include metadata in versions %u/%u/%u.\n"
+            "--max-memory <bytes> (default %llu) bounds codec model/window/workspace\n"
+            "allocations. Folder path and metadata bookkeeping is additional.\n"
+            "Models shrink only to their supported minimum; lower budgets fail\n"
+            "before output is published and report the required bytes. The minimum\n"
+            "normal single-model budget is %llu bytes; verification/segments may need more.\n"
+            "Named files and folders preserve modes and access/modification timestamps.\n"
             "encode skips round-trip verification by default. --verify proves its output\n"
             "as it writes it when the budget holds two models, or, for a file written\n"
             "to a file, in a second pass with one. --no-verify explicitly skips this proof.\n"
@@ -101,7 +183,10 @@ static void print_usage(FILE *stream) {
             "of --segment-bytes (default %llu, whole blocks of %llu) that start the\n"
             "model afresh, the file the crate's threads write; this port codes and\n"
             "decodes the segments in order, on one thread.\n",
-            ADAPT_FAST_VERSION, ADAPT_MAX_VERSION, ADAPT_FORMAT_VERSION, (unsigned long long)ADAPT_DEFAULT_MAX_MEMORY,
+            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
+            ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_METADATA_MAX_VERSION,
+            (unsigned long long)ADAPT_DEFAULT_MAX_MEMORY,
+            (unsigned long long)minimum_error.detail,
             (unsigned long long)ADAPT_SEGMENT_BYTES, (unsigned long long)ADAPT_BLOCK_BYTES);
 }
 
@@ -271,6 +356,30 @@ static int write_stream(void *context, const uint8_t *buf, size_t len) {
     return 0;
 }
 
+typedef struct metadata_writer {
+    stream *out;
+    const adapt_metadata *metadata;
+    int header_written;
+} metadata_writer;
+
+/* The byte codec still produces its original stream; extend only its first
+ * header write, leaving prediction, block lengths and payload CRC unchanged. */
+static int write_metadata_stream(void *context, const uint8_t *buf, size_t len) {
+    metadata_writer *w = context;
+    if (!w->header_written && w->metadata != NULL) {
+        uint8_t header[ADAPT_HEADER_MAX_BYTES];
+        size_t n = adapt_header_add_metadata(buf, len, w->metadata, header, sizeof(header));
+        if (n == 0) {
+            w->out->error = EINVAL;
+            return EINVAL;
+        }
+        w->header_written = 1;
+        return write_stream(w->out, header, n);
+    }
+    w->header_written = 1;
+    return write_stream(w->out, buf, len);
+}
+
 static void binary_stdio(void) {
 #ifdef _WIN32
     _setmode(_fileno(stdin), _O_BINARY);
@@ -383,7 +492,7 @@ static int staged_open(staged *s, const char *target, int force) {
 }
 
 /* Publish the staged file as `target`. Returns an exit code or 0. */
-static int staged_publish(staged *s, const char *target, int force) {
+static int staged_publish(staged *s, const char *target, int force, const adapt_metadata *metadata) {
     int rc;
     if (s->file != NULL && fclose(s->file) != 0) {
         int e = errno;
@@ -392,6 +501,12 @@ static int staged_publish(staged *s, const char *target, int force) {
         return other_error(target, strerror(e));
     }
     s->file = NULL;
+    if (metadata != NULL && (rc = metadata_apply(s->path, 0, metadata)) != 0) {
+        char message[160];
+        snprintf(message, sizeof(message), "cannot restore metadata: %s", strerror(rc));
+        staged_discard(s);
+        return other_error(target, message);
+    }
 #ifndef _WIN32
     if (!force) {
         /* Linking a complete file is atomic and refuses every existing
@@ -614,6 +729,7 @@ typedef struct entry {
     char *target;
     uint64_t size;
     uint8_t kind;
+    adapt_metadata metadata;
 } entry;
 
 typedef struct folder {
@@ -636,7 +752,7 @@ static void folder_free(folder *f) {
 }
 
 /* Add an entry; takes the strings. Returns 0 or an errno. */
-static int folder_add(folder *f, uint8_t kind, char *path, uint64_t size, char *target) {
+static int folder_add(folder *f, uint8_t kind, char *path, uint64_t size, char *target, const adapt_metadata *metadata) {
     entry *e;
     size_t n;
     if (f->count == f->cap) {
@@ -650,7 +766,7 @@ static int folder_add(folder *f, uint8_t kind, char *path, uint64_t size, char *
         f->items = bigger;
         f->cap = grown;
     }
-    n = adapt_archive_entry(kind, path, size, target, NULL, 0);
+    n = adapt_archive_entry_metadata(kind, path, size, target, metadata, NULL, 0);
     if (n == 0) {
         free(path);
         free(target);
@@ -661,6 +777,7 @@ static int folder_add(folder *f, uint8_t kind, char *path, uint64_t size, char *
     e->path = path;
     e->size = size;
     e->target = target;
+    e->metadata = *metadata;
     f->stream_bytes += n + (kind == KIND_FILE ? size : 0);
     return 0;
 }
@@ -688,11 +805,18 @@ static int walk(folder *f, const char *rel, char **culprit) {
         char *full = path == NULL ? NULL : join(f->root, path);
         char *target = NULL;
         uint64_t size = 0;
+        adapt_metadata metadata;
         int kind;
         if (path == NULL || full == NULL) {
             free(path);
             free(full);
             rc = ENOMEM;
+            break;
+        }
+        rc = metadata_read_path(full, 1, &metadata);
+        if (rc != 0) {
+            *culprit = full;
+            free(path);
             break;
         }
         kind = examine(full, &size, &target);
@@ -717,13 +841,13 @@ static int walk(folder *f, const char *rel, char **culprit) {
                 break;
             }
             strcpy(again, path);
-            rc = folder_add(f, KIND_DIRECTORY, path, 0, NULL);
+            rc = folder_add(f, KIND_DIRECTORY, path, 0, NULL, &metadata);
             if (rc == 0) {
                 rc = walk(f, again, culprit);
             }
             free(again);
         } else {
-            rc = folder_add(f, (uint8_t)kind, path, size, target);
+            rc = folder_add(f, (uint8_t)kind, path, size, target, &metadata);
         }
     }
     for (i = 0; i < count; i++) {
@@ -748,7 +872,7 @@ typedef struct packer {
     folder *f;
     size_t index; /* the next entry */
     enum { PACK_MAGIC, PACK_HEADER, PACK_DATA, PACK_END, PACK_DONE } stage;
-    uint8_t head[ADAPT_ARCHIVE_MAGIC_BYTES + 1 + 2 + ADAPT_ARCHIVE_PATH_MAX + 2 + ADAPT_ARCHIVE_PATH_MAX];
+    uint8_t head[ADAPT_ARCHIVE_MAGIC_BYTES + 1 + 2 + ADAPT_ARCHIVE_PATH_MAX + 2 + ADAPT_ARCHIVE_PATH_MAX + ADAPT_METADATA_BYTES];
     size_t head_len, head_at;
     FILE *file;
     uint64_t remaining;
@@ -764,7 +888,7 @@ static void packer_reset(packer *p, folder *f) {
     memset(p, 0, sizeof(*p));
     p->f = f;
     p->stage = PACK_MAGIC;
-    memcpy(p->head, ADAPT_ARCHIVE_MAGIC, ADAPT_ARCHIVE_MAGIC_BYTES);
+    memcpy(p->head, ADAPT_ARCHIVE_METADATA_MAGIC, ADAPT_ARCHIVE_MAGIC_BYTES);
     p->head_len = ADAPT_ARCHIVE_MAGIC_BYTES;
 }
 
@@ -786,7 +910,7 @@ static void packer_next(packer *p) {
     }
     {
         const entry *e = &p->f->items[p->index];
-        p->head_len = adapt_archive_entry(e->kind, e->path, e->size, e->target, p->head, sizeof(p->head));
+        p->head_len = adapt_archive_entry_metadata(e->kind, e->path, e->size, e->target, &e->metadata, p->head, sizeof(p->head));
         p->head_at = 0;
         p->stage = PACK_HEADER;
     }
@@ -885,12 +1009,19 @@ static int packer_failure(const char *input, const packer *p) {
 
 /* The sink that restores an archive under a staging directory. Every
  * path has passed the unpacker's rules, so it stays under the root. */
+typedef struct deferred_metadata {
+    char *path;
+    adapt_metadata metadata;
+    struct deferred_metadata *next;
+} deferred_metadata;
+
 typedef struct restorer {
     const char *root;
     FILE *file;
     int error; /* errno of the failure */
     char *failed; /* the entry's path, malloc'd, or NULL */
     const char *why; /* a failure the errno does not name, or NULL */
+    deferred_metadata *directories;
 } restorer;
 
 static int restore_fail(restorer *r, const char *path, int e, const char *why) {
@@ -1005,11 +1136,60 @@ static int restore_symlink(void *context, const char *path, const char *target) 
 #endif
 }
 
+static int restore_metadata(void *context, const char *path, uint8_t kind, const adapt_metadata *metadata) {
+    restorer *r = context;
+    char *full = join(r->root, path);
+    int rc;
+    if (full == NULL) {
+        return restore_fail(r, path, ENOMEM, NULL);
+    }
+    if (kind == ADAPT_ARCHIVE_DIRECTORY) {
+        deferred_metadata *item = malloc(sizeof(*item));
+        if (item == NULL) {
+            free(full);
+            return restore_fail(r, path, ENOMEM, NULL);
+        }
+        item->path = full;
+        item->metadata = *metadata;
+        item->next = r->directories;
+        r->directories = item;
+        return 0;
+    }
+    rc = metadata_apply(full, kind == ADAPT_ARCHIVE_SYMLINK, metadata);
+    free(full);
+    return rc != 0 ? restore_fail(r, path, rc, "cannot restore metadata") : 0;
+}
+
+/* Reverse traversal order finalizes children before parents. On failure
+ * release the records without applying any remaining metadata. */
+static int finish_directory_metadata(restorer *r, int apply) {
+    int rc = 0;
+    while (r->directories != NULL) {
+        deferred_metadata *item = r->directories;
+        r->directories = item->next;
+        if (apply && rc == 0) {
+            int e = metadata_apply(item->path, 0, &item->metadata);
+            if (e != 0) {
+                rc = restore_fail(r, item->path, e, "cannot restore directory metadata");
+            }
+        }
+        free(item->path);
+        free(item);
+    }
+    return rc;
+}
+
 /* Remove a directory we created and everything under it. Only the staging
  * directory is ever handed here. */
 static void remove_tree(const char *path) {
     char **names = NULL;
     size_t count = 0, i;
+#ifdef _WIN32
+    (void)_chmod(path, _S_IREAD | _S_IWRITE);
+#else
+    /* Metadata may have made our staging directories read-only. */
+    (void)chmod(path, 0700);
+#endif
     if (list_directory(path, &names, &count) == 0) {
         for (i = 0; i < count; i++) {
             char *full = join(path, names[i]);
@@ -1126,7 +1306,7 @@ static int staged_dir_publish(staged *s, const char *target, int force) {
  * read ahead to learn what the container holds — before the rest. */
 typedef struct replay {
     stream *in;
-    uint8_t held[ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES];
+    uint8_t held[ADAPT_HEADER_MAX_BYTES];
     size_t held_len, held_at;
 } replay;
 
@@ -1203,7 +1383,9 @@ static int decode_command(int argc, char **argv) {
     uint64_t threads;
     adapt_sizes sizes;
     replay ahead;
-    restorer restore = {NULL, NULL, 0, NULL, NULL};
+    restorer restore = {NULL, NULL, 0, NULL, NULL, NULL};
+    adapt_metadata metadata;
+    int has_metadata;
     adapt_archive_unpacker *unpacker = NULL;
     rc = parse_args(&a, argc, argv, with_value);
     if (rc != 0) {
@@ -1279,6 +1461,10 @@ static int decode_command(int argc, char **argv) {
         free(output);
         return rc;
     }
+    has_metadata = adapt_header_has_metadata(ahead.held);
+    if (has_metadata) {
+        (void)adapt_read_metadata(ahead.held, ahead.held_len, &metadata, NULL);
+    }
     if (sizes.archive) {
         /* a folder: restored under a staging directory beside the target */
         adapt_archive_sink sink;
@@ -1315,6 +1501,7 @@ static int decode_command(int argc, char **argv) {
             free(output);
             return rc;
         }
+        adapt_archive_set_metadata_callback(unpacker, restore_metadata);
         status = adapt_decode_stream(read_replay, &ahead, adapt_archive_unpack, unpacker, limits, &stats, &error);
         if (status == ADAPT_OK) {
             status = adapt_archive_finish(unpacker, &error);
@@ -1324,6 +1511,14 @@ static int decode_command(int argc, char **argv) {
         }
         if (restore.file != NULL) {
             fclose(restore.file);
+        }
+        rc = finish_directory_metadata(&restore, status == ADAPT_OK);
+        if (status == ADAPT_OK && rc != 0) {
+            status = ADAPT_ERROR_IO;
+        }
+        if (status == ADAPT_OK && has_metadata && (rc = metadata_apply(stage.path, 0, &metadata)) != 0) {
+            (void)restore_fail(&restore, "root", rc, "cannot restore directory metadata");
+            status = ADAPT_ERROR_IO;
         }
         if (status != ADAPT_OK) {
             char message[400];
@@ -1394,7 +1589,7 @@ static int decode_command(int argc, char **argv) {
         return rc;
     }
     if (stage.file != NULL) {
-        rc = staged_publish(&stage, output, force);
+        rc = staged_publish(&stage, output, force, has_metadata ? &metadata : NULL);
         if (rc != 0) {
             free(output);
             return rc;
@@ -1470,6 +1665,9 @@ static int encode_command(int argc, char **argv) {
     folder dir;
     packer pack;
     int is_folder = 0;
+    adapt_metadata source_metadata;
+    int has_metadata = 0;
+    metadata_writer metadata_output;
     char folder_name[4096];
     rc = parse_args(&a, argc, argv, with_value);
     if (rc != 0) {
@@ -1559,6 +1757,12 @@ static int encode_command(int argc, char **argv) {
         /* every entry listed and sized before a byte is coded, so the
          * stream's length is known and the sizes fit it */
         char *culprit = NULL;
+        rc = metadata_read_path(folder_name, 0, &source_metadata);
+        if (rc != 0) {
+            free(output);
+            return other_error(input, strerror(rc));
+        }
+        has_metadata = 1;
         rc = folder_collect(&dir, folder_name, &culprit);
         if (rc != 0) {
             snprintf(message, sizeof(message), "%s%s%s", culprit != NULL ? culprit : "",
@@ -1584,6 +1788,15 @@ static int encode_command(int argc, char **argv) {
     }
     if (!is_folder) {
         known_length = input_length(in.file, &length);
+        if (known_length) {
+            rc = metadata_read_path(input, 0, &source_metadata);
+            if (rc != 0) {
+                fclose(in.file);
+                free(output);
+                return other_error(input, strerror(rc));
+            }
+            has_metadata = 1;
+        }
     }
     if (threads >= 2 && known_length) {
         /* A file's sizes are the crate's for its threads: each model fitted
@@ -1650,13 +1863,19 @@ static int encode_command(int argc, char **argv) {
     {
         adapt_read_fn source = is_folder ? read_packer : read_stream;
         void *source_context = is_folder ? (void *)&pack : (void *)&in;
+        metadata_output.out = &out;
+        metadata_output.metadata = has_metadata ? &source_metadata : NULL;
+        metadata_output.header_written = 0;
         if (alongside) {
-            status = adapt_encode_stream_verified_segments(source, source_context, write_stream, &out, sizes, max_memory,
+            status = adapt_encode_stream_verified_segments(source, source_context, write_metadata_stream, &metadata_output, sizes, max_memory,
                                                            segment_bytes, &stats, &error);
         } else {
-            status = adapt_encode_stream_segments(source, source_context, write_stream, &out, sizes, max_memory,
+            status = adapt_encode_stream_segments(source, source_context, write_metadata_stream, &metadata_output, sizes, max_memory,
                                                   segment_bytes, &stats, &error);
         }
+    }
+    if (status == ADAPT_OK && has_metadata) {
+        stats.output_bytes += ADAPT_METADATA_HEADER_BYTES;
     }
     packer_close(&pack);
     if (status == ADAPT_OK && out.file == stdout && fflush(stdout) != 0) {
@@ -1752,7 +1971,7 @@ static int encode_command(int argc, char **argv) {
         fclose(in.file);
     }
     if (stage.path != NULL) {
-        rc = staged_publish(&stage, output, force);
+        rc = staged_publish(&stage, output, force, NULL);
         if (rc != 0) {
             folder_free(&dir);
             free(output);
@@ -1789,7 +2008,7 @@ static int info_command(int argc, char **argv) {
     args a;
     const char *input;
     FILE *file;
-    uint8_t header[ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES];
+    uint8_t header[ADAPT_HEADER_MAX_BYTES];
     size_t header_len;
     /* the trailer, and before it the segment count of a segmented file */
     uint8_t tail[ADAPT_TRAILER_BYTES + ADAPT_SEGMENT_COUNT_BYTES];

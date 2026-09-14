@@ -325,11 +325,30 @@ def inspect_container(path: Path) -> dict[str, Any]:
             return data
 
         header = read(8)
-        if header[:4] != b"ADPT" or header[4] not in (13, 14, 15):
+        if header[:4] != b"ADPT" or header[4] not in (13, 14, 15, 16, 17, 18):
             raise ValueError("unsupported container header")
         period = int.from_bytes(read(2), "little") if header[7] & 0x80 else 0
+        filesystem_metadata = None
+        if header[4] in (16, 17, 18):
+            metadata = read(32)
+            checksum_input = header + (period.to_bytes(2, "little") if header[7] & 0x80 else b"") + metadata[:28]
+            if zlib.crc32(checksum_input) != int.from_bytes(metadata[28:], "little"):
+                raise ValueError("metadata header checksum mismatch")
+            filesystem_metadata = dict(
+                mode=int.from_bytes(metadata[:4], "little"),
+                atime_seconds=int.from_bytes(metadata[4:12], "little", signed=True),
+                atime_nanoseconds=int.from_bytes(metadata[12:16], "little"),
+                mtime_seconds=int.from_bytes(metadata[16:24], "little", signed=True),
+                mtime_nanoseconds=int.from_bytes(metadata[24:28], "little"),
+            )
+            if (filesystem_metadata["mode"] & ~0o7777 or
+                    filesystem_metadata["atime_nanoseconds"] >= 1_000_000_000 or
+                    filesystem_metadata["mtime_nanoseconds"] >= 1_000_000_000):
+                raise ValueError("invalid filesystem metadata")
         result: dict[str, Any] = dict(
             format_version=header[4],
+            filesystem_metadata=filesystem_metadata,
+            metadata_bytes=32 if filesystem_metadata is not None else 0,
             context_table_bytes=16 << (header[5] & 31),
             recall_table_bytes=4 << (header[6] & 31),
             window_bytes=1 << (header[7] & 31),

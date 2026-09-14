@@ -7,8 +7,10 @@ matches, and run memories, arbitrated by small online mixers. The container
 frames the input in 256 KiB blocks, each modelled, stored-and-observed, or
 stored-and-skipped, and ends with the original length and its CRC-32. The
 implementation is C99 with nothing beyond the C standard library (POSIX
-threads for the encoder's optional proof), and reads and writes format
-versions 13 (normal), 14 (fast) and 15 (max).
+threads for the encoder's optional proof). Byte streams use format versions
+13 (normal), 14 (fast) and 15 (max); named files and folders use versions
+16, 17 and 18 respectively to carry filesystem metadata. The decoder reads
+all six versions. The CLI uses native filesystem APIs to restore metadata.
 
 The code began as an integer-for-integer port of a Rust crate and keeps that
 crate's layout and names; since format 13 it defines its own format and
@@ -68,15 +70,19 @@ cadapt --version
 `<input>` or `<output>` may be `-` for standard input or output. Without
 `-o`, `encode` writes `<input>.adpt` and `decode` strips that suffix (or
 appends `.out`). An existing output is kept unless `--force` is given. Both
-directions stream: memory is the model and one block, whatever the length,
-and `--max-memory` (default 64 MiB) bounds it — a smaller budget means a
-smaller model, never a refused input. A decoder needs the budget the file's
-header names, so a file encoded under a large budget wants the same budget
-to decode.
+directions stream: codec working memory is the model, window, block workspace
+and reserved headroom. `--max-memory` (default 64 MiB) bounds that allocation.
+Models shrink only to their supported minimum: **1 MiB is insufficient**.
+`--help` prints the minimum normal single-model budget; an insufficient
+budget fails before publication and reports required and allowed bytes.
+Verification and segments can require more. A decoder needs the model sizes
+the container declares. Folder encoding additionally retains an entry/path
+inventory, and restoration retains pending directory metadata; this CLI
+bookkeeping is outside the codec's working-memory bound.
 
-- `--fast` writes the fast profile (version 14): two hashed contexts, one
+- `--fast` writes the fast profile (version 14 or 17): two hashed contexts, one
   arbiter, about three times the decoding speed for about a twelfth more
-  bytes. `--max` writes the max profile (version 15): more contexts and run
+  bytes. `--max` writes the max profile (version 15 or 18): more contexts and run
   memories, fewer bytes for about twice the time in the same memory.
 - `--verify` proves the output as it is written, with a second model
   decoding every block, when the budget holds two models; for a file
@@ -93,6 +99,26 @@ to decode.
   file byte for byte, every directory and symbolic link in its place — and
   refuses to write a folder to standard output. On Windows a symbolic link
   is neither packed nor restored.
+- Named files and folders carry permission bits and access/modification
+  timestamps in the container, including the folder root, empty directories
+  and symbolic links. On POSIX, timestamps retain nanoseconds and signed Unix
+  seconds; symlink timestamps are set without following the link. Directory
+  metadata is applied after restoring its children. Reading the source can
+  advance its access time, so identical containers require identical source
+  bytes **and metadata** at the start of each encode.
+- Metadata is checked after application and before publication. A filesystem
+  that cannot reproduce the recorded mode or timestamp fails restoration
+  instead of silently rounding or dropping it. Windows currently records
+  the C runtime's modes and whole-second timestamps; it rejects unsupported
+  modes, nanosecond timestamps and symlinks. This release's metadata tests
+  run on POSIX; Windows behavior has not been validated. Creation/status-change
+  times, ownership, ACLs, extended attributes, hard-link identity and sparse
+  allocation are not preserved yet; this implements the permission and
+  access/modification-time portion of `FMT-7` in
+  [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md).
+- Encoding standard input has no source filesystem metadata. Decoding to
+  standard output emits only bytes. Older containers remain readable; when
+  they lack metadata, restored files take the permissions allowed by umask.
 
 A file output is staged beside its target and published by name only once
 complete, so an interrupted run leaves no partial target. Without
@@ -144,8 +170,10 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   enwik8, the Wikipedia excerpt the benchmark uses, CC BY-SA) chooses a
   class width and a context set, in all three profiles; `records` (a
   synthetic raw RGB image) a record period; `segmented` (300,000 bytes of
-  enwik8) two segments. Regenerate them with `cadapt encode` after a
-  deliberate format change, never to make a test pass.
+  enwik8) two segments. Regenerate byte-stream vectors with the library
+  encoder and their explicit sizes/profile/segment settings after a
+  deliberate format change, never to make a test pass. Named CLI inputs
+  now include metadata and are unsuitable as metadata-free golden vectors.
 - `make check` adds the Python tests — the CLI command by command
   (`tests/test_cadapt.py`), the coverage gate's own tests
   (`tests/test_check_gcov.py`), the benchmark's (`bench/test_telemetry.py`)
@@ -168,8 +196,27 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
 
 A file is an 8-byte fixed header (signature `ADPT`, version, table size and
 class code, recall size and context-set code, window size and flags), an
-optional 2-byte record period, blocks, an optional segment table, and a
-13-byte trailer. The constants that pin it are the `ADAPT_*` macros at the
+optional 2-byte record period, an optional metadata extension, blocks, an
+optional segment table, and a 13-byte trailer. The constants that pin it are the `ADAPT_*` macros at the
 top of [adapt.h](adpat/c/adapt.h); a change to any of them is a new version.
-Versions 13, 14 and 15 are the normal, fast and max profiles of the same
-container; every other version byte is refused.
+Versions 13, 14 and 15 are the normal, fast and max byte-stream profiles.
+Versions 16, 17 and 18 use the same predictors and append a 32-byte extension
+after the record period (or fixed header when absent):
+
+| Bytes | Field (little-endian) |
+|---|---|
+| 4 | Permission bits, restricted to `07777` |
+| 8 + 4 | Access time: signed Unix seconds, nanoseconds below 1,000,000,000 |
+| 8 + 4 | Modification time: signed Unix seconds, nanoseconds below 1,000,000,000 |
+| 4 | CRC-32 of the entire header through the preceding metadata fields |
+
+For folders, the extension holds the root metadata. The decoded archive
+stream starts with `ADPTARC2`, and each entry's existing kind/path/length or
+link-target header is followed by the same 28-byte metadata record, before
+file content. Entry metadata is covered by the outer payload CRC-32.
+`ADPTARC1` archives remain readable. Older codec releases do not read
+versions 16–18. The byte-oriented library encoders still emit versions
+13–15; `adapt_header_add_metadata()` adds the extension and
+`adapt_read_metadata()` reads it. Use `adapt_header_len()` for the actual
+container header size; `adapt_sizes_header_bytes()` gives the base encoder
+header size without metadata.

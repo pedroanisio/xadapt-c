@@ -1,5 +1,5 @@
 /*
- * adapt.h — the adapt codec, format versions 13, 14 and 15, in C99 with
+ * adapt.h — the adapt codec, format versions 13 through 18, in C99 with
  * nothing beyond the C standard library (and POSIX threads for the
  * encoder's proof, when built with ADAPT_THREADS).
  *
@@ -95,6 +95,37 @@ extern "C" {
  * and three arbiter inputs per context instead of one; the same memory,
  * about twice the time, fewer bytes. `cadapt encode --max`. */
 #define ADAPT_MAX_VERSION 15u
+/* Versions 16--18 use the same predictors as 13--15 and append a
+ * checksummed filesystem-metadata record to the header. Old streams keep
+ * their original versions and remain readable. */
+#define ADAPT_METADATA_VERSION 16u
+#define ADAPT_METADATA_FAST_VERSION 17u
+#define ADAPT_METADATA_MAX_VERSION 18u
+#define ADAPT_METADATA_BYTES 28u
+#define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)
+#define ADAPT_HEADER_MAX_BYTES (ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES + ADAPT_METADATA_HEADER_BYTES)
+
+/* POSIX permission bits and signed Unix seconds plus nanoseconds. ctime
+ * and creation time are filesystem-managed and are not reconstructed. */
+typedef struct adapt_metadata {
+    uint32_t mode;
+    int64_t atime_seconds;
+    uint32_t atime_nanoseconds;
+    int64_t mtime_seconds;
+    uint32_t mtime_nanoseconds;
+} adapt_metadata;
+
+/* Serialize/parse exactly ADAPT_METADATA_BYTES, returning 1 on success,
+ * 0 for NULL arguments or invalid mode/nanosecond fields. */
+int adapt_metadata_write(const adapt_metadata *metadata, uint8_t *out);
+int adapt_metadata_read(const uint8_t *data, adapt_metadata *metadata);
+
+/* The fixed eight-byte header identifies whether metadata follows. */
+int adapt_header_has_metadata(const uint8_t *header);
+/* Extend a valid legacy header into out, returning its full length or 0.
+ * The input and output must not overlap. */
+size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_metadata *metadata,
+                                 uint8_t *out, size_t cap);
 /* The fast profile's context sets: order-2 and class, order-2 and
  * order-4, order-1 and order-2. */
 #define ADAPT_FAST_SETS 3u
@@ -172,6 +203,10 @@ typedef struct adapt_error {
     uint64_t limit;
 } adapt_error;
 
+/* Read validated metadata from an extended header; legacy headers return
+ * ADAPT_ERROR_BAD_HEADER. The header CRC covers the metadata and framing. */
+adapt_status adapt_read_metadata(const uint8_t *header, size_t len, adapt_metadata *metadata, adapt_error *error);
+
 /* Write the message the Rust crate displays for `error` into `buf`
  * (NUL-terminated, truncated to `len`); returns the length it wanted, as
  * snprintf does. */
@@ -229,15 +264,15 @@ typedef struct adapt_sizes {
 /* Context sets a file may choose, by header code. */
 #define ADAPT_CONTEXT_SETS 8u
 
-/* Validate a fixed header and return the sizes it declares. */
 /* The bytes the header of a file whose fixed header is `fixed` occupies:
- * the fixed part, and the period after it when the window byte's flag says so. */
+ * fixed part, optional period, and metadata extension for versions 16--18.
+ * `fixed` must contain at least ADAPT_HEADER_BYTES bytes. */
 size_t adapt_header_len(const uint8_t *fixed);
-/* Bytes of a file's header from its sizes. */
+/* Base byte-stream encoder header size, excluding filesystem metadata. */
 size_t adapt_sizes_header_bytes(adapt_sizes sizes);
 /* Validate the header at the start of `header`, `len` bytes of it available:
- * the fixed part and, when flagged, the period after it. Fewer bytes than
- * the header announces is ADAPT_ERROR_TRUNCATED. */
+ * fixed part, optional period, and metadata including its checksum.
+ * Fewer bytes than the header announces is ADAPT_ERROR_TRUNCATED. */
 adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *sizes, adapt_error *error);
 /* The record period of `sample` as the encoder finds it, or 0. */
 uint16_t adapt_detect_period(const uint8_t *sample, size_t n);
@@ -437,21 +472,27 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len);
  * Archives: a folder as one stream
  *
  * A folder is coded as a container flagged ADAPT_ARCHIVE_FLAG whose
- * decoded bytes are an adapt archive: ADAPT_ARCHIVE_MAGIC, then entries,
+ * decoded bytes are an adapt archive: ADAPT_ARCHIVE_MAGIC (version 1) or
+ * ADAPT_ARCHIVE_METADATA_MAGIC (version 2), then entries,
  * then one ADAPT_ARCHIVE_END byte. An entry is a kind byte, a path (its
  * length as a little-endian u16, then its bytes: components joined by '/',
  * relative to the folder, none empty, none '.' or '..', no NUL) and, for
  * a file, its length as a little-endian u64 and then its bytes; for a
- * symbolic link, its target (u16 length, bytes). Entries come depth first,
+ * symbolic link, its target (u16 length, bytes). Version 2 appends a
+ * 28-byte adapt_metadata record after the entry header, before file data;
+ * the folder root's metadata lives in the outer container header.
+ * Entries come depth first,
  * siblings in byte order of their names, a directory before what it
- * holds, so the same folder gives the same bytes wherever it is packed.
+ * holds, so identical contents and metadata give identical archive bytes.
  * An empty directory is an entry like any other; the folder itself is
  * not one. The unpacker checks every rule and hands the entries to a sink
  * of callbacks as their bytes arrive, so a folder of any size is restored
- * in the memory of one block.
+ * with bounded parser memory. A filesystem sink may retain directory
+ * metadata until children are restored; this bookkeeping is additional.
  * --------------------------------------------------------------------- */
 
 #define ADAPT_ARCHIVE_MAGIC "ADPTARC1"
+#define ADAPT_ARCHIVE_METADATA_MAGIC "ADPTARC2"
 #define ADAPT_ARCHIVE_MAGIC_BYTES 8u
 #define ADAPT_ARCHIVE_END 0u
 #define ADAPT_ARCHIVE_DIRECTORY 1u
@@ -471,6 +512,10 @@ int adapt_archive_path_valid(const char *path);
  * The archive's start is ADAPT_ARCHIVE_MAGIC, its end one
  * ADAPT_ARCHIVE_END byte; a caller emits those itself. */
 size_t adapt_archive_entry(uint8_t kind, const char *path, uint64_t size, const char *target, uint8_t *out, size_t cap);
+/* Version 2 appends metadata after each version-1 entry header. Its root
+ * metadata is in the outer container header. Both archive versions decode. */
+size_t adapt_archive_entry_metadata(uint8_t kind, const char *path, uint64_t size, const char *target,
+                                    const adapt_metadata *metadata, uint8_t *out, size_t cap);
 
 /* What an unpacker does with each entry: `directory` for a directory,
  * `file_open` then `file_data` for each of the file's bytes as they come
@@ -487,9 +532,13 @@ typedef struct adapt_archive_sink {
 } adapt_archive_sink;
 
 typedef struct adapt_archive_unpacker adapt_archive_unpacker;
+/* Called after an entry's bytes are complete (after file_close for files).
+ * Directory metadata must be applied after their children are restored. */
+typedef int (*adapt_archive_metadata_fn)(void *context, const char *path, uint8_t kind, const adapt_metadata *metadata);
 
 /* An unpacker for one archive, or NULL when memory is short. */
 adapt_archive_unpacker *adapt_archive_unpacker_new(adapt_archive_sink sink);
+void adapt_archive_set_metadata_callback(adapt_archive_unpacker *u, adapt_archive_metadata_fn callback);
 void adapt_archive_unpacker_free(adapt_archive_unpacker *u);
 
 /* Feed the next bytes of the archive, in order, in any pieces: an

@@ -518,9 +518,9 @@ static void test_framing(void) {
     file[4] = 4;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
-    file[4] = ADAPT_MAX_VERSION + 1;
+    file[4] = ADAPT_METADATA_MAX_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_MAX_VERSION + 1);
+    CHECK(error.detail == ADAPT_METADATA_MAX_VERSION + 1);
     /* 0.8.0's normal profile, version 6, is refused like every version no file was published in */
     file[4] = 6;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
@@ -926,6 +926,86 @@ static void test_crc32(void) {
     CHECK(adapt_crc32((const uint8_t *)"The quick brown fox jumps over the lazy dog", 43) == 0x414FA339u);
 }
 
+static void metadata_checksum(uint8_t *header, size_t len) {
+    uint32_t crc = adapt_crc32(header, len - 4);
+    size_t i;
+    for (i = 0; i < 4; i++) {
+        header[len - 4 + i] = (uint8_t)(crc >> (8 * i));
+    }
+}
+
+static void test_metadata_headers(void) {
+    adapt_metadata m = {0751, -123, 456, 789, 123456789}, back;
+    uint8_t header[ADAPT_HEADER_MAX_BYTES], damaged[ADAPT_HEADER_MAX_BYTES];
+    uint8_t file[ADAPT_HEADER_MAX_BYTES + sizeof(EMPTY_FILE)];
+    adapt_sizes sizes;
+    adapt_error error;
+    size_t n, i;
+    uint64_t length;
+    CHECK(!adapt_header_has_metadata(NULL));
+    n = adapt_header_add_metadata(EMPTY_FILE, ADAPT_HEADER_BYTES, &m, header, sizeof(header));
+    CHECK(n == ADAPT_HEADER_BYTES + ADAPT_METADATA_HEADER_BYTES);
+    CHECK(header[4] == ADAPT_METADATA_VERSION && adapt_header_has_metadata(header));
+    CHECK(adapt_header_len(header) == n);
+    CHECK_STATUS(adapt_read_header(header, n, &sizes, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_read_metadata(header, n, &back, &error), ADAPT_OK);
+    CHECK(back.mode == m.mode && back.atime_seconds == m.atime_seconds && back.atime_nanoseconds == 456);
+    CHECK(back.mtime_seconds == m.mtime_seconds && back.mtime_nanoseconds == m.mtime_nanoseconds);
+    CHECK_STATUS(adapt_read_metadata(header, n, NULL, &error), ADAPT_ERROR_INVALID_ARGUMENT);
+    CHECK_STATUS(adapt_read_metadata(NULL, 0, &back, &error), ADAPT_ERROR_INVALID_ARGUMENT);
+    CHECK_STATUS(adapt_read_metadata(EMPTY_FILE, sizeof(EMPTY_FILE), &back, &error), ADAPT_ERROR_BAD_HEADER);
+    CHECK(adapt_header_add_metadata(NULL, 0, &m, header, sizeof(header)) == 0);
+    CHECK(adapt_header_add_metadata(EMPTY_FILE, ADAPT_HEADER_BYTES, &m, NULL, 0) == 0);
+    CHECK(adapt_header_add_metadata(EMPTY_FILE, ADAPT_HEADER_BYTES, &m, damaged, n - 1) == 0);
+    CHECK(adapt_header_add_metadata(EMPTY_FILE, sizeof(EMPTY_FILE), &m, damaged, sizeof(damaged)) == 0);
+    CHECK(adapt_header_add_metadata(header, n, &m, damaged, sizeof(damaged)) == 0);
+    CHECK(adapt_header_add_metadata(EMPTY_FILE, ADAPT_HEADER_BYTES, NULL, damaged, sizeof(damaged)) == 0);
+    for (i = 0; i < n; i++) {
+        CHECK_STATUS(adapt_read_metadata(header, i, &back, &error), ADAPT_ERROR_TRUNCATED);
+        memcpy(damaged, header, n);
+        damaged[i] ^= 1;
+        CHECK(adapt_read_header(damaged, n, &sizes, &error) != ADAPT_OK);
+    }
+    for (i = ADAPT_HEADER_BYTES + 3; i < n - 4; i += 12) {
+        memcpy(damaged, header, n);
+        damaged[i] = 255;
+        metadata_checksum(damaged, n);
+        CHECK_STATUS(adapt_read_header(damaged, n, &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+    }
+    memcpy(file, header, n);
+    memcpy(file + n, EMPTY_FILE + ADAPT_HEADER_BYTES, sizeof(EMPTY_FILE) - ADAPT_HEADER_BYTES);
+    CHECK_STATUS(decode_bytes(file, n + sizeof(EMPTY_FILE) - ADAPT_HEADER_BYTES, adapt_default_limits(), &error), ADAPT_OK);
+    CHECK_STATUS(adapt_declared_len(file, n + sizeof(EMPTY_FILE) - ADAPT_HEADER_BYTES, &length, &error), ADAPT_OK);
+    CHECK(length == 0);
+    CHECK_STATUS(adapt_declared_len(file, n + ADAPT_TRAILER_BYTES - 1, &length, &error), ADAPT_ERROR_TRUNCATED);
+    /* Exercise all predictors, optional period, and segment accounting with
+     * an extended header; the underlying golden payloads stay unchanged. */
+    {
+        static const char *names[] = {"hello.adpt", "abc-fast.adpt", "abc-max.adpt", "records.adpt", "segmented.adpt"};
+        size_t k;
+        for (k = 0; k < sizeof(names) / sizeof(names[0]); k++) {
+            size_t old_len, old_header, out_len, expected_len;
+            uint8_t *old = read_file(names[k], &old_len), *encoded, *out = NULL, *expected = NULL;
+            old_header = adapt_header_len(old);
+            n = adapt_header_add_metadata(old, old_header, &m, header, sizeof(header));
+            CHECK(n == old_header + ADAPT_METADATA_HEADER_BYTES);
+            encoded = malloc(old_len + ADAPT_METADATA_HEADER_BYTES);
+            CHECK(encoded != NULL);
+            memcpy(encoded, header, n);
+            memcpy(encoded + n, old + old_header, old_len - old_header);
+            CHECK_STATUS(adapt_decode(old, old_len, adapt_default_limits(), &expected, &expected_len, &error), ADAPT_OK);
+            CHECK_STATUS(adapt_decode(encoded, old_len + ADAPT_METADATA_HEADER_BYTES, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+            CHECK(out_len == expected_len && memcmp(out, expected, expected_len) == 0);
+            CHECK_STATUS(adapt_declared_len(encoded, old_len + ADAPT_METADATA_HEADER_BYTES, &length, &error), ADAPT_OK);
+            CHECK(length == expected_len);
+            adapt_free(expected);
+            adapt_free(out);
+            free(encoded);
+            free(old);
+        }
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: test_adapt_decode <vectors-dir>\n");
@@ -933,6 +1013,7 @@ int main(int argc, char **argv) {
     }
     vectors_dir = argv[1];
     test_crc32();
+    test_metadata_headers();
     test_vector("empty.adpt", "empty.bin");
     test_vector("hello.adpt", "hello.bin");
     test_vector("abc.adpt", "abc.bin");

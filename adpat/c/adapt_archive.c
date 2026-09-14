@@ -16,6 +16,60 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void put_integer(uint8_t *out, uint64_t value, size_t bytes) {
+    size_t i;
+    for (i = 0; i < bytes; i++) {
+        out[i] = (uint8_t)(value >> (8 * i));
+    }
+}
+
+static uint64_t get_integer(const uint8_t *data, size_t bytes) {
+    uint64_t value = 0;
+    size_t i;
+    for (i = 0; i < bytes; i++) {
+        value |= (uint64_t)data[i] << (8 * i);
+    }
+    return value;
+}
+
+static int64_t signed_seconds(uint64_t value) {
+    return value <= INT64_MAX ? (int64_t)value : -1 - (int64_t)(UINT64_MAX - value);
+}
+
+static int metadata_valid(const adapt_metadata *m) {
+    return m != NULL && (m->mode & ~07777u) == 0 && m->atime_nanoseconds < 1000000000u &&
+           m->mtime_nanoseconds < 1000000000u;
+}
+
+int adapt_metadata_write(const adapt_metadata *m, uint8_t *out) {
+    if (out == NULL || !metadata_valid(m)) {
+        return 0;
+    }
+    put_integer(out, m->mode, 4);
+    put_integer(out + 4, (uint64_t)m->atime_seconds, 8);
+    put_integer(out + 12, m->atime_nanoseconds, 4);
+    put_integer(out + 16, (uint64_t)m->mtime_seconds, 8);
+    put_integer(out + 24, m->mtime_nanoseconds, 4);
+    return 1;
+}
+
+int adapt_metadata_read(const uint8_t *data, adapt_metadata *m) {
+    adapt_metadata value;
+    if (data == NULL || m == NULL) {
+        return 0;
+    }
+    value.mode = (uint32_t)get_integer(data, 4);
+    value.atime_seconds = signed_seconds(get_integer(data + 4, 8));
+    value.atime_nanoseconds = (uint32_t)get_integer(data + 12, 4);
+    value.mtime_seconds = signed_seconds(get_integer(data + 16, 8));
+    value.mtime_nanoseconds = (uint32_t)get_integer(data + 24, 4);
+    if (!metadata_valid(&value)) {
+        return 0;
+    }
+    *m = value;
+    return 1;
+}
+
 /* ------------------------------------------------------------------------
  * Paths and entry headers
  * --------------------------------------------------------------------- */
@@ -99,6 +153,19 @@ size_t adapt_archive_entry(uint8_t kind, const char *path, uint64_t size, const 
     return n;
 }
 
+size_t adapt_archive_entry_metadata(uint8_t kind, const char *path, uint64_t size, const char *target,
+                                    const adapt_metadata *metadata, uint8_t *out, size_t cap) {
+    size_t n = adapt_archive_entry(kind, path, size, target, NULL, 0);
+    if (n == 0 || !metadata_valid(metadata)) {
+        return 0;
+    }
+    if (out != NULL && cap >= n + ADAPT_METADATA_BYTES) {
+        (void)adapt_archive_entry(kind, path, size, target, out, cap);
+        (void)adapt_metadata_write(metadata, out + n);
+    }
+    return n + ADAPT_METADATA_BYTES;
+}
+
 /* ------------------------------------------------------------------------
  * The unpacker
  * --------------------------------------------------------------------- */
@@ -112,6 +179,7 @@ typedef enum stage {
     STAGE_DATA,
     STAGE_TARGET_LEN,
     STAGE_TARGET,
+    STAGE_METADATA,
     STAGE_DONE
 } stage;
 
@@ -134,6 +202,10 @@ struct adapt_archive_unpacker {
     size_t target_len, target_at;
     char *target;
     uint64_t size, remaining;
+    int has_metadata;
+    uint8_t metadata_bytes[ADAPT_METADATA_BYTES];
+    adapt_metadata metadata;
+    adapt_archive_metadata_fn metadata_callback;
 };
 
 adapt_archive_unpacker *adapt_archive_unpacker_new(adapt_archive_sink sink) {
@@ -150,6 +222,12 @@ adapt_archive_unpacker *adapt_archive_unpacker_new(adapt_archive_sink sink) {
     u->sink = sink;
     u->stage = STAGE_MAGIC;
     return u;
+}
+
+void adapt_archive_set_metadata_callback(adapt_archive_unpacker *u, adapt_archive_metadata_fn callback) {
+    if (u != NULL) {
+        u->metadata_callback = callback;
+    }
 }
 
 void adapt_archive_unpacker_free(adapt_archive_unpacker *u) {
@@ -182,6 +260,18 @@ static int close_component(adapt_archive_unpacker *u, uint64_t at) {
     return 0;
 }
 
+static int entry_done(adapt_archive_unpacker *u) {
+    int rc;
+    u->stage = STAGE_KIND;
+    if (u->has_metadata && u->metadata_callback != NULL) {
+        rc = u->metadata_callback(u->sink.context, u->path, u->kind, &u->metadata);
+        if (rc != 0) {
+            return sink_failed(u, rc);
+        }
+    }
+    return 0;
+}
+
 /* The entry's header is complete: hand it on, and move to its bytes or
  * the next entry. */
 static int entry_ready(adapt_archive_unpacker *u) {
@@ -192,16 +282,14 @@ static int entry_ready(adapt_archive_unpacker *u) {
         if (rc != 0) {
             return sink_failed(u, rc);
         }
-        u->stage = STAGE_KIND;
-        return 0;
+        return entry_done(u);
     }
     if (u->kind == ADAPT_ARCHIVE_SYMLINK) {
         rc = u->sink.symlink(u->sink.context, u->path, u->target);
         if (rc != 0) {
             return sink_failed(u, rc);
         }
-        u->stage = STAGE_KIND;
-        return 0;
+        return entry_done(u);
     }
     rc = u->sink.file_open(u->sink.context, u->path, u->size);
     if (rc != 0) {
@@ -213,11 +301,20 @@ static int entry_ready(adapt_archive_unpacker *u) {
         if (rc != 0) {
             return sink_failed(u, rc);
         }
-        u->stage = STAGE_KIND;
+        return entry_done(u);
     } else {
         u->stage = STAGE_DATA;
     }
     return 0;
+}
+
+static int entry_header_ready(adapt_archive_unpacker *u) {
+    if (u->has_metadata) {
+        u->field = 0;
+        u->stage = STAGE_METADATA;
+        return 0;
+    }
+    return entry_ready(u);
 }
 
 int adapt_archive_unpack(void *unpacker, const uint8_t *buf, size_t len) {
@@ -235,7 +332,9 @@ int adapt_archive_unpack(void *unpacker, const uint8_t *buf, size_t len) {
         int rc;
         switch (u->stage) {
             case STAGE_MAGIC:
-                if (b != (uint8_t)ADAPT_ARCHIVE_MAGIC[u->field]) {
+                if (u->field == ADAPT_ARCHIVE_MAGIC_BYTES - 1 && b == '2') {
+                    u->has_metadata = 1;
+                } else if (b != (uint8_t)ADAPT_ARCHIVE_MAGIC[u->field]) {
                     return refuse(u, "signature is not an adapt archive's", at);
                 }
                 if (++u->field == ADAPT_ARCHIVE_MAGIC_BYTES) {
@@ -297,7 +396,7 @@ int adapt_archive_unpack(void *unpacker, const uint8_t *buf, size_t len) {
                         u->target_len = 0;
                         u->stage = STAGE_TARGET_LEN;
                     } else {
-                        rc = entry_ready(u);
+                        rc = entry_header_ready(u);
                         if (rc != 0) {
                             return rc;
                         }
@@ -308,7 +407,7 @@ int adapt_archive_unpack(void *unpacker, const uint8_t *buf, size_t len) {
                 u->size |= (uint64_t)b << (8 * u->field);
                 i++;
                 if (++u->field == 8) {
-                    rc = entry_ready(u);
+                    rc = entry_header_ready(u);
                     if (rc != 0) {
                         return rc;
                     }
@@ -330,7 +429,10 @@ int adapt_archive_unpack(void *unpacker, const uint8_t *buf, size_t len) {
                     if (rc != 0) {
                         return sink_failed(u, rc);
                     }
-                    u->stage = STAGE_KIND;
+                    rc = entry_done(u);
+                    if (rc != 0) {
+                        return rc;
+                    }
                 }
                 break;
             }
@@ -354,6 +456,19 @@ int adapt_archive_unpack(void *unpacker, const uint8_t *buf, size_t len) {
                 i++;
                 if (u->target_at == u->target_len) {
                     u->target[u->target_at] = '\0';
+                    rc = entry_header_ready(u);
+                    if (rc != 0) {
+                        return rc;
+                    }
+                }
+                break;
+            case STAGE_METADATA:
+                u->metadata_bytes[u->field++] = b;
+                i++;
+                if (u->field == ADAPT_METADATA_BYTES) {
+                    if (!adapt_metadata_read(u->metadata_bytes, &u->metadata)) {
+                        return refuse(u, "invalid permission bits or timestamp nanoseconds", at);
+                    }
                     rc = entry_ready(u);
                     if (rc != 0) {
                         return rc;

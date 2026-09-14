@@ -4,17 +4,28 @@ exact messages and reports each command gives, the bytes `info` describes,
 and the file a pipe and a file encode to."""
 
 import os
+import re
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 
 CADAPT = Path(__file__).resolve().parent.parent / "build" / "cadapt"
 VECTORS = Path(__file__).resolve().parent / "vectors"
 LOW_MEMORY = str(16 << 20)
 SOURCE = b"optional verification\n" * 128
+
+
+def payload_stream(container: bytes) -> bytes:
+    """Remove only validated filesystem metadata for legacy stream comparisons."""
+    if container[4] not in (16, 17, 18):
+        return container
+    base = 8 + (2 if container[7] & 0x80 else 0)
+    assert zlib.crc32(container[:base + 28]) == int.from_bytes(container[base + 28:base + 32], "little")
+    return container[:4] + bytes([container[4] - 3]) + container[5:base] + container[base + 32:]
 
 
 class CodecTest(unittest.TestCase):
@@ -72,7 +83,7 @@ class VerificationTest(CodecTest):
                 )
                 self.assertEqual(verified.returncode, 0, verified.stderr)
                 self.assertIn(b", verified", verified.stderr)
-                self.assertEqual(output.read_bytes(), verified_output.read_bytes())
+                self.assertEqual(payload_stream(output.read_bytes()), payload_stream(verified_output.read_bytes()))
                 self.assert_roundtrip(output.read_bytes())
 
     def test_default_pipe_succeeds_with_one_model_budget(self) -> None:
@@ -109,12 +120,11 @@ class VerificationTest(CodecTest):
         self.assertEqual(plain.returncode, 0, plain.stderr)
         self.assertEqual(explicit.returncode, 0, explicit.stderr)
         self.assertIn(b"not verified (--no-verify)", explicit.stderr)
-        self.assertEqual(plain.stdout, explicit.stdout)
+        self.assertEqual(payload_stream(plain.stdout), payload_stream(explicit.stdout))
 
     def test_published_files_take_the_mode_the_umask_leaves(self) -> None:
-        """A staged output is published with the permissions any other
-        tool would give a new file: 0666 less the umask, not the staging
-        file's private mode."""
+        """New containers honor umask; restored named files recover the
+        source mode. Legacy streams continue to honor umask when decoded."""
         for umask, mode in ((0o022, 0o644), (0o002, 0o664), (0o077, 0o600)):
             with self.subTest(umask=oct(umask)):
                 encoded = self.root / f"mode-{umask:o}.adpt"
@@ -126,8 +136,12 @@ class VerificationTest(CodecTest):
                 ):
                     run = self.run_codec(*args, umask=umask)
                     self.assertEqual(run.returncode, 0, run.stderr)
-                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), mode, f"{args} left {path} at {oct(path.stat().st_mode)}")
+                    wanted = stat.S_IMODE(self.source.stat().st_mode) if args[0] == "decode" else mode
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), wanted, f"{args} left {path} at {oct(path.stat().st_mode)}")
                 self.assertEqual(decoded.read_bytes(), SOURCE)
+                legacy = self.run_codec("decode", "-", "-o", decoded, "--force", data=payload_stream(encoded.read_bytes()), umask=umask)
+                self.assertEqual(legacy.returncode, 0, legacy.stderr)
+                self.assertEqual(stat.S_IMODE(decoded.stat().st_mode), mode)
 
     def test_conflicting_verification_flags_are_rejected_before_output(self) -> None:
         for flags in (("--verify", "--no-verify"), ("--no-verify", "--verify")):
@@ -138,6 +152,136 @@ class VerificationTest(CodecTest):
                 self.assertIn(b"cannot be used together", encoded.stderr)
                 self.assertFalse(output.exists())
                 self.assertEqual(encoded.stdout, b"")
+
+
+@unittest.skipIf(os.name == "nt", "POSIX modes and nanosecond timestamps")
+class MetadataTest(CodecTest):
+    """Restoration obtains metadata from the container, not its filesystem."""
+
+    def test_single_file_metadata_survives_copy_and_source_removal(self):
+        for profile in ((), ("--fast",), ("--max",)):
+            with self.subTest(profile=profile):
+                self.source.write_bytes(SOURCE)
+                self.source.chmod(0o751)
+                times = (1_500_000_000_123_456_789, -100_000_000_987_654_321)
+                os.utime(self.source, ns=times)
+                encoded = self.run_codec("encode", self.source, "-o", "-", "--verify", *profile)
+                self.assertEqual(encoded.returncode, 0, encoded.stderr)
+                self.source.unlink()
+                container = self.root / "copied.adpt"
+                container.write_bytes(encoded.stdout)
+                container.chmod(0o600)
+                restored = self.root / "restored.bin"
+                decoded = self.run_codec("decode", container, "-o", restored, "--force")
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                st = restored.stat()
+                self.assertEqual(stat.S_IMODE(st.st_mode), 0o751)
+                self.assertEqual((st.st_atime_ns, st.st_mtime_ns), times)
+                self.assertEqual(restored.read_bytes(), SOURCE)
+                piped = self.run_codec("decode", "-", data=encoded.stdout)
+                self.assertEqual(piped.returncode, 0, piped.stderr)
+                self.assertEqual(piped.stdout, SOURCE)
+
+    def test_folder_metadata_includes_root_and_readonly_directories(self):
+        folder = self.root / "tree"
+        (folder / "nested" / "empty").mkdir(parents=True)
+        (folder / "nested" / "data").write_bytes(SOURCE)
+        os.symlink("data", folder / "nested" / "link")
+        expected = {}
+        for index, (rel, mode) in enumerate((("nested/empty", 0o500), ("nested/data", 0o640),
+                                             ("nested/link", 0o777), ("nested", 0o550), ("", 0o750))):
+            path = folder / rel
+            if not path.is_symlink():
+                path.chmod(mode)
+            times = (1_400_000_000_123_456_789 + index, 1_450_000_000_987_654_321 + index)
+            os.utime(path, ns=times, follow_symlinks=False)
+            expected[rel] = (mode, *times)
+        container = self.root / "tree.adpt"
+        encoded = self.run_codec("encode", folder, "-o", container, "--verify", "--max-memory", LOW_MEMORY)
+        self.assertEqual(encoded.returncode, 0, encoded.stderr)
+        restored = self.root / "restored"
+        decoded = self.run_codec("decode", container, "-o", restored)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        # Inspect timestamps before listing directories or reading content.
+        for rel, wanted in expected.items():
+            st = (restored / rel).lstat()
+            self.assertEqual((stat.S_IMODE(st.st_mode), st.st_atime_ns, st.st_mtime_ns), wanted, rel)
+        self.assertEqual((restored / "nested" / "data").read_bytes(), SOURCE)
+        self.assertEqual(os.readlink(restored / "nested" / "link"), "data")
+        self.assertTrue((restored / "nested" / "empty").is_dir())
+
+    def test_metadata_damage_is_rejected_without_publishing(self):
+        encoded = self.run_codec("encode", self.source, "-o", "-")
+        self.assertEqual(encoded.returncode, 0, encoded.stderr)
+        self.assertIn(encoded.stdout[4], (16, 17, 18))
+        damaged = bytearray(encoded.stdout)
+        metadata_at = 8 + (2 if damaged[7] & 0x80 else 0)
+        damaged[metadata_at] ^= 1
+        output = self.root / "refused"
+        decoded = self.run_codec("decode", "-", "-o", output, data=damaged)
+        self.assertEqual(decoded.returncode, 1, decoded.stderr)
+        self.assertFalse(output.exists())
+        self.assertEqual([], list(self.root.glob("*.part")))
+
+    def test_unrepresentable_timestamps_refuse_publication_and_clean_readonly_tree(self):
+        folder = self.root / "readonly"
+        (folder / "nested").mkdir(parents=True)
+        (folder / "nested" / "data").write_bytes(SOURCE)
+        (folder / "nested").chmod(0o500)
+        for source in (self.source, folder):
+            with self.subTest(source=source.name):
+                encoded = self.run_codec("encode", source, "-o", "-")
+                self.assertEqual(encoded.returncode, 0, encoded.stderr)
+                invalid = bytearray(encoded.stdout)
+                base = 8 + (2 if invalid[7] & 0x80 else 0)
+                # A valid signed container timestamp outside filesystem ranges.
+                invalid[base + 16:base + 24] = ((1 << 63) - 1).to_bytes(8, "little")
+                invalid[base + 28:base + 32] = zlib.crc32(invalid[:base + 28]).to_bytes(4, "little")
+                output = self.root / (source.name + "-refused")
+                if source == self.source:
+                    output.write_bytes(b"keep existing output")
+                decoded = self.run_codec("decode", "-", "-o", output, "--force", data=invalid)
+                self.assert_failure(decoded, b"metadata")
+                if source == self.source:
+                    self.assertEqual(output.read_bytes(), b"keep existing output")
+                else:
+                    self.assertFalse(output.exists())
+                self.assertEqual([], [p for p in self.root.iterdir() if ".part" in p.name])
+
+
+class MemoryContractTest(CodecTest):
+    def test_one_mib_refusal_matches_documented_minimum(self):
+        help_run = self.run_codec("--help")
+        self.assertEqual(help_run.returncode, 0, help_run.stderr)
+        help_text = help_run.stdout + help_run.stderr
+        self.assertNotIn(b"never a refused input", help_text)
+        advertised = re.search(rb"minimum\s+normal single-model budget is (\d+) bytes", help_text)
+        self.assertIsNotNone(advertised, help_text)
+        for profile in ((), ("--fast",), ("--max",)):
+            output = self.root / "too-small.adpt"
+            run = self.run_codec("encode", self.source, "-o", output, "--max-memory", str(1 << 20), *profile)
+            self.assert_failure(run, b"memory budget exceeded")
+            match = re.search(rb"need (\d+) bytes, limit (\d+)", run.stderr)
+            self.assertIsNotNone(match, run.stderr)
+            self.assertGreater(int(match[1]), 1 << 20)
+            if not profile:
+                self.assertEqual(int(match[1]), int(advertised[1]))
+            self.assertEqual(int(match[2]), 1 << 20)
+            self.assertFalse(output.exists())
+            self.assertEqual([], list(self.root.glob("*.part")))
+
+        # The documented floor is usable, and one byte less is refused.
+        for budget, success in ((int(advertised[1]), True), (int(advertised[1]) - 1, False)):
+            with self.subTest(budget=budget):
+                run = self.run_codec("encode", self.source, "-o", "-", "--max-memory", str(budget))
+                if success:
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    decoded = self.run_codec("decode", "-", "--max-memory", str(budget), data=run.stdout)
+                    self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                    self.assertEqual(decoded.stdout, SOURCE)
+                else:
+                    self.assert_failure(run, b"memory budget exceeded")
+                    self.assertEqual(run.stdout, b"")
 
 
 def snapshot(root: Path) -> dict:
@@ -196,7 +340,13 @@ class FolderTest(unittest.TestCase):
         self.assertEqual([], [p for p in self.root.iterdir() if ".part" in p.name])
 
     def test_folder_container_is_deterministic_and_named_after_the_folder(self) -> None:
+        # Reading can advance atime, which is part of the input now. Restore
+        # the same metadata before each encode, including dangling links.
+        paths = [self.folder, *self.folder.rglob("*")]
+        times = [(path, path.lstat()) for path in paths]
         first = self.run_codec("encode", self.folder, "-o", self.root / "one.adpt", "--no-verify")
+        for path, st in times:
+            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns), follow_symlinks=False)
         second = self.run_codec("encode", str(self.folder) + os.sep, "--no-verify")
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)
@@ -234,6 +384,9 @@ class FolderTest(unittest.TestCase):
         self.assertEqual(self.run_codec("encode", self.folder / "a.txt", "-o", plain, "--no-verify").returncode, 0)
         flagged = bytearray(plain.read_bytes())
         flagged[5] |= 0x80
+        # Keep the new header checksum valid to exercise the archive parser.
+        base = 8 + (2 if flagged[7] & 0x80 else 0)
+        flagged[base + 28:base + 32] = zlib.crc32(flagged[:base + 28]).to_bytes(4, "little")
         (self.root / "flagged.adpt").write_bytes(flagged)
         refused = self.run_codec("decode", self.root / "flagged.adpt", "-o", self.root / "flagged")
         self.assertEqual(refused.returncode, 1, refused.stderr)
@@ -537,7 +690,7 @@ class CommandTest(CodecTest):
     def test_encode_switches_and_reports(self) -> None:
         text = VECTORS / "text.bin"
         # a file to standard output, and the profiles' version bytes
-        for flags, version in (((), 13), (("--fast",), 14), (("--max",), 15)):
+        for flags, version in (((), 16), (("--fast",), 17), (("--max",), 18)):
             with self.subTest(flags=flags):
                 run = self.run_codec("encode", text, "-o", "-", *flags)
                 self.assertEqual(run.returncode, 0, run.stderr)
@@ -548,7 +701,7 @@ class CommandTest(CodecTest):
         run = self.run_codec("encode", VECTORS / "segmented.bin", "-o", "-", "--threads", "2", "--segment-bytes", "262144")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn(b", 2 segments on 1 thread\n", run.stderr)
-        self.assertEqual(run.stdout, (VECTORS / "segmented.adpt").read_bytes())
+        self.assertEqual(payload_stream(run.stdout), (VECTORS / "segmented.adpt").read_bytes())
         run = self.run_codec("encode", "-", "--threads", "2", "--segment-bytes", "262144", data=(VECTORS / "segmented.bin").read_bytes())
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn(b"2 segments on 1 thread (a pipe is read in order)", run.stderr)
@@ -566,8 +719,8 @@ class CommandTest(CodecTest):
         empty.write_bytes(b"")
         run = self.run_codec("encode", empty, "-o", "-", "--verify")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(run.stdout, (VECTORS / "empty.adpt").read_bytes())
-        self.assertIn(b"0 bytes -> 21 bytes (0.00%), verified", run.stderr)
+        self.assertEqual(payload_stream(run.stdout), (VECTORS / "empty.adpt").read_bytes())
+        self.assertIn(b"0 bytes -> 53 bytes (0.00%), verified", run.stderr)
 
 
 if __name__ == "__main__":

@@ -391,10 +391,127 @@ static void test_malformed(void) {
     }
 }
 
+static int rec_metadata(void *context, const char *path, uint8_t kind, const adapt_metadata *m) {
+    record *r = context;
+    char line[300];
+    CHECK(!r->open);
+    CHECK(m->mode == 0640 && m->atime_seconds == -1 && m->atime_nanoseconds == 1234);
+    CHECK(m->mtime_seconds == 0 && m->mtime_nanoseconds == 999999999u);
+    if (r->fail_on == -(int)kind) {
+        return 77;
+    }
+    snprintf(line, sizeof(line), "metadata %s", path);
+    return note(r, line);
+}
+
+static void test_metadata(void) {
+    static const uint8_t encoded[] = {
+        0xa0, 1, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255,
+        0xd2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0xc9, 0x9a, 0x3b
+    };
+    adapt_metadata m = {0640, -1, 1234, 0, 999999999u}, decoded;
+    uint8_t bytes[ADAPT_METADATA_BYTES], short_out[1] = {99};
+    build b;
+    size_t n, piece, offset, at;
+    int kind;
+    CHECK(adapt_metadata_write(&m, bytes) && memcmp(bytes, encoded, sizeof(encoded)) == 0);
+    CHECK(adapt_metadata_read(encoded, &decoded));
+    CHECK(decoded.mode == m.mode && decoded.atime_seconds == -1 && decoded.mtime_nanoseconds == 999999999u);
+    CHECK(!adapt_metadata_write(NULL, bytes) && !adapt_metadata_write(&m, NULL));
+    CHECK(!adapt_metadata_read(NULL, &decoded) && !adapt_metadata_read(bytes, NULL));
+    m.atime_seconds = INT64_MIN;
+    m.mtime_seconds = INT64_MAX;
+    CHECK(adapt_metadata_write(&m, bytes) && adapt_metadata_read(bytes, &decoded));
+    CHECK(decoded.atime_seconds == INT64_MIN && decoded.mtime_seconds == INT64_MAX);
+    m.atime_seconds = -1;
+    m.mtime_seconds = 0;
+    m.mode = 010000;
+    CHECK(!adapt_metadata_write(&m, bytes));
+    CHECK(adapt_archive_entry_metadata(1, "d", 0, NULL, &m, NULL, 0) == 0);
+    m.mode = 0640;
+    m.atime_nanoseconds = 1000000000;
+    CHECK(!adapt_metadata_write(&m, bytes));
+    m.atime_nanoseconds = 1234;
+    m.mtime_nanoseconds = 1000000000;
+    CHECK(!adapt_metadata_write(&m, bytes));
+    m.mtime_nanoseconds = 999999999u;
+    CHECK(adapt_archive_entry_metadata(9, "d", 0, NULL, &m, NULL, 0) == 0);
+    CHECK(adapt_archive_entry_metadata(1, "d", 0, NULL, &m, short_out, 1) == 4 + ADAPT_METADATA_BYTES);
+    CHECK(short_out[0] == 99);
+    adapt_archive_set_metadata_callback(NULL, rec_metadata);
+
+    b.len = 0;
+    put(&b, ADAPT_ARCHIVE_METADATA_MAGIC, ADAPT_ARCHIVE_MAGIC_BYTES);
+    n = adapt_archive_entry_metadata(1, "d", 0, NULL, &m, b.bytes + b.len, sizeof(b.bytes) - b.len);
+    b.len += n;
+    n = adapt_archive_entry_metadata(2, "d/f", 3, NULL, &m, b.bytes + b.len, sizeof(b.bytes) - b.len);
+    b.len += n;
+    put(&b, "abc", 3);
+    n = adapt_archive_entry_metadata(2, "d/empty", 0, NULL, &m, b.bytes + b.len, sizeof(b.bytes) - b.len);
+    b.len += n;
+    n = adapt_archive_entry_metadata(3, "d/link", 0, "f", &m, b.bytes + b.len, sizeof(b.bytes) - b.len);
+    b.len += n;
+    end(&b);
+    for (piece = 1; piece <= b.len; piece++) {
+        record r = {{0}, 0, 0, 0, 0};
+        adapt_archive_unpacker *u = adapt_archive_unpacker_new(sink_of(&r));
+        CHECK(u != NULL);
+        adapt_archive_set_metadata_callback(u, rec_metadata);
+        for (at = 0; at < b.len; at += n) {
+            n = piece < b.len - at ? piece : b.len - at;
+            CHECK(adapt_archive_unpack(u, b.bytes + at, n) == 0);
+        }
+        CHECK(adapt_archive_finish(u, NULL) == ADAPT_OK);
+        CHECK(adapt_archive_entries(u) == 4);
+        CHECK(strstr(r.log, "dir d\nmetadata d\nopen d/f") != NULL);
+        CHECK(strstr(r.log, "close\nmetadata d/f\n") != NULL);
+        CHECK(strstr(r.log, "close\nmetadata d/empty\n") != NULL);
+        CHECK(strstr(r.log, "link d/link -> f\nmetadata d/link\n") != NULL);
+        adapt_archive_unpacker_free(u);
+    }
+    for (kind = 1; kind <= 3; kind++) {
+        record r = {{0}, 0, -kind, 0, 0};
+        adapt_archive_unpacker *u = adapt_archive_unpacker_new(sink_of(&r));
+        adapt_archive_set_metadata_callback(u, rec_metadata);
+        CHECK(adapt_archive_unpack(u, b.bytes, b.len) == 77);
+        CHECK(adapt_archive_unpack(u, b.bytes, b.len) == 77);
+        adapt_archive_unpacker_free(u);
+    }
+    /* Content-only consumers may ignore validated metadata. */
+    {
+        record r = {{0}, 0, 0, 0, 0};
+        adapt_archive_unpacker *u;
+        CHECK(feed(b.bytes, b.len, 1, &r, &u) == 0);
+        CHECK(adapt_archive_finish(u, NULL) == ADAPT_OK);
+        adapt_archive_unpacker_free(u);
+    }
+    /* Each invalid metadata field is rejected before creating the entry. */
+    for (offset = 3; offset <= 27; offset += 12) {
+        record r = {{0}, 0, 0, 0, 0};
+        adapt_archive_unpacker *u;
+        uint8_t old = b.bytes[12 + offset];
+        b.bytes[12 + offset] = 255;
+        CHECK(feed(b.bytes, b.len, 1, &r, &u) == ADAPT_ARCHIVE_MALFORMED);
+        CHECK(r.calls == 0);
+        CHECK(adapt_archive_finish(u, NULL) == ADAPT_ERROR_BAD_ARCHIVE);
+        adapt_archive_unpacker_free(u);
+        b.bytes[12 + offset] = old;
+    }
+    for (offset = 12; offset < 12 + ADAPT_METADATA_BYTES; offset++) {
+        record r = {{0}, 0, 0, 0, 0};
+        adapt_archive_unpacker *u;
+        CHECK(feed(b.bytes, offset, 1, &r, &u) == 0);
+        CHECK(adapt_archive_finish(u, NULL) == ADAPT_ERROR_BAD_ARCHIVE);
+        CHECK(r.calls == 0);
+        adapt_archive_unpacker_free(u);
+    }
+}
+
 int main(void) {
     test_paths_and_entries();
     test_well_formed();
     test_malformed();
+    test_metadata();
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);
         return 1;
