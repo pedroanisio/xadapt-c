@@ -121,11 +121,36 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   instead of silently rounding or dropping it. Windows currently records
   the C runtime's modes and whole-second timestamps; it rejects unsupported
   modes, nanosecond timestamps and symlinks. This release's metadata tests
-  run on POSIX; Windows behavior has not been validated. Creation/status-change
-  times, ownership, ACLs, extended attributes, hard-link identity and sparse
-  allocation are not preserved yet; this implements the permission and
-  access/modification-time portion of `FMT-7` in
-  [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md).
+  run on POSIX; Windows behavior has not been validated.
+- A folder's **hard links, holes and extended attributes** travel too
+  (`FMT-7` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md); archive version
+  3, which `info` still reports as "a folder"). The portability rules:
+  - *Hard links.* Names that share one inode inside the folder are packed
+    once, the first name (in the archive's byte order) carrying the bytes,
+    every later name a link to it, and are restored as hard links. A name
+    whose other names lie outside the folder is packed as a plain file. On
+    Windows a hard-link entry is restored as a copy of its target's bytes.
+  - *Holes.* Where the platform can tell holes from data (`SEEK_HOLE`:
+    Linux, macOS, FreeBSD), a file with holes is packed as its data extents
+    only and restored to its apparent length with the holes left as holes;
+    a filesystem that keeps no holes fills them with zeros, which reads the
+    same. A file of more than 65,535 extents is packed dense. Windows packs
+    every file dense and restores extents by seeking, so holes come back as
+    zeros.
+  - *Extended attributes and ACLs.* On Linux, `user.*` attributes and the
+    two POSIX ACL attributes (`system.posix_acl_access`,
+    `system.posix_acl_default`) are packed for every entry and restored by
+    name, each read back after it is set; a filesystem that cannot hold an
+    attribute fails restoration rather than dropping it. `security.*` and
+    `trusted.*` belong to the kernel and to root and are left alone. A
+    directory's attributes are applied after its children, with its
+    metadata, so a default ACL is not inherited by children the archive
+    records differently. On macOS the attributes `listxattr` reports are
+    packed and restored; macOS ACLs are not attributes there and are not
+    preserved. Windows packs no attributes and refuses to restore an archive
+    that carries any. Attribute values are limited to 64 KiB.
+  - *Not preserved.* Creation and status-change times (filesystem-managed),
+    and ownership (which needs root to restore and is not in `FMT-7`).
 - Encoding standard input has no source filesystem metadata. Decoding to
   standard output emits only bytes. Older containers remain readable; when
   they lack metadata, restored files take the permissions allowed by umask.

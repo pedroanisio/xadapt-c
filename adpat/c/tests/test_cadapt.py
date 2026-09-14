@@ -6,6 +6,7 @@ and the file a pipe and a file encode to."""
 import os
 import random
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -452,6 +453,77 @@ class FolderTest(unittest.TestCase):
         self.assertEqual(self.run_codec("decode", container, "-o", self.root / "asfile", "--force").returncode, 0)
         self.assertEqual(snapshot(self.root / "asfile"), snapshot(self.folder))
         self.assertEqual([], [p for p in self.root.iterdir() if ".part" in p.name])
+
+    @unittest.skipIf(os.name == "nt", "hard links, holes and attributes are POSIX things here")
+    def test_folder_keeps_hard_links_holes_attributes_and_acls(self) -> None:
+        """FMT-7: two names of one inode come back as two names of one
+        inode; a file's holes stay holes; user attributes and, where the
+        platform stores them as attributes, POSIX ACLs — including a
+        directory's default ACL — come back verified; and the container is
+        the same bytes for the same folder."""
+        folder = self.folder
+        os.link(folder / "a.txt", folder / "sub" / "a-again.txt")
+        os.link(folder / "a.txt", folder / "a-third.txt")
+        sparse = folder / "sub" / "holes.bin"
+        with open(sparse, "wb") as f:
+            f.truncate(3 << 20)
+            f.seek(1 << 20)
+            f.write(b"middle")
+            f.seek((3 << 20) - 3)
+            f.write(b"end")
+        with open(folder / "sub" / "allhole.bin", "wb") as f:
+            f.truncate(1 << 20)
+        try:
+            os.setxattr(folder / "a.txt", "user.note", b"hello \x00 world")
+            os.setxattr(folder / "a.txt", "user.empty", b"")
+            os.setxattr(folder / "sub", "user.dir", b"yes")
+            xattrs = True
+        except OSError:
+            xattrs = False
+        acls = shutil.which("setfacl") is not None and shutil.which("getfacl") is not None
+        if acls:
+            acls = subprocess.run(["setfacl", "-m", "u:nobody:r", folder / "a.txt"], capture_output=True).returncode == 0
+            acls = acls and subprocess.run(["setfacl", "-d", "-m", "u:nobody:rx", folder / "sub"], capture_output=True).returncode == 0
+        container = self.root / "tree.adpt"
+        paths = [folder, *folder.rglob("*")]
+        stamps = [(path, path.lstat()) for path in paths]
+        encoded = self.run_codec("encode", folder, "-o", container, "--verify")
+        self.assertEqual(encoded.returncode, 0, encoded.stderr)
+        # a hole is not stored: the folder is a few KiB of bytes plus 4 MiB of holes
+        self.assertLess(container.stat().st_size, 1 << 20)
+        restored = self.root / "back"
+        decoded = self.run_codec("decode", container, "-o", restored)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        self.assertEqual(snapshot(restored), snapshot(folder))
+        # hard links: one inode, three names
+        a, again, third = (restored / "a.txt").stat(), (restored / "sub" / "a-again.txt").stat(), (restored / "a-third.txt").stat()
+        self.assertEqual((again.st_ino, third.st_ino), (a.st_ino, a.st_ino))
+        self.assertEqual(a.st_nlink, 3)
+        # holes: the apparent length, the bytes, and far fewer blocks than bytes
+        for name in ("holes.bin", "allhole.bin"):
+            st = (restored / "sub" / name).stat()
+            self.assertEqual(st.st_size, (folder / "sub" / name).stat().st_size)
+            self.assertLess(st.st_blocks * 512, st.st_size // 4, name)
+        self.assertEqual((restored / "sub" / "holes.bin").read_bytes(), sparse.read_bytes())
+        if xattrs:
+            self.assertEqual(sorted(os.listxattr(restored / "a.txt")), sorted(os.listxattr(folder / "a.txt")))
+            self.assertEqual(os.getxattr(restored / "a.txt", "user.note"), b"hello \x00 world")
+            self.assertEqual(os.getxattr(restored / "a.txt", "user.empty"), b"")
+            self.assertEqual(os.getxattr(restored / "sub", "user.dir"), b"yes")
+            self.assertEqual(os.getxattr(restored / "sub" / "a-again.txt", "user.note"), b"hello \x00 world")
+        if acls:
+            for rel in ("a.txt", "sub"):
+                want = subprocess.run(["getfacl", "-c", "-p", folder / rel], capture_output=True, text=True).stdout
+                got = subprocess.run(["getfacl", "-c", "-p", restored / rel], capture_output=True, text=True).stdout
+                self.assertEqual(got, want, rel)
+            self.assertIn("default:user:nobody:r-x", subprocess.run(["getfacl", "-c", restored / "sub"], capture_output=True, text=True).stdout)
+        # the same folder, the same bytes; the source's access times restored first
+        first = container.read_bytes()
+        for path, st in stamps:
+            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns), follow_symlinks=False)
+        second = self.run_codec("encode", folder, "-o", self.root / "again.adpt", "--no-verify")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual((self.root / "again.adpt").read_bytes(), first)
 
     @unittest.skipIf(os.name == "nt", "a fifo is a POSIX thing")
     def test_an_entry_of_another_kind_refuses_the_folder(self) -> None:

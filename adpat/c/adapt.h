@@ -478,34 +478,71 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len);
  * Archives: a folder as one stream
  *
  * A folder is coded as a container flagged ADAPT_ARCHIVE_FLAG whose
- * decoded bytes are an adapt archive: ADAPT_ARCHIVE_MAGIC (version 1) or
- * ADAPT_ARCHIVE_METADATA_MAGIC (version 2), then entries,
- * then one ADAPT_ARCHIVE_END byte. An entry is a kind byte, a path (its
- * length as a little-endian u16, then its bytes: components joined by '/',
- * relative to the folder, none empty, none '.' or '..', no NUL) and, for
- * a file, its length as a little-endian u64 and then its bytes; for a
- * symbolic link, its target (u16 length, bytes). Version 2 appends a
- * 28-byte adapt_metadata record after the entry header, before file data;
- * the folder root's metadata lives in the outer container header.
- * Entries come depth first,
- * siblings in byte order of their names, a directory before what it
- * holds, so identical contents and metadata give identical archive bytes.
- * An empty directory is an entry like any other; the folder itself is
- * not one. The unpacker checks every rule and hands the entries to a sink
- * of callbacks as their bytes arrive, so a folder of any size is restored
- * with bounded parser memory. A filesystem sink may retain directory
- * metadata until children are restored; this bookkeeping is additional.
+ * decoded bytes are an adapt archive: ADAPT_ARCHIVE_MAGIC (version 1),
+ * ADAPT_ARCHIVE_METADATA_MAGIC (version 2) or ADAPT_ARCHIVE_FULL_MAGIC
+ * (version 3, what the encoder writes), then entries, then one
+ * ADAPT_ARCHIVE_END byte. An entry is a kind byte, a path (its length as
+ * a little-endian u16, then its bytes: components joined by '/', relative
+ * to the folder, none empty, none '.' or '..', no NUL) and, for a file,
+ * its length as a little-endian u64 and then its bytes; for a symbolic
+ * link, its target (u16 length, bytes). Version 2 appends a 28-byte
+ * adapt_metadata record after the entry header, before file data; the
+ * folder root's metadata lives in the outer container header.
+ *
+ * Version 3 (FMT-7) adds two kinds and one trailer to every entry:
+ *   - a hard link (ADAPT_ARCHIVE_HARDLINK): the path, then the archive
+ *     path of an earlier file or sparse-file entry (u16 length, bytes,
+ *     the path rules), whose inode it shares; it carries no metadata or
+ *     attributes of its own, having its target's;
+ *   - a sparse file (ADAPT_ARCHIVE_SPARSE): the path, its apparent
+ *     length as a u64, the number of data extents as a u32 (at most
+ *     ADAPT_ARCHIVE_EXTENTS_MAX), the metadata record, then each extent
+ *     as its offset and length (two u64) followed by its bytes; extents
+ *     come in ascending order, none empty, none overlapping, none past
+ *     the length, and the bytes between them are holes;
+ *   - after an entry's bytes (after the metadata for a directory or a
+ *     link), its extended attributes: a u16 count, then per attribute a
+ *     u16 name length (1 to ADAPT_ARCHIVE_ATTRIBUTE_NAME_MAX), the name
+ *     (no NUL), a u32 value length (at most
+ *     ADAPT_ARCHIVE_ATTRIBUTE_VALUE_MAX) and the value. Names come in
+ *     byte order, none twice. POSIX ACLs travel here as the attributes
+ *     the platform stores them in (system.posix_acl_access and
+ *     system.posix_acl_default on Linux).
+ * Entries come depth first, siblings in byte order of their names, a
+ * directory before what it holds, so identical contents, metadata,
+ * links, holes and attributes give identical archive bytes. An empty
+ * directory is an entry like any other; the folder itself is not one.
+ * The unpacker checks every rule and hands the entries to a sink of
+ * callbacks as their bytes arrive — each extent before its bytes, each
+ * attribute as it completes — so a folder of any size is restored with
+ * bounded parser memory: one path, one link target, one attribute. A
+ * filesystem sink may retain directory metadata until children are
+ * restored; this bookkeeping is additional.
  * --------------------------------------------------------------------- */
 
 #define ADAPT_ARCHIVE_MAGIC "ADPTARC1"
 #define ADAPT_ARCHIVE_METADATA_MAGIC "ADPTARC2"
+#define ADAPT_ARCHIVE_FULL_MAGIC "ADPTARC3"
 #define ADAPT_ARCHIVE_MAGIC_BYTES 8u
 #define ADAPT_ARCHIVE_END 0u
 #define ADAPT_ARCHIVE_DIRECTORY 1u
 #define ADAPT_ARCHIVE_FILE 2u
 #define ADAPT_ARCHIVE_SYMLINK 3u
+#define ADAPT_ARCHIVE_HARDLINK 4u
+#define ADAPT_ARCHIVE_SPARSE 5u
 /* The most bytes a path or a link target may take. */
 #define ADAPT_ARCHIVE_PATH_MAX 65535u
+/* The most data extents a sparse entry may list, the longest attribute
+ * name, and the longest attribute value (Linux's XATTR_SIZE_MAX). */
+#define ADAPT_ARCHIVE_EXTENTS_MAX 65535u
+#define ADAPT_ARCHIVE_ATTRIBUTE_NAME_MAX 255u
+#define ADAPT_ARCHIVE_ATTRIBUTE_VALUE_MAX 65536u
+
+/* One data extent of a sparse file: where its bytes start and how many. */
+typedef struct adapt_extent {
+    uint64_t offset;
+    uint64_t length;
+} adapt_extent;
 
 /* Whether a path may name an archive entry: 1 to ADAPT_ARCHIVE_PATH_MAX
  * bytes, components joined by '/', none empty, '.' or '..', no NUL. */
@@ -519,15 +556,35 @@ int adapt_archive_path_valid(const char *path);
  * ADAPT_ARCHIVE_END byte; a caller emits those itself. */
 size_t adapt_archive_entry(uint8_t kind, const char *path, uint64_t size, const char *target, uint8_t *out, size_t cap);
 /* Version 2 appends metadata after each version-1 entry header. Its root
- * metadata is in the outer container header. Both archive versions decode. */
+ * metadata is in the outer container header. Every archive version decodes. */
 size_t adapt_archive_entry_metadata(uint8_t kind, const char *path, uint64_t size, const char *target,
                                     const adapt_metadata *metadata, uint8_t *out, size_t cap);
+
+/* A version-3 entry's header: for a hard link, `target` is the earlier
+ * entry's archive path and `metadata` is ignored; for a sparse file,
+ * `size` is the apparent length and `extents` the `extent_count` data
+ * extents, checked against the rules above; the bytes of each extent
+ * follow its own offset and length, which adapt_archive_extent() writes.
+ * Returns the header's length, or 0 when a rule is broken. */
+size_t adapt_archive_entry_full(uint8_t kind, const char *path, uint64_t size, const char *target,
+                                const adapt_extent *extents, uint32_t extent_count, const adapt_metadata *metadata,
+                                uint8_t *out, size_t cap);
+/* One extent's offset and length, as written before its bytes: 16 bytes. */
+size_t adapt_archive_extent(const adapt_extent *extent, uint8_t *out, size_t cap);
+/* An entry's attribute trailer: the count, then each attribute by
+ * adapt_archive_attribute(); 0 when a name or value is too long. */
+size_t adapt_archive_attributes(uint32_t count, uint8_t *out, size_t cap);
+size_t adapt_archive_attribute(const char *name, const uint8_t *value, size_t len, uint8_t *out, size_t cap);
 
 /* What an unpacker does with each entry: `directory` for a directory,
  * `file_open` then `file_data` for each of the file's bytes as they come
  * and `file_close` once its length is reached (a file of length 0 is
- * opened and closed with no data), `symlink` for a link. Each returns 0,
- * or a nonzero status the unpacker returns as its own. */
+ * opened and closed with no data), `symlink` for a link; and, for a
+ * version-3 archive, `hardlink` for a hard link, `sparse_open` for a
+ * sparse file followed by `extent` before each extent's `file_data` and
+ * `file_close` at the end, and `attribute` for each extended attribute
+ * once the entry's bytes are complete. Every callback must be set. Each
+ * returns 0, or a nonzero status the unpacker returns as its own. */
 typedef struct adapt_archive_sink {
     void *context;
     int (*directory)(void *context, const char *path);
@@ -535,6 +592,11 @@ typedef struct adapt_archive_sink {
     int (*file_data)(void *context, const uint8_t *data, size_t len);
     int (*file_close)(void *context);
     int (*symlink)(void *context, const char *path, const char *target);
+    int (*hardlink)(void *context, const char *path, const char *target);
+    int (*sparse_open)(void *context, const char *path, uint64_t size, uint32_t extents);
+    int (*extent)(void *context, uint64_t offset, uint64_t length);
+    int (*attribute)(void *context, const char *path, uint8_t kind, const char *name, const uint8_t *value,
+                     size_t len);
 } adapt_archive_sink;
 
 typedef struct adapt_archive_unpacker adapt_archive_unpacker;
@@ -564,7 +626,8 @@ adapt_status adapt_archive_finish(const adapt_archive_unpacker *u, adapt_error *
  * byte refused. */
 const char *adapt_archive_problem(const adapt_archive_unpacker *u, uint64_t *offset);
 
-/* Entries handed to the sink so far: directories, files and links. */
+/* Entries handed to the sink so far: directories, files, links, hard
+ * links and sparse files. */
 uint64_t adapt_archive_entries(const adapt_archive_unpacker *u);
 
 #ifdef __cplusplus

@@ -27,15 +27,24 @@
  * trusted.
  *
  * C99 plus platform file APIs: exclusive creation for staging, POSIX
- * link() for publishing without replacing a target, a 64-bit ftell for
- * `info` on large files, and directory listing, lstat, readlink, mkdir
- * and symlink for folders. Windows equivalents are named below; there a
- * symbolic link is neither seen in a folder nor restored from one. A
- * filesystem without hard links (FAT, exFAT, some network mounts) refuses
- * link(), so publishing there needs --force, which renames instead.
+ * link() for publishing without replacing a target and for a folder's
+ * hard links, a 64-bit ftell for `info` on large files, directory
+ * listing, lstat, readlink, mkdir and symlink for folders, lseek's
+ * SEEK_HOLE and SEEK_DATA for a file's holes, and the platform's
+ * extended-attribute calls (Linux, macOS) for attributes and, on Linux,
+ * POSIX ACLs. Windows equivalents are named below; there a symbolic link
+ * is neither seen in a folder nor restored from one, a hard link is
+ * restored as a copy, holes come back as zeros and attributes are neither
+ * packed nor restored — the README states each rule. A filesystem without
+ * hard links (FAT, exFAT, some network mounts) refuses link(), so
+ * publishing there needs --force, which renames instead.
  */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
+#endif
+/* Linux keeps SEEK_DATA and SEEK_HOLE, the sparse map, behind _GNU_SOURCE. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE 1
 #endif
 #if !defined(_WIN32) && !defined(_FILE_OFFSET_BITS)
 #define _FILE_OFFSET_BITS 64
@@ -67,6 +76,13 @@ typedef long long cadapt_off;
 #define cadapt_fseek fseeko
 #define cadapt_ftell ftello
 typedef off_t cadapt_off;
+/* Extended attributes: Linux and macOS list, read and set them by name;
+ * the calls differ in shape, so each is wrapped below. Elsewhere on POSIX
+ * a folder is packed without them. */
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/xattr.h>
+#define CADAPT_XATTR 1
+#endif
 #endif
 
 #define CADAPT_VERSION "0.12.0"
@@ -143,6 +159,278 @@ static int metadata_apply(const char *path, int symlink_entry, const adapt_metad
         return ENOTSUP;
     }
     return 0;
+}
+
+/* ------------------------------------------------------------------------
+ * Extended attributes and sparse maps: what FMT-7 preserves beyond modes
+ * and times. Attributes travel by name; on Linux the POSIX ACLs are two
+ * of them (system.posix_acl_access, system.posix_acl_default), so they
+ * come along. Only the namespaces a file's owner may set again are kept:
+ * user.* and the ACLs. security.* and trusted.* belong to the kernel and
+ * to root and are left where they are.
+ * --------------------------------------------------------------------- */
+
+typedef struct attrs {
+    char **names;
+    uint8_t **values;
+    size_t *lens;
+    uint32_t count;
+} attrs;
+
+static void attrs_free(attrs *a) {
+    uint32_t i;
+    for (i = 0; i < a->count; i++) {
+        free(a->names[i]);
+        free(a->values[i]);
+    }
+    free(a->names);
+    free(a->values);
+    free(a->lens);
+    a->names = NULL;
+    a->values = NULL;
+    a->lens = NULL;
+    a->count = 0;
+}
+
+/* The bytes an entry's attribute trailer takes in the archive. */
+static uint64_t attrs_bytes(const attrs *a) {
+    uint64_t n = 2;
+    uint32_t i;
+    for (i = 0; i < a->count; i++) {
+        n += adapt_archive_attribute(a->names[i], a->values[i], a->lens[i], NULL, 0);
+    }
+    return n;
+}
+
+#ifdef CADAPT_XATTR
+static int attr_kept(const char *name) {
+    return strncmp(name, "user.", 5) == 0 || strcmp(name, "system.posix_acl_access") == 0 ||
+           strcmp(name, "system.posix_acl_default") == 0;
+}
+
+static int compare_attr_names(const void *a, const void *b) {
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+static ssize_t xattr_list(const char *path, char *buf, size_t size) {
+#ifdef __APPLE__
+    return listxattr(path, buf, size, XATTR_NOFOLLOW);
+#else
+    return llistxattr(path, buf, size);
+#endif
+}
+
+static ssize_t xattr_get(const char *path, const char *name, void *buf, size_t size) {
+#ifdef __APPLE__
+    return getxattr(path, name, buf, size, 0, XATTR_NOFOLLOW);
+#else
+    return lgetxattr(path, name, buf, size);
+#endif
+}
+
+static int xattr_set(const char *path, const char *name, const void *value, size_t size) {
+#ifdef __APPLE__
+    return setxattr(path, name, value, size, 0, XATTR_NOFOLLOW);
+#else
+    return lsetxattr(path, name, value, size, 0);
+#endif
+}
+
+/* The attributes of the entry at `path` (a link's own, not its target's),
+ * in byte order of their names. A filesystem without attributes gives
+ * none. Returns 0 or an errno; E2BIG for a value the archive cannot hold. */
+static int attrs_read(const char *path, attrs *a) {
+    char *list = NULL, *at, *end;
+    ssize_t n;
+    size_t cap = 4096;
+    uint32_t i;
+    memset(a, 0, sizeof(*a));
+    for (;;) {
+        list = malloc(cap);
+        if (list == NULL) {
+            return ENOMEM;
+        }
+        n = xattr_list(path, list, cap);
+        if (n >= 0) {
+            break;
+        }
+        free(list);
+        if (errno == ERANGE) {
+            cap *= 2;
+            continue;
+        }
+        return errno == ENOTSUP || errno == EOPNOTSUPP || errno == ENOSYS ? 0 : errno;
+    }
+    for (at = list, end = list + n; at < end; at += strlen(at) + 1) {
+        if (attr_kept(at)) {
+            a->count++;
+        }
+    }
+    if (a->count == 0) {
+        free(list);
+        return 0;
+    }
+    a->names = calloc(a->count, sizeof(*a->names));
+    a->values = calloc(a->count, sizeof(*a->values));
+    a->lens = calloc(a->count, sizeof(*a->lens));
+    if (a->names == NULL || a->values == NULL || a->lens == NULL) {
+        free(list);
+        attrs_free(a);
+        return ENOMEM;
+    }
+    for (at = list, i = 0; at < end; at += strlen(at) + 1) {
+        if (attr_kept(at)) {
+            a->names[i] = malloc(strlen(at) + 1);
+            if (a->names[i] == NULL) {
+                free(list);
+                attrs_free(a);
+                return ENOMEM;
+            }
+            strcpy(a->names[i++], at);
+        }
+    }
+    free(list);
+    qsort(a->names, a->count, sizeof(*a->names), compare_attr_names);
+    for (i = 0; i < a->count; i++) {
+        ssize_t len = xattr_get(path, a->names[i], NULL, 0);
+        if (len < 0) {
+            int e = errno;
+            attrs_free(a);
+            return e;
+        }
+        if ((size_t)len > ADAPT_ARCHIVE_ATTRIBUTE_VALUE_MAX || strlen(a->names[i]) > ADAPT_ARCHIVE_ATTRIBUTE_NAME_MAX) {
+            attrs_free(a);
+            return E2BIG;
+        }
+        a->values[i] = malloc((size_t)len + 1);
+        if (a->values[i] == NULL) {
+            attrs_free(a);
+            return ENOMEM;
+        }
+        len = xattr_get(path, a->names[i], a->values[i], (size_t)len + 1);
+        if (len < 0) {
+            int e = errno;
+            attrs_free(a);
+            return e;
+        }
+        a->lens[i] = (size_t)len;
+    }
+    return 0;
+}
+
+/* Set one attribute and read it back: a filesystem that accepts the call
+ * but keeps something else has not restored it. Returns 0 or an errno. */
+static int attr_apply(const char *path, const char *name, const uint8_t *value, size_t len) {
+    uint8_t *back;
+    ssize_t got;
+    if (xattr_set(path, name, value, len) != 0) {
+        return errno;
+    }
+    back = malloc(len + 1);
+    if (back == NULL) {
+        return ENOMEM;
+    }
+    got = xattr_get(path, name, back, len + 1);
+    if (got < 0 || (size_t)got != len || (len > 0 && memcmp(back, value, len) != 0)) {
+        free(back);
+        return got < 0 ? errno : ENOTSUP;
+    }
+    free(back);
+    return 0;
+}
+#else
+static int attrs_read(const char *path, attrs *a) {
+    (void)path;
+    memset(a, 0, sizeof(*a));
+    return 0;
+}
+
+static int attr_apply(const char *path, const char *name, const uint8_t *value, size_t len) {
+    (void)path;
+    (void)name;
+    (void)value;
+    (void)len;
+    return ENOTSUP;
+}
+#endif
+
+/* The data extents of the file at `path`, `size` bytes long, when the
+ * platform can tell holes from data and the file has any: *count extents
+ * (malloc'd), or *count = UINT32_MAX for a dense file. A file of more
+ * extents than the archive lists is stored dense. Returns 0 or an errno. */
+static int sparse_map(const char *path, uint64_t size, adapt_extent **extents, uint32_t *count) {
+    *extents = NULL;
+    *count = UINT32_MAX;
+#if !defined(_WIN32) && defined(SEEK_HOLE) && defined(SEEK_DATA)
+    {
+        int fd = open(path, O_RDONLY);
+        off_t at = 0, data, hole;
+        adapt_extent *list = NULL;
+        uint32_t n = 0, cap = 0;
+        if (fd < 0) {
+            return errno;
+        }
+        /* a file without holes has its first hole at its end */
+        hole = lseek(fd, 0, SEEK_HOLE);
+        if (hole < 0) {
+            int e = errno;
+            close(fd);
+            return e == EINVAL || e == ENOTSUP || e == EOPNOTSUPP ? 0 : e;
+        }
+        if ((uint64_t)hole >= size) {
+            close(fd);
+            return 0;
+        }
+        while ((uint64_t)at < size) {
+            data = lseek(fd, at, SEEK_DATA);
+            if (data < 0) {
+                if (errno == ENXIO) {
+                    break; /* only a hole remains */
+                }
+                free(list);
+                close(fd);
+                return errno;
+            }
+            hole = lseek(fd, data, SEEK_HOLE);
+            if (hole < 0) {
+                free(list);
+                close(fd);
+                return errno;
+            }
+            if ((uint64_t)hole > size) {
+                hole = (off_t)size;
+            }
+            if (n == cap) {
+                adapt_extent *grown;
+                cap = cap == 0 ? 16 : cap * 2;
+                grown = realloc(list, cap * sizeof(*grown));
+                if (grown == NULL) {
+                    free(list);
+                    close(fd);
+                    return ENOMEM;
+                }
+                list = grown;
+            }
+            if (n == ADAPT_ARCHIVE_EXTENTS_MAX) {
+                free(list);
+                close(fd);
+                return 0;
+            }
+            list[n].offset = (uint64_t)data;
+            list[n].length = (uint64_t)(hole - data);
+            n++;
+            at = hole;
+        }
+        close(fd);
+        *extents = list;
+        *count = n;
+        return 0;
+    }
+#else
+    (void)path;
+    (void)size;
+    return 0;
+#endif
 }
 
 /* Format numbers and memory defaults come from the codec constants.
@@ -599,17 +887,34 @@ static char *join(const char *a, const char *b) {
 }
 
 /* What a directory entry is: the kinds an archive holds, or none. */
-enum { KIND_NONE = 0, KIND_DIRECTORY = ADAPT_ARCHIVE_DIRECTORY, KIND_FILE = ADAPT_ARCHIVE_FILE, KIND_SYMLINK = ADAPT_ARCHIVE_SYMLINK };
+enum {
+    KIND_NONE = 0,
+    KIND_DIRECTORY = ADAPT_ARCHIVE_DIRECTORY,
+    KIND_FILE = ADAPT_ARCHIVE_FILE,
+    KIND_SYMLINK = ADAPT_ARCHIVE_SYMLINK,
+    KIND_HARDLINK = ADAPT_ARCHIVE_HARDLINK,
+    KIND_SPARSE = ADAPT_ARCHIVE_SPARSE
+};
+
+/* A file's identity on its filesystem, for the hard links among a
+ * folder's files: two names with the same identity share one inode. */
+typedef struct identity {
+    uint64_t device, inode;
+    int shared; /* the inode has more than one name */
+} identity;
 
 /* The kind of the entry at `path`, its size when a file, and its target
  * when a link (malloc'd); KIND_NONE for anything else, or -1 with errno
  * when it cannot be examined. A link is examined, not followed. */
-static int examine(const char *path, uint64_t *size, char **target) {
+static int examine(const char *path, uint64_t *size, char **target, identity *id) {
 #ifdef _WIN32
     struct _stat64 st;
     if (_stat64(path, &st) != 0) {
         return -1;
     }
+    id->device = (uint64_t)st.st_dev;
+    id->inode = (uint64_t)st.st_ino;
+    id->shared = 0;
     if (st.st_mode & _S_IFDIR) {
         return KIND_DIRECTORY;
     }
@@ -623,6 +928,9 @@ static int examine(const char *path, uint64_t *size, char **target) {
     if (lstat(path, &st) != 0) {
         return -1;
     }
+    id->device = (uint64_t)st.st_dev;
+    id->inode = (uint64_t)st.st_ino;
+    id->shared = st.st_nlink > 1;
     if (S_ISDIR(st.st_mode)) {
         return KIND_DIRECTORY;
     }
@@ -662,7 +970,8 @@ static int examine(const char *path, uint64_t *size, char **target) {
 static int is_directory(const char *path) {
     uint64_t size;
     char *target = NULL;
-    int kind = examine(path, &size, &target);
+    identity id;
+    int kind = examine(path, &size, &target, &id);
     free(target);
     return kind == KIND_DIRECTORY;
 }
@@ -763,16 +1072,28 @@ static int list_directory(const char *path, char ***names, size_t *count) {
 /* One entry of the folder being coded. */
 typedef struct entry {
     char *path; /* the archive path */
-    char *target;
+    char *target; /* a link's target, or the path a hard link shares */
     uint64_t size;
     uint8_t kind;
     adapt_metadata metadata;
+    /* a sparse file's data extents */
+    adapt_extent *extents;
+    uint32_t extent_count;
+    attrs attrs;
 } entry;
+
+/* An inode seen with more than one name: the entry that carries it. */
+typedef struct seen_inode {
+    identity id;
+    size_t index;
+} seen_inode;
 
 typedef struct folder {
     const char *root;
     entry *items;
     size_t count, cap;
+    seen_inode *inodes;
+    size_t inode_count, inode_cap;
     /* the bytes the archive stream takes, for the sizes and the report */
     uint64_t stream_bytes;
 } folder;
@@ -782,31 +1103,69 @@ static void folder_free(folder *f) {
     for (i = 0; i < f->count; i++) {
         free(f->items[i].path);
         free(f->items[i].target);
+        free(f->items[i].extents);
+        attrs_free(&f->items[i].attrs);
     }
     free(f->items);
+    free(f->inodes);
     f->items = NULL;
-    f->count = f->cap = 0;
+    f->inodes = NULL;
+    f->count = f->cap = f->inode_count = f->inode_cap = 0;
 }
 
-/* Add an entry; takes the strings. Returns 0 or an errno. */
-static int folder_add(folder *f, uint8_t kind, char *path, uint64_t size, char *target, const adapt_metadata *metadata) {
+/* The entry an inode already has, or -1. */
+static long folder_inode(const folder *f, const identity *id) {
+    size_t i;
+    for (i = 0; i < f->inode_count; i++) {
+        if (f->inodes[i].id.device == id->device && f->inodes[i].id.inode == id->inode) {
+            return (long)f->inodes[i].index;
+        }
+    }
+    return -1;
+}
+
+static int folder_remember_inode(folder *f, const identity *id, size_t index) {
+    if (f->inode_count == f->inode_cap) {
+        size_t grown = f->inode_cap == 0 ? 16 : f->inode_cap * 2;
+        seen_inode *bigger = realloc(f->inodes, grown * sizeof(*bigger));
+        if (bigger == NULL) {
+            return ENOMEM;
+        }
+        f->inodes = bigger;
+        f->inode_cap = grown;
+    }
+    f->inodes[f->inode_count].id = *id;
+    f->inodes[f->inode_count].index = index;
+    f->inode_count++;
+    return 0;
+}
+
+/* Add an entry; takes the strings, the extents and the attributes.
+ * Returns 0 or an errno. */
+static int folder_add(folder *f, uint8_t kind, char *path, uint64_t size, char *target, adapt_extent *extents,
+                      uint32_t extent_count, attrs *a, const adapt_metadata *metadata) {
     entry *e;
     size_t n;
+    uint32_t i;
     if (f->count == f->cap) {
         size_t grown = f->cap == 0 ? 64 : f->cap * 2;
         entry *bigger = realloc(f->items, grown * sizeof(*bigger));
         if (bigger == NULL) {
             free(path);
             free(target);
+            free(extents);
+            attrs_free(a);
             return ENOMEM;
         }
         f->items = bigger;
         f->cap = grown;
     }
-    n = adapt_archive_entry_metadata(kind, path, size, target, metadata, NULL, 0);
+    n = adapt_archive_entry_full(kind, path, size, target, extents, extent_count, metadata, NULL, 0);
     if (n == 0) {
         free(path);
         free(target);
+        free(extents);
+        attrs_free(a);
         return ENAMETOOLONG;
     }
     e = &f->items[f->count++];
@@ -815,7 +1174,21 @@ static int folder_add(folder *f, uint8_t kind, char *path, uint64_t size, char *
     e->size = size;
     e->target = target;
     e->metadata = *metadata;
-    f->stream_bytes += n + (kind == KIND_FILE ? size : 0);
+    e->extents = extents;
+    e->extent_count = extent_count;
+    e->attrs = *a;
+    memset(a, 0, sizeof(*a));
+    f->stream_bytes += n;
+    if (kind == KIND_FILE) {
+        f->stream_bytes += size;
+    } else if (kind == KIND_SPARSE) {
+        for (i = 0; i < extent_count; i++) {
+            f->stream_bytes += 16 + extents[i].length;
+        }
+    }
+    if (kind != KIND_HARDLINK) {
+        f->stream_bytes += attrs_bytes(&e->attrs);
+    }
     return 0;
 }
 
@@ -843,7 +1216,12 @@ static int walk(folder *f, const char *rel, char **culprit) {
         char *target = NULL;
         uint64_t size = 0;
         adapt_metadata metadata;
+        adapt_extent *extents = NULL;
+        uint32_t extent_count = UINT32_MAX;
+        attrs a;
+        identity id;
         int kind;
+        memset(&a, 0, sizeof(a));
         if (path == NULL || full == NULL) {
             free(path);
             free(full);
@@ -856,7 +1234,7 @@ static int walk(folder *f, const char *rel, char **culprit) {
             free(path);
             break;
         }
-        kind = examine(full, &size, &target);
+        kind = examine(full, &size, &target, &id);
         if (kind < 0) {
             rc = errno;
             *culprit = full;
@@ -869,22 +1247,68 @@ static int walk(folder *f, const char *rel, char **culprit) {
             free(path);
             break;
         }
+        if (kind == KIND_FILE && id.shared) {
+            /* a name an earlier entry's inode already has is a hard link
+             * to that entry; the first name carries the bytes */
+            long earlier = folder_inode(f, &id);
+            if (earlier >= 0) {
+                char *shared = malloc(strlen(f->items[earlier].path) + 1);
+                if (shared == NULL) {
+                    free(full);
+                    free(path);
+                    rc = ENOMEM;
+                    break;
+                }
+                strcpy(shared, f->items[earlier].path);
+                free(full);
+                rc = folder_add(f, KIND_HARDLINK, path, 0, shared, NULL, 0, &a, &metadata);
+                continue;
+            }
+            rc = folder_remember_inode(f, &id, f->count);
+            if (rc != 0) {
+                free(full);
+                free(path);
+                break;
+            }
+        }
+        if (kind == KIND_FILE && size > 0) {
+            rc = sparse_map(full, size, &extents, &extent_count);
+            if (rc != 0) {
+                *culprit = full;
+                free(path);
+                free(target);
+                break;
+            }
+            if (extent_count != UINT32_MAX) {
+                kind = KIND_SPARSE;
+            }
+        }
+        rc = attrs_read(full, &a);
+        if (rc != 0) {
+            *culprit = full;
+            free(path);
+            free(target);
+            free(extents);
+            break;
+        }
         free(full);
         if (kind == KIND_DIRECTORY) {
             char *again = malloc(strlen(path) + 1);
             if (again == NULL) {
                 free(path);
+                attrs_free(&a);
                 rc = ENOMEM;
                 break;
             }
             strcpy(again, path);
-            rc = folder_add(f, KIND_DIRECTORY, path, 0, NULL, &metadata);
+            rc = folder_add(f, KIND_DIRECTORY, path, 0, NULL, NULL, 0, &a, &metadata);
             if (rc == 0) {
                 rc = walk(f, again, culprit);
             }
             free(again);
         } else {
-            rc = folder_add(f, (uint8_t)kind, path, size, target, &metadata);
+            rc = folder_add(f, (uint8_t)kind, path, size, target, extents, kind == KIND_SPARSE ? extent_count : 0, &a,
+                            &metadata);
         }
     }
     for (i = 0; i < count; i++) {
@@ -908,11 +1332,18 @@ static int folder_collect(folder *f, const char *root, char **culprit) {
 typedef struct packer {
     folder *f;
     size_t index; /* the next entry */
-    enum { PACK_MAGIC, PACK_HEADER, PACK_DATA, PACK_END, PACK_DONE } stage;
-    uint8_t head[ADAPT_ARCHIVE_MAGIC_BYTES + 1 + 2 + ADAPT_ARCHIVE_PATH_MAX + 2 + ADAPT_ARCHIVE_PATH_MAX + ADAPT_METADATA_BYTES];
+    /* the header, an extent's offset and length and the end go out
+     * through `head`, the attribute trailer through `trailer`; a file's
+     * or an extent's bytes are read straight from the file */
+    enum { PACK_MAGIC, PACK_HEADER, PACK_EXTENT, PACK_DATA, PACK_ATTRS, PACK_END, PACK_DONE } stage;
+    uint8_t head[ADAPT_ARCHIVE_MAGIC_BYTES + 1 + 2 + ADAPT_ARCHIVE_PATH_MAX + 2 + ADAPT_ARCHIVE_PATH_MAX + 12 +
+                 ADAPT_METADATA_BYTES];
     size_t head_len, head_at;
+    uint8_t *trailer; /* the entry's attribute trailer, malloc'd */
+    size_t trailer_len, trailer_at;
     FILE *file;
     uint64_t remaining;
+    uint32_t extent; /* the next extent of a sparse entry */
     int error; /* errno of the failure */
     const char *failed; /* the entry's path, or NULL */
     int changed; /* the failure: the file's bytes differed from its listing */
@@ -922,10 +1353,11 @@ static void packer_reset(packer *p, folder *f) {
     if (p->file != NULL) {
         fclose(p->file);
     }
+    free(p->trailer);
     memset(p, 0, sizeof(*p));
     p->f = f;
     p->stage = PACK_MAGIC;
-    memcpy(p->head, ADAPT_ARCHIVE_METADATA_MAGIC, ADAPT_ARCHIVE_MAGIC_BYTES);
+    memcpy(p->head, ADAPT_ARCHIVE_FULL_MAGIC, ADAPT_ARCHIVE_MAGIC_BYTES);
     p->head_len = ADAPT_ARCHIVE_MAGIC_BYTES;
 }
 
@@ -934,6 +1366,8 @@ static void packer_close(packer *p) {
         fclose(p->file);
         p->file = NULL;
     }
+    free(p->trailer);
+    p->trailer = NULL;
 }
 
 /* Move to the next entry's header, or the end. */
@@ -947,10 +1381,70 @@ static void packer_next(packer *p) {
     }
     {
         const entry *e = &p->f->items[p->index];
-        p->head_len = adapt_archive_entry_metadata(e->kind, e->path, e->size, e->target, &e->metadata, p->head, sizeof(p->head));
+        p->head_len = adapt_archive_entry_full(e->kind, e->path, e->size, e->target, e->extents, e->extent_count,
+                                               &e->metadata, p->head, sizeof(p->head));
         p->head_at = 0;
+        p->extent = 0;
         p->stage = PACK_HEADER;
     }
+}
+
+/* The entry's attribute trailer, built once and sent from `trailer`.
+ * Returns 0 or an errno. */
+static int packer_attrs(packer *p) {
+    const entry *e = &p->f->items[p->index];
+    size_t n = (size_t)attrs_bytes(&e->attrs), at;
+    uint32_t i;
+    uint8_t *t = malloc(n);
+    if (t == NULL) {
+        p->error = ENOMEM;
+        return ENOMEM;
+    }
+    at = adapt_archive_attributes(e->attrs.count, t, n);
+    for (i = 0; i < e->attrs.count; i++) {
+        at += adapt_archive_attribute(e->attrs.names[i], e->attrs.values[i], e->attrs.lens[i], t + at, n - at);
+    }
+    free(p->trailer);
+    p->trailer = t;
+    p->trailer_len = n;
+    p->trailer_at = 0;
+    p->stage = PACK_ATTRS;
+    return 0;
+}
+
+/* Open the entry's file for its bytes. Returns 0 or an errno. */
+static int packer_open(packer *p) {
+    const entry *e = &p->f->items[p->index];
+    char *full = join(p->f->root, e->path);
+    if (full == NULL) {
+        p->error = ENOMEM;
+        return ENOMEM;
+    }
+    p->file = fopen(full, "rb");
+    free(full);
+    if (p->file == NULL) {
+        p->error = errno;
+        p->failed = e->path;
+        return p->error != 0 ? p->error : EIO;
+    }
+    return 0;
+}
+
+/* The next extent of a sparse entry: its offset and length through
+ * `head`, the file positioned at its bytes. Returns 0 or an errno. */
+static int packer_extent(packer *p) {
+    const entry *e = &p->f->items[p->index];
+    const adapt_extent *x = &e->extents[p->extent];
+    p->head_len = adapt_archive_extent(x, p->head, sizeof(p->head));
+    p->head_at = 0;
+    if (cadapt_fseek(p->file, (cadapt_off)x->offset, SEEK_SET) != 0) {
+        p->error = errno;
+        p->failed = e->path;
+        return p->error != 0 ? p->error : EIO;
+    }
+    p->remaining = x->length;
+    p->stage = PACK_EXTENT;
+    return 0;
 }
 
 static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
@@ -960,8 +1454,26 @@ static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
         if (p->stage == PACK_DONE) {
             break;
         }
-        if (p->stage == PACK_MAGIC || p->stage == PACK_HEADER || p->stage == PACK_END) {
+        if (p->stage == PACK_ATTRS) {
+            size_t n = p->trailer_len - p->trailer_at;
+            if (n > len - at) {
+                n = len - at;
+            }
+            memcpy(buf + at, p->trailer + p->trailer_at, n);
+            at += n;
+            p->trailer_at += n;
+            if (p->trailer_at < p->trailer_len) {
+                break;
+            }
+            packer_close(p);
+            p->index++;
+            packer_next(p);
+            continue;
+        }
+        if (p->stage == PACK_MAGIC || p->stage == PACK_HEADER || p->stage == PACK_EXTENT || p->stage == PACK_END) {
             size_t n = p->head_len - p->head_at;
+            const entry *e = p->index < p->f->count ? &p->f->items[p->index] : NULL;
+            int rc = 0;
             if (n > len - at) {
                 n = len - at;
             }
@@ -975,33 +1487,35 @@ static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
                 p->stage = PACK_DONE;
             } else if (p->stage == PACK_MAGIC) {
                 packer_next(p);
-            } else if (p->f->items[p->index].kind == KIND_FILE) {
-                const entry *e = &p->f->items[p->index];
-                char *full = join(p->f->root, e->path);
-                if (full == NULL) {
-                    p->error = ENOMEM;
-                    return ENOMEM;
-                }
-                p->file = fopen(full, "rb");
-                free(full);
-                if (p->file == NULL) {
-                    p->error = errno;
-                    p->failed = e->path;
-                    return p->error != 0 ? p->error : EIO;
-                }
+            } else if (p->stage == PACK_EXTENT) {
+                p->stage = PACK_DATA;
+            } else if (e->kind == KIND_FILE) {
+                rc = packer_open(p);
                 p->remaining = e->size;
                 p->stage = PACK_DATA;
-            } else {
+            } else if (e->kind == KIND_SPARSE) {
+                rc = packer_open(p);
+                if (rc == 0) {
+                    rc = e->extent_count == 0 ? packer_attrs(p) : packer_extent(p);
+                }
+            } else if (e->kind == KIND_HARDLINK) {
                 p->index++;
                 packer_next(p);
+            } else {
+                rc = packer_attrs(p);
+            }
+            if (rc != 0) {
+                return rc;
             }
             continue;
         }
-        /* PACK_DATA: the file's bytes, exactly as many as were listed */
+        /* PACK_DATA: the file's or the extent's bytes, exactly as many as
+         * were listed */
         {
             const entry *e = &p->f->items[p->index];
             size_t n = len - at;
             size_t r;
+            int rc;
             if ((uint64_t)n > p->remaining) {
                 n = (size_t)p->remaining;
             }
@@ -1015,15 +1529,29 @@ static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
             at += r;
             p->remaining -= r;
             if (p->remaining == 0) {
+                if (e->kind == KIND_SPARSE && ++p->extent < e->extent_count) {
+                    rc = packer_extent(p);
+                    if (rc != 0) {
+                        return rc;
+                    }
+                    continue;
+                }
                 /* the file must end where its listing said */
-                if (fgetc(p->file) != EOF) {
+                if (e->kind == KIND_SPARSE) {
+                    if (cadapt_fseek(p->file, 0, SEEK_END) != 0 || (uint64_t)cadapt_ftell(p->file) != e->size) {
+                        p->failed = e->path;
+                        p->changed = 1;
+                        return EIO;
+                    }
+                } else if (fgetc(p->file) != EOF) {
                     p->failed = e->path;
                     p->changed = 1;
                     return EIO;
                 }
-                packer_close(p);
-                p->index++;
-                packer_next(p);
+                rc = packer_attrs(p);
+                if (rc != 0) {
+                    return rc;
+                }
             }
         }
     }
@@ -1049,6 +1577,10 @@ static int packer_failure(const char *input, const packer *p) {
 typedef struct deferred_metadata {
     char *path;
     adapt_metadata metadata;
+    /* the directory's attributes, applied with its metadata once its
+     * children exist: a default ACL set earlier would be inherited by
+     * children the archive records differently */
+    attrs attrs;
     struct deferred_metadata *next;
 } deferred_metadata;
 
@@ -1059,6 +1591,8 @@ typedef struct restorer {
     char *failed; /* the entry's path, malloc'd, or NULL */
     const char *why; /* a failure the errno does not name, or NULL */
     deferred_metadata *directories;
+    /* the directory whose attributes are arriving, deferred with it */
+    deferred_metadata *pending;
 } restorer;
 
 static int restore_fail(restorer *r, const char *path, int e, const char *why) {
@@ -1173,6 +1707,154 @@ static int restore_symlink(void *context, const char *path, const char *target) 
 #endif
 }
 
+/* A hard link: the same inode under another name. Where the platform has
+ * no link(), the target's bytes are copied instead, which the README
+ * states. */
+static int restore_hardlink(void *context, const char *path, const char *target) {
+    restorer *r = context;
+    char *full = join(r->root, path);
+    char *to = join(r->root, target);
+    int rc;
+    if (full == NULL || to == NULL) {
+        free(full);
+        free(to);
+        return restore_fail(r, path, ENOMEM, NULL);
+    }
+#ifdef _WIN32
+    {
+        FILE *in = fopen(to, "rb"), *out = NULL;
+        uint8_t buf[65536];
+        size_t n;
+        rc = 0;
+        if (in == NULL) {
+            rc = errno;
+        } else {
+            int fd = _open(full, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
+            out = fd < 0 ? NULL : _fdopen(fd, "wb");
+            if (out == NULL) {
+                rc = errno;
+            }
+        }
+        while (rc == 0 && (n = fread(buf, 1, sizeof(buf), in)) > 0) {
+            if (fwrite(buf, 1, n, out) != n) {
+                rc = errno != 0 ? errno : EIO;
+            }
+        }
+        if (in != NULL && ferror(in)) {
+            rc = EIO;
+        }
+        if (in != NULL) {
+            fclose(in);
+        }
+        if (out != NULL && fclose(out) != 0 && rc == 0) {
+            rc = errno;
+        }
+    }
+#else
+    rc = link(to, full) == 0 ? 0 : errno;
+#endif
+    free(full);
+    free(to);
+    if (rc != 0) {
+        return restore_fail(r, path, rc, rc == EEXIST ? "named twice in the archive" : "cannot restore hard link");
+    }
+    return 0;
+}
+
+/* A sparse file: created empty at its apparent length, each extent
+ * written at its offset. Where the filesystem keeps no holes, the bytes
+ * between extents are zeros all the same. */
+static int restore_sparse_open(void *context, const char *path, uint64_t size, uint32_t extents) {
+    restorer *r = context;
+    int rc = restore_file_open(context, path, size);
+    (void)extents;
+    if (rc != 0) {
+        return rc;
+    }
+#ifdef _WIN32
+    rc = _chsize_s(_fileno(r->file), (long long)size) == 0 ? 0 : errno;
+#else
+    rc = ftruncate(fileno(r->file), (off_t)size) == 0 ? 0 : errno;
+#endif
+    if (rc != 0) {
+        return restore_fail(r, path, rc, "cannot restore sparse file");
+    }
+    return 0;
+}
+
+static int restore_extent(void *context, uint64_t offset, uint64_t length) {
+    restorer *r = context;
+    (void)length;
+    if (cadapt_fseek(r->file, (cadapt_off)offset, SEEK_SET) != 0) {
+        r->error = errno;
+        return r->error != 0 ? r->error : EIO;
+    }
+    return 0;
+}
+
+/* One attribute of the entry just restored: set now, or, for a
+ * directory, with its metadata once its children exist. */
+static int restore_attribute(void *context, const char *path, uint8_t kind, const char *name, const uint8_t *value,
+                             size_t len) {
+    restorer *r = context;
+    int rc;
+    if (kind == ADAPT_ARCHIVE_DIRECTORY) {
+        deferred_metadata *d = r->pending;
+        attrs *a;
+        uint32_t n;
+        if (d == NULL) {
+            char *full = join(r->root, path);
+            d = full == NULL ? NULL : calloc(1, sizeof(*d));
+            if (d == NULL) {
+                free(full);
+                return restore_fail(r, path, ENOMEM, NULL);
+            }
+            d->path = full;
+            r->pending = d;
+        }
+        a = &d->attrs;
+        n = a->count;
+        {
+            char **names = realloc(a->names, (n + 1) * sizeof(*names));
+            uint8_t **values = names == NULL ? NULL : realloc(a->values, (n + 1) * sizeof(*values));
+            size_t *lens = values == NULL ? NULL : realloc(a->lens, (n + 1) * sizeof(*lens));
+            if (names != NULL) {
+                a->names = names;
+            }
+            if (values != NULL) {
+                a->values = values;
+            }
+            if (lens != NULL) {
+                a->lens = lens;
+            }
+            if (names == NULL || values == NULL || lens == NULL) {
+                return restore_fail(r, path, ENOMEM, NULL);
+            }
+        }
+        a->names[n] = malloc(strlen(name) + 1);
+        a->values[n] = malloc(len + 1);
+        if (a->names[n] == NULL || a->values[n] == NULL) {
+            free(a->names[n]);
+            free(a->values[n]);
+            return restore_fail(r, path, ENOMEM, NULL);
+        }
+        strcpy(a->names[n], name);
+        memcpy(a->values[n], value, len);
+        a->lens[n] = len;
+        a->count = n + 1;
+        return 0;
+    }
+    {
+        char *full = join(r->root, path);
+        if (full == NULL) {
+            return restore_fail(r, path, ENOMEM, NULL);
+        }
+        rc = attr_apply(full, name, value, len);
+        free(full);
+    }
+    return rc != 0 ? restore_fail(r, path, rc, "cannot restore extended attribute") : 0;
+}
+
 static int restore_metadata(void *context, const char *path, uint8_t kind, const adapt_metadata *metadata) {
     restorer *r = context;
     char *full = join(r->root, path);
@@ -1181,12 +1863,18 @@ static int restore_metadata(void *context, const char *path, uint8_t kind, const
         return restore_fail(r, path, ENOMEM, NULL);
     }
     if (kind == ADAPT_ARCHIVE_DIRECTORY) {
-        deferred_metadata *item = malloc(sizeof(*item));
+        deferred_metadata *item = r->pending;
+        r->pending = NULL;
         if (item == NULL) {
+            item = calloc(1, sizeof(*item));
+            if (item == NULL) {
+                free(full);
+                return restore_fail(r, path, ENOMEM, NULL);
+            }
+            item->path = full;
+        } else {
             free(full);
-            return restore_fail(r, path, ENOMEM, NULL);
         }
-        item->path = full;
         item->metadata = *metadata;
         item->next = r->directories;
         r->directories = item;
@@ -1201,15 +1889,33 @@ static int restore_metadata(void *context, const char *path, uint8_t kind, const
  * release the records without applying any remaining metadata. */
 static int finish_directory_metadata(restorer *r, int apply) {
     int rc = 0;
+    if (r->pending != NULL) {
+        /* a directory whose attributes came but whose metadata did not:
+         * the stream ended early, and the caller reports that */
+        r->pending->next = r->directories;
+        r->directories = r->pending;
+        r->pending = NULL;
+        apply = 0;
+    }
     while (r->directories != NULL) {
         deferred_metadata *item = r->directories;
+        uint32_t i;
         r->directories = item->next;
         if (apply && rc == 0) {
-            int e = metadata_apply(item->path, 0, &item->metadata);
+            int e = 0;
+            for (i = 0; i < item->attrs.count && e == 0; i++) {
+                e = attr_apply(item->path, item->attrs.names[i], item->attrs.values[i], item->attrs.lens[i]);
+            }
             if (e != 0) {
-                rc = restore_fail(r, item->path, e, "cannot restore directory metadata");
+                rc = restore_fail(r, item->path, e, "cannot restore extended attribute");
+            } else {
+                e = metadata_apply(item->path, 0, &item->metadata);
+                if (e != 0) {
+                    rc = restore_fail(r, item->path, e, "cannot restore directory metadata");
+                }
             }
         }
+        attrs_free(&item->attrs);
         free(item->path);
         free(item);
     }
@@ -1425,7 +2131,7 @@ static int decode_command(int argc, char **argv) {
     uint64_t threads;
     adapt_sizes sizes;
     replay ahead;
-    restorer restore = {NULL, NULL, 0, NULL, NULL, NULL};
+    restorer restore = {NULL, NULL, 0, NULL, NULL, NULL, NULL};
     adapt_metadata metadata;
     int has_metadata;
     adapt_archive_unpacker *unpacker = NULL;
@@ -1533,6 +2239,10 @@ static int decode_command(int argc, char **argv) {
         sink.file_data = restore_file_data;
         sink.file_close = restore_file_close;
         sink.symlink = restore_symlink;
+        sink.hardlink = restore_hardlink;
+        sink.sparse_open = restore_sparse_open;
+        sink.extent = restore_extent;
+        sink.attribute = restore_attribute;
         unpacker = adapt_archive_unpacker_new(sink);
         if (unpacker == NULL) {
             rc = other_error(input, "memory allocation failed");

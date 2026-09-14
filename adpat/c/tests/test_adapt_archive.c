@@ -91,6 +91,42 @@ static int rec_symlink(void *context, const char *path, const char *target) {
     return note(context, line);
 }
 
+static int rec_hardlink(void *context, const char *path, const char *target) {
+    char line[300];
+    snprintf(line, sizeof(line), "hard %s = %s", path, target);
+    return note(context, line);
+}
+
+static int rec_sparse_open(void *context, const char *path, uint64_t size, uint32_t extents) {
+    record *r = context;
+    char line[300];
+    snprintf(line, sizeof(line), "sparse %s %llu %u", path, (unsigned long long)size, (unsigned)extents);
+    CHECK(!r->open);
+    r->open = 1;
+    return note(context, line);
+}
+
+static int rec_extent(void *context, uint64_t offset, uint64_t length) {
+    record *r = context;
+    char line[300];
+    snprintf(line, sizeof(line), "extent %llu+%llu", (unsigned long long)offset, (unsigned long long)length);
+    CHECK(r->open);
+    return note(context, line);
+}
+
+static int rec_attribute(void *context, const char *path, uint8_t kind, const char *name, const uint8_t *value, size_t len) {
+    record *r = context;
+    char line[400];
+    size_t i;
+    CHECK(!r->open);
+    snprintf(line, sizeof(line), "attr %s %u %s=", path, (unsigned)kind, name);
+    for (i = 0; i < len && strlen(line) + 1 < sizeof(line); i++) {
+        line[strlen(line) + 1] = '\0';
+        line[strlen(line)] = (char)(value[i] == 0 ? '.' : value[i]);
+    }
+    return note(context, line);
+}
+
 static adapt_archive_sink sink_of(record *r) {
     adapt_archive_sink s;
     s.context = r;
@@ -99,6 +135,10 @@ static adapt_archive_sink sink_of(record *r) {
     s.file_data = rec_file_data;
     s.file_close = rec_file_close;
     s.symlink = rec_symlink;
+    s.hardlink = rec_hardlink;
+    s.sparse_open = rec_sparse_open;
+    s.extent = rec_extent;
+    s.attribute = rec_attribute;
     return s;
 }
 
@@ -265,8 +305,10 @@ static void test_well_formed(void) {
     adapt_archive_unpacker_free(NULL);
 }
 
-/* One stream that breaks one rule at a known byte. */
-static void refuse(const build *b, uint64_t at, const char *why, size_t piece) {
+/* One stream that breaks one rule at a known byte. A rule broken among a
+ * sparse entry's extents, which stream with their bytes, is met after the
+ * sink opened the file; `open_ok` says so, and the sink's cleanup is its own. */
+static void refuse_at(const build *b, uint64_t at, const char *why, size_t piece, int open_ok) {
     record r;
     adapt_archive_unpacker *u;
     adapt_error error;
@@ -287,8 +329,12 @@ static void refuse(const build *b, uint64_t at, const char *why, size_t piece) {
           error.detail == at);
     /* more bytes change nothing */
     CHECK(adapt_archive_unpack(u, b->bytes, 1) == ADAPT_ARCHIVE_MALFORMED);
-    CHECK(!r.open);
+    CHECK(open_ok || !r.open);
     adapt_archive_unpacker_free(u);
+}
+
+static void refuse(const build *b, uint64_t at, const char *why, size_t piece) {
+    refuse_at(b, at, why, piece, 0);
 }
 
 static void test_malformed(void) {
@@ -507,11 +553,308 @@ static void test_metadata(void) {
     }
 }
 
+/* ---- version 3: hard links, sparse files, attributes ----------------------- */
+
+static const adapt_metadata META = {0644, 10, 0, 20, 5};
+
+static void put_full(build *b, uint8_t kind, const char *path, uint64_t size, const char *target,
+                     const adapt_extent *extents, uint32_t count) {
+    size_t n = adapt_archive_entry_full(kind, path, size, target, extents, count, &META, b->bytes + b->len,
+                                        sizeof(b->bytes) - b->len);
+    CHECK(n > 0);
+    b->len += n;
+}
+
+static void put_attrs(build *b, uint32_t count) {
+    b->len += adapt_archive_attributes(count, b->bytes + b->len, sizeof(b->bytes) - b->len);
+}
+
+static void put_attr(build *b, const char *name, const char *value) {
+    size_t n = adapt_archive_attribute(name, (const uint8_t *)value, strlen(value), b->bytes + b->len, sizeof(b->bytes) - b->len);
+    CHECK(n > 0);
+    b->len += n;
+}
+
+static void put_extent(build *b, uint64_t offset, const char *data) {
+    adapt_extent e;
+    e.offset = offset;
+    e.length = strlen(data);
+    b->len += adapt_archive_extent(&e, b->bytes + b->len, sizeof(b->bytes) - b->len);
+    put(b, data, strlen(data));
+}
+
+static void start3(build *b) {
+    b->len = 0;
+    put(b, ADAPT_ARCHIVE_FULL_MAGIC, ADAPT_ARCHIVE_MAGIC_BYTES);
+}
+
+/* A version-3 folder: a directory with an ACL, a file with two attributes,
+ * a hard link to it, a sparse file of two extents around a hole, an
+ * attribute-less symlink and an empty sparse file. */
+static void build_full(build *b) {
+    adapt_extent extents[2] = {{2, 3}, {8, 2}};
+    start3(b);
+    put_full(b, ADAPT_ARCHIVE_DIRECTORY, "d", 0, NULL, NULL, 0);
+    put_attrs(b, 1);
+    put_attr(b, "system.posix_acl_access", "acl");
+    put_full(b, ADAPT_ARCHIVE_FILE, "d/f", 3, NULL, NULL, 0);
+    put(b, "abc", 3);
+    put_attrs(b, 2);
+    put_attr(b, "user.a", "1");
+    put_attr(b, "user.b", "");
+    put_full(b, ADAPT_ARCHIVE_HARDLINK, "d/h", 0, "d/f", NULL, 0);
+    put_full(b, ADAPT_ARCHIVE_SPARSE, "s", 10, NULL, extents, 2);
+    put_extent(b, 2, "xyz");
+    put_extent(b, 8, "pq");
+    put_attrs(b, 0);
+    put_full(b, ADAPT_ARCHIVE_SYMLINK, "l", 0, "d/f", NULL, 0);
+    put_attrs(b, 0);
+    put_full(b, ADAPT_ARCHIVE_SPARSE, "z", 4, NULL, NULL, 0);
+    put_attrs(b, 0);
+    end(b);
+}
+
+static int rec_meta(void *context, const char *path, uint8_t kind, const adapt_metadata *m) {
+    char line[300];
+    snprintf(line, sizeof(line), "meta %s %u %o", path, (unsigned)kind, (unsigned)m->mode);
+    return note(context, line);
+}
+
+/* Join consecutive `data` lines of a log in place: a small piece size
+ * splits a file's bytes over several calls, and the sink sees the same
+ * bytes either way. */
+static void join_data_lines(char *log) {
+    char *out = log, *line = log;
+    int last_was_data = 0;
+    while (*line != '\0') {
+        char *nl = strchr(line, '\n');
+        size_t n = nl == NULL ? strlen(line) : (size_t)(nl - line) + 1;
+        int is_data = strncmp(line, "data ", 5) == 0;
+        if (is_data && last_was_data) {
+            out--; /* over the previous newline */
+            memmove(out, line + 5, n - 5);
+            out += n - 5;
+        } else {
+            memmove(out, line, n);
+            out += n;
+        }
+        last_was_data = is_data;
+        line += n;
+    }
+    *out = '\0';
+}
+
+static void test_full_well_formed(void) {
+    static const char *const want =
+        "dir d\nattr d 1 system.posix_acl_access=acl\nmeta d 1 644\n"
+        "open d/f 3\ndata abc\nclose\nattr d/f 2 user.a=1\nattr d/f 2 user.b=\nmeta d/f 2 644\n"
+        "hard d/h = d/f\n"
+        "sparse s 10 2\nextent 2+3\ndata xyz\nextent 8+2\ndata pq\nclose\nmeta s 5 644\n"
+        "link l -> d/f\nmeta l 3 644\n"
+        "sparse z 4 0\nclose\nmeta z 5 644\n";
+    build b;
+    size_t piece;
+    build_full(&b);
+    for (piece = 1; piece <= b.len; piece = piece < 8 ? piece + 1 : piece * 3) {
+        record r;
+        adapt_archive_unpacker *u = adapt_archive_unpacker_new(sink_of(&r));
+        adapt_error error;
+        size_t at = 0;
+        int rc = 0;
+        memset(&r, 0, sizeof(r));
+        adapt_archive_set_metadata_callback(u, rec_meta);
+        while (at < b.len && rc == 0) {
+            size_t n = piece < b.len - at ? piece : b.len - at;
+            rc = adapt_archive_unpack(u, b.bytes + at, n);
+            at += n;
+        }
+        CHECK(rc == 0);
+        CHECK(adapt_archive_finish(u, &error) == ADAPT_OK);
+        CHECK(adapt_archive_entries(u) == 6);
+        join_data_lines(r.log);
+        if (strcmp(r.log, want) != 0) {
+            fprintf(stderr, "piece %zu: got\n%s\nwant\n%s\n", piece, r.log, want);
+        }
+        CHECK(strcmp(r.log, want) == 0);
+        adapt_archive_unpacker_free(u);
+    }
+    /* a sink that fails on any call stops the unpacker there */
+    {
+        record r;
+        adapt_archive_unpacker *u;
+        memset(&r, 0, sizeof(r));
+        r.fail_on = 10; /* the hard link */
+        CHECK(feed(b.bytes, b.len, 7, &r, &u) == 77);
+        CHECK(adapt_archive_unpack(u, b.bytes, 1) == 77);
+        adapt_archive_unpacker_free(u);
+    }
+}
+
+static void test_full_writers(void) {
+    adapt_extent ok[2] = {{0, 1}, {1, 1}}, empty[1] = {{0, 0}}, overlap[2] = {{0, 2}, {1, 1}}, past[1] = {{3, 2}};
+    uint8_t out[600];
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_HARDLINK, "a", 0, "b", NULL, 0, NULL, NULL, 0) == 1 + 2 + 1 + 2 + 1);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_HARDLINK, "a", 0, "a", NULL, 0, NULL, NULL, 0) == 0);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_HARDLINK, "a", 0, "../b", NULL, 0, NULL, NULL, 0) == 0);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_HARDLINK, "a", 0, NULL, NULL, 0, NULL, NULL, 0) == 0);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_SPARSE, "s", 2, NULL, ok, 2, &META, NULL, 0) ==
+          1 + 2 + 1 + 8 + 4 + ADAPT_METADATA_BYTES);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_SPARSE, "s", 4, NULL, NULL, 0, &META, NULL, 0) > 0);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_SPARSE, "s", 2, NULL, empty, 1, &META, NULL, 0) == 0);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_SPARSE, "s", 3, NULL, overlap, 2, &META, NULL, 0) == 0);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_SPARSE, "s", 4, NULL, past, 1, &META, NULL, 0) == 0);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_SPARSE, "s", 2, NULL, ok, 2, NULL, NULL, 0) == 0);
+    CHECK(adapt_archive_entry_full(9, "s", 2, NULL, ok, 2, &META, NULL, 0) == 0);
+    CHECK(adapt_archive_entry_full(ADAPT_ARCHIVE_FILE, "f", 2, NULL, NULL, 0, &META, NULL, 0) ==
+          adapt_archive_entry_metadata(ADAPT_ARCHIVE_FILE, "f", 2, NULL, &META, NULL, 0));
+    CHECK(adapt_archive_extent(&ok[0], out, sizeof(out)) == 16 && out[0] == 0 && out[8] == 1);
+    CHECK(adapt_archive_extent(&empty[0], out, sizeof(out)) == 0);
+    CHECK(adapt_archive_attributes(3, out, sizeof(out)) == 2 && out[0] == 3 && out[1] == 0);
+    CHECK(adapt_archive_attributes(70000, out, sizeof(out)) == 0);
+    CHECK(adapt_archive_attribute("user.x", (const uint8_t *)"v", 1, out, sizeof(out)) == 2 + 6 + 4 + 1);
+    CHECK(out[0] == 6 && memcmp(out + 2, "user.x", 6) == 0 && out[8] == 1 && out[12] == 'v');
+    CHECK(adapt_archive_attribute("", NULL, 0, out, sizeof(out)) == 0);
+    CHECK(adapt_archive_attribute("user.x", NULL, 1, out, sizeof(out)) == 0);
+    CHECK(adapt_archive_attribute("user.x", out, ADAPT_ARCHIVE_ATTRIBUTE_VALUE_MAX + 1, NULL, 0) == 0);
+    {
+        char longest[ADAPT_ARCHIVE_ATTRIBUTE_NAME_MAX + 2];
+        memset(longest, 'n', sizeof(longest) - 1);
+        longest[sizeof(longest) - 1] = '\0';
+        CHECK(adapt_archive_attribute(longest, NULL, 0, NULL, 0) == 0);
+        longest[ADAPT_ARCHIVE_ATTRIBUTE_NAME_MAX] = '\0';
+        CHECK(adapt_archive_attribute(longest, NULL, 0, NULL, 0) == 2 + ADAPT_ARCHIVE_ATTRIBUTE_NAME_MAX + 4);
+    }
+}
+
+static void test_full_malformed(void) {
+    build b;
+    size_t piece, head;
+    adapt_extent one[1] = {{0, 2}};
+    for (piece = 1; piece <= 64; piece = piece == 1 ? 5 : piece * 4) {
+        /* the new kinds are not version 2's */
+        start(&b);
+        b.bytes[7] = '2';
+        b.bytes[b.len++] = ADAPT_ARCHIVE_HARDLINK;
+        refuse(&b, 8, "kind", piece);
+        start(&b);
+        b.bytes[7] = '2';
+        b.bytes[b.len++] = ADAPT_ARCHIVE_SPARSE;
+        refuse(&b, 8, "kind", piece);
+        /* a hard link whose target leaves the folder, or is itself */
+        start3(&b);
+        b.bytes[b.len++] = ADAPT_ARCHIVE_HARDLINK;
+        b.bytes[b.len++] = 1;
+        b.bytes[b.len++] = 0;
+        put(&b, "a", 1);
+        b.bytes[b.len++] = 4;
+        b.bytes[b.len++] = 0;
+        put(&b, "../a", 4);
+        refuse(&b, 8 + 3 + 1 + 2 + 3, "hard link target", piece);
+        start3(&b);
+        b.bytes[b.len++] = ADAPT_ARCHIVE_HARDLINK;
+        b.bytes[b.len++] = 1;
+        b.bytes[b.len++] = 0;
+        put(&b, "a", 1);
+        b.bytes[b.len++] = 1;
+        b.bytes[b.len++] = 0;
+        put(&b, "a", 1);
+        refuse(&b, 8 + 3 + 1 + 2 + 0, "hard link names itself", piece);
+        /* extents: empty, out of order, past the length; too many */
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_SPARSE, "s", 4, NULL, one, 1);
+        head = b.len;
+        put(&b, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 16);
+        refuse_at(&b, head + 15, "extent is empty", piece, 1);
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_SPARSE, "s", 8, NULL, one, 1);
+        b.bytes[b.len - ADAPT_METADATA_BYTES - 4] = 2; /* two extents */
+        head = b.len;
+        put_extent(&b, 4, "ab");
+        put_extent(&b, 3, "cd");
+        refuse_at(&b, head + 18 + 15, "out of order", piece, 1);
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_SPARSE, "s", 4, NULL, one, 1);
+        head = b.len;
+        put_extent(&b, 3, "ab");
+        refuse_at(&b, head + 15, "past the file", piece, 1);
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_SPARSE, "s", 4, NULL, one, 1);
+        b.bytes[b.len - ADAPT_METADATA_BYTES - 2] = 1; /* count 65536 + 1 */
+        b.bytes[b.len - ADAPT_METADATA_BYTES - 4] = 1;
+        refuse(&b, b.len - ADAPT_METADATA_BYTES - 1, "too many extents", piece);
+        /* attributes: an empty name, a name too long, a value too long,
+         * names out of order, a name twice, a NUL in a name */
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_DIRECTORY, "d", 0, NULL, NULL, 0);
+        put_attrs(&b, 1);
+        head = b.len;
+        b.bytes[b.len++] = 0;
+        b.bytes[b.len++] = 0;
+        refuse(&b, head + 1, "attribute name", piece);
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_DIRECTORY, "d", 0, NULL, NULL, 0);
+        put_attrs(&b, 1);
+        head = b.len;
+        b.bytes[b.len++] = 0;
+        b.bytes[b.len++] = 1;
+        refuse(&b, head + 1, "attribute name", piece);
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_DIRECTORY, "d", 0, NULL, NULL, 0);
+        put_attrs(&b, 1);
+        head = b.len;
+        b.bytes[b.len++] = 1;
+        b.bytes[b.len++] = 0;
+        put(&b, "n", 1);
+        b.bytes[b.len++] = 1;
+        b.bytes[b.len++] = 0;
+        b.bytes[b.len++] = 1;
+        b.bytes[b.len++] = 0;
+        refuse(&b, head + 6, "attribute value too long", piece);
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_DIRECTORY, "d", 0, NULL, NULL, 0);
+        put_attrs(&b, 2);
+        put_attr(&b, "user.b", "1");
+        head = b.len;
+        put_attr(&b, "user.a", "2");
+        refuse(&b, b.len - 1, "out of byte order", piece);
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_DIRECTORY, "d", 0, NULL, NULL, 0);
+        put_attrs(&b, 2);
+        put_attr(&b, "user.a", "1");
+        put_attr(&b, "user.a", "");
+        refuse(&b, b.len - 1, "repeated", piece);
+        start3(&b);
+        put_full(&b, ADAPT_ARCHIVE_DIRECTORY, "d", 0, NULL, NULL, 0);
+        put_attrs(&b, 1);
+        head = b.len;
+        b.bytes[b.len++] = 2;
+        b.bytes[b.len++] = 0;
+        put(&b, "a\0", 2);
+        refuse(&b, head + 3, "NUL", piece);
+        /* a version-3 entry cut before its attributes is not complete */
+        {
+            record r;
+            adapt_archive_unpacker *u;
+            adapt_error error;
+            start3(&b);
+            put_full(&b, ADAPT_ARCHIVE_DIRECTORY, "d", 0, NULL, NULL, 0);
+            end(&b);
+            memset(&r, 0, sizeof(r));
+            CHECK(feed(b.bytes, b.len - 1, piece, &r, &u) == 0);
+            CHECK(adapt_archive_finish(u, &error) == ADAPT_ERROR_BAD_ARCHIVE);
+            adapt_archive_unpacker_free(u);
+        }
+    }
+}
+
 int main(void) {
     test_paths_and_entries();
     test_well_formed();
     test_malformed();
     test_metadata();
+    test_full_writers();
+    test_full_well_formed();
+    test_full_malformed();
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);
         return 1;
