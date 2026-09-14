@@ -1,0 +1,3616 @@
+{
+  "schema": "cadapt.corpus.scripts.v1",
+  "fetched_at": "2026-09-14T17:13:12.700818+00:00",
+  "selection": "allpages, namespace 0, non-redirects, above the size floor, from the row's start title, in title order",
+  "rows": [
+    {
+      "row": "cjk-ja",
+      "wiki": "ja.wikipedia.org",
+      "script": "CJK (kana, kanji)",
+      "licence": "CC BY-SA 4.0 (Wikipedia article text; authors per article history)",
+      "bytes": 2100118,
+      "non_ascii_bytes": 1955687,
+      "articles": [
+        {
+          "title": "あぁ〜しらき",
+          "revision": 110647727,
+          "bytes": 10698
+        },
+        {
+          "title": "あぁ愛しの番長さま",
+          "revision": 109692521,
+          "bytes": 25385
+        },
+        {
+          "title": "ああっ女神さまっ",
+          "revision": 109764250,
+          "bytes": 52548
+        },
+        {
+          "title": "ああっ女神さまっの登場人物",
+          "revision": 106453276,
+          "bytes": 76954
+        },
+        {
+          "title": "ああ探偵事務所",
+          "revision": 110136366,
+          "bytes": 21151
+        },
+        {
+          "title": "ああ播磨灘",
+          "revision": 108013862,
+          "bytes": 70200
+        },
+        {
+          "title": "あいうら",
+          "revision": 110566124,
+          "bytes": 55181
+        },
+        {
+          "title": "あいおいニッセイ同和損害保険",
+          "revision": 110890697,
+          "bytes": 15838
+        },
+        {
+          "title": "あいこら",
+          "revision": 110663294,
+          "bytes": 37186
+        },
+        {
+          "title": "あいさつの魔法。",
+          "revision": 109770269,
+          "bytes": 24714
+        },
+        {
+          "title": "あいざき進也",
+          "revision": 110542924,
+          "bytes": 11275
+        },
+        {
+          "title": "あいすなっつ",
+          "revision": 111017759,
+          "bytes": 10886
+        },
+        {
+          "title": "あいたま",
+          "revision": 109573855,
+          "bytes": 19591
+        },
+        {
+          "title": "あいだあい",
+          "revision": 110701310,
+          "bytes": 18013
+        },
+        {
+          "title": "あいだもも",
+          "revision": 109432488,
+          "bytes": 23091
+        },
+        {
+          "title": "あいちトリエンナーレ",
+          "revision": 110885143,
+          "bytes": 71584
+        },
+        {
+          "title": "あいち国際女性映画祭",
+          "revision": 108148311,
+          "bytes": 8984
+        },
+        {
+          "title": "あいつがトラブル",
+          "revision": 109746336,
+          "bytes": 14349
+        },
+        {
+          "title": "あいつが上手で下手が僕で",
+          "revision": 107294561,
+          "bytes": 14144
+        },
+        {
+          "title": "あいつとララバイ",
+          "revision": 110993276,
+          "bytes": 28157
+        },
+        {
+          "title": "あいつ今何してる?",
+          "revision": 110735807,
+          "bytes": 14815
+        },
+        {
+          "title": "あいづ",
+          "revision": 110424027,
+          "bytes": 24546
+        },
+        {
+          "title": "あいどりゅ☆",
+          "revision": 102740646,
+          "bytes": 2902
+        },
+        {
+          "title": "あいなっつ",
+          "revision": 110903277,
+          "bytes": 8112
+        },
+        {
+          "title": "あいにくあんたのためじゃない",
+          "revision": 109763347,
+          "bytes": 24221
+        },
+        {
+          "title": "あいのり",
+          "revision": 110926509,
+          "bytes": 24797
+        },
+        {
+          "title": "あいの里公園駅",
+          "revision": 110919338,
+          "bytes": 8656
+        },
+        {
+          "title": "あいの里教育大駅",
+          "revision": 110919222,
+          "bytes": 8238
+        },
+        {
+          "title": "あいの風とやま鉄道",
+          "revision": 110957399,
+          "bytes": 32537
+        },
+        {
+          "title": "あいの風とやま鉄道線",
+          "revision": 110374630,
+          "bytes": 23552
+        },
+        {
+          "title": "あいはら友子",
+          "revision": 110083958,
+          "bytes": 13288
+        },
+        {
+          "title": "あいぱく",
+          "revision": 110674923,
+          "bytes": 13656
+        },
+        {
+          "title": "あいまいみー",
+          "revision": 110599792,
+          "bytes": 19273
+        },
+        {
+          "title": "あいみょん",
+          "revision": 110945540,
+          "bytes": 16774
+        },
+        {
+          "title": "あいりすミスティリア!〜少女のつむぐ夢の秘跡〜",
+          "revision": 109979694,
+          "bytes": 103494
+        },
+        {
+          "title": "あいりん地区",
+          "revision": 110955023,
+          "bytes": 27517
+        },
+        {
+          "title": "あいコミ",
+          "revision": 110002001,
+          "bytes": 15947
+        },
+        {
+          "title": "あいテレビ",
+          "revision": 110515343,
+          "bytes": 22678
+        },
+        {
+          "title": "あい愛バス",
+          "revision": 110253610,
+          "bytes": 17811
+        },
+        {
+          "title": "あえか",
+          "revision": 110656533,
+          "bytes": 18959
+        },
+        {
+          "title": "あえかなる世界の終わりに",
+          "revision": 110613026,
+          "bytes": 20006
+        },
+        {
+          "title": "あおいうに",
+          "revision": 110188394,
+          "bytes": 6532
+        },
+        {
+          "title": "あおいちゃんとヤマトくん",
+          "revision": 94283150,
+          "bytes": 19482
+        },
+        {
+          "title": "あおいれな",
+          "revision": 110255179,
+          "bytes": 9311
+        },
+        {
+          "title": "あおい交通",
+          "revision": 110607679,
+          "bytes": 46437
+        },
+        {
+          "title": "あおい輝彦",
+          "revision": 110716566,
+          "bytes": 27092
+        },
+        {
+          "title": "あおきいろ",
+          "revision": 110721254,
+          "bytes": 15049
+        },
+        {
+          "title": "あおきさやか",
+          "revision": 110832429,
+          "bytes": 14162
+        },
+        {
+          "title": "あおぎり高校",
+          "revision": 111018499,
+          "bytes": 13906
+        },
+        {
+          "title": "あおざくら 防衛大学校物語",
+          "revision": 110940456,
+          "bytes": 136018
+        },
+        {
+          "title": "あおぞら銀行",
+          "revision": 110384676,
+          "bytes": 22953
+        },
+        {
+          "title": "あおば通駅",
+          "revision": 109767504,
+          "bytes": 8629
+        },
+        {
+          "title": "あおもりTODAY",
+          "revision": 99788785,
+          "bytes": 21473
+        },
+        {
+          "title": "あおり運転",
+          "revision": 110885145,
+          "bytes": 26098
+        },
+        {
+          "title": "あかいくつ",
+          "revision": 110873412,
+          "bytes": 12110
+        },
+        {
+          "title": "あかぎ (列車)",
+          "revision": 110735085,
+          "bytes": 16593
+        },
+        {
+          "title": "あかぎ団",
+          "revision": 110825467,
+          "bytes": 19612
+        },
+        {
+          "title": "あかこんバス",
+          "revision": 109462146,
+          "bytes": 13435
+        },
+        {
+          "title": "あかさたな",
+          "revision": 110315728,
+          "bytes": 12270
+        },
+        {
+          "title": "あかせあかり",
+          "revision": 110669206,
+          "bytes": 11404
+        },
+        {
+          "title": "あかつ",
+          "revision": 110955097,
+          "bytes": 13873
+        },
+        {
+          "title": "あかつき (列車)",
+          "revision": 105648109,
+          "bytes": 28950
+        },
+        {
+          "title": "あかつき (探査機)",
+          "revision": 110671420,
+          "bytes": 22985
+        },
+        {
+          "title": "あかね (高速フェリー)",
+          "revision": 108942069,
+          "bytes": 8179
+        },
+        {
+          "title": "あかねさす少女",
+          "revision": 110664824,
+          "bytes": 13301
+        },
+        {
+          "title": "あかねさす紫の花",
+          "revision": 107889660,
+          "bytes": 13001
+        },
+        {
+          "title": "あかね噺",
+          "revision": 111006348,
+          "bytes": 75495
+        },
+        {
+          "title": "あかね色に染まる坂",
+          "revision": 110290125,
+          "bytes": 34017
+        },
+        {
+          "title": "あかほりさとる",
+          "revision": 109548149,
+          "bytes": 18308
+        },
+        {
+          "title": "あかほり外道アワーらぶげ",
+          "revision": 103469193,
+          "bytes": 16891
+        },
+        {
+          "title": "あかりとシロの心霊夜話",
+          "revision": 109601670,
+          "bytes": 17179
+        },
+        {
+          "title": "あかるい光の中で",
+          "revision": 109733492,
+          "bytes": 4534
+        },
+        {
+          "title": "あかんたれ",
+          "revision": 110131907,
+          "bytes": 23227
+        },
+        {
+          "title": "あがた森魚",
+          "revision": 110304248,
+          "bytes": 18286
+        },
+        {
+          "title": "あきそら",
+          "revision": 110389209,
+          "bytes": 36615
+        },
+        {
+          "title": "あきつ丸",
+          "revision": 110225660,
+          "bytes": 32386
+        },
+        {
+          "title": "あきづき型護衛艦 (2代)",
+          "revision": 110950951,
+          "bytes": 27767
+        },
+        {
+          "title": "あきづき型護衛艦 (初代)",
+          "revision": 110970328,
+          "bytes": 15963
+        },
+        {
+          "title": "あきない世傳 金と銀",
+          "revision": 110328309,
+          "bytes": 23762
+        },
+        {
+          "title": "あきばもも",
+          "revision": 111003279,
+          "bytes": 10136
+        },
+        {
+          "title": "あきまん",
+          "revision": 109295197,
+          "bytes": 21392
+        },
+        {
+          "title": "あきる野市",
+          "revision": 110975771,
+          "bytes": 22237
+        },
+        {
+          "title": "あきる野市議会",
+          "revision": 110805007,
+          "bytes": 1289
+        },
+        {
+          "title": "あきれた刑事",
+          "revision": 110912477,
+          "bytes": 11512
+        },
+        {
+          "title": "あきんどスシロー",
+          "revision": 110932554,
+          "bytes": 27074
+        },
+        {
+          "title": "あき竹城",
+          "revision": 111017391,
+          "bytes": 20838
+        },
+        {
+          "title": "あぐかる",
+          "revision": 110671424,
+          "bytes": 16647
+        }
+      ],
+      "sha256": "2d5bc5bdc15cf1febd6d072f54679833afa358718928b7ed06f0b497b5fcd64f",
+      "crc32": "1ac05c77",
+      "file": "static/corpus/scripts/cjk-ja.zip",
+      "member": "cjk-ja.txt"
+    },
+    {
+      "row": "cjk-zh",
+      "wiki": "zh.wikipedia.org",
+      "script": "CJK (Han)",
+      "licence": "CC BY-SA 4.0 (Wikipedia article text; authors per article history)",
+      "bytes": 2097273,
+      "non_ascii_bytes": 1948705,
+      "articles": [
+        {
+          "title": "一·二八事變",
+          "revision": 94214474,
+          "bytes": 35857
+        },
+        {
+          "title": "一一",
+          "revision": 94301669,
+          "bytes": 15783
+        },
+        {
+          "title": "一个中国",
+          "revision": 93186573,
+          "bytes": 13112
+        },
+        {
+          "title": "一个中国政策",
+          "revision": 94158940,
+          "bytes": 18285
+        },
+        {
+          "title": "一个机构两块牌子",
+          "revision": 93722827,
+          "bytes": 11713
+        },
+        {
+          "title": "一中各表",
+          "revision": 93901461,
+          "bytes": 15590
+        },
+        {
+          "title": "一中同表",
+          "revision": 88692379,
+          "bytes": 10203
+        },
+        {
+          "title": "一中政策 (美國)",
+          "revision": 93722880,
+          "bytes": 15753
+        },
+        {
+          "title": "一丹奖",
+          "revision": 93722897,
+          "bytes": 5883
+        },
+        {
+          "title": "一之濑俊明",
+          "revision": 94288518,
+          "bytes": 16385
+        },
+        {
+          "title": "一之瀨家的大罪",
+          "revision": 90253773,
+          "bytes": 8913
+        },
+        {
+          "title": "一之瀨美空",
+          "revision": 93722978,
+          "bytes": 4680
+        },
+        {
+          "title": "一九八四",
+          "revision": 94255445,
+          "bytes": 51690
+        },
+        {
+          "title": "一事不再理",
+          "revision": 91168999,
+          "bytes": 14440
+        },
+        {
+          "title": "一二·三事件",
+          "revision": 94245340,
+          "bytes": 23942
+        },
+        {
+          "title": "一二·九运动",
+          "revision": 91838481,
+          "bytes": 38200
+        },
+        {
+          "title": "一人之下",
+          "revision": 93798391,
+          "bytes": 18946
+        },
+        {
+          "title": "一人有一點顏色",
+          "revision": 93083301,
+          "bytes": 9500
+        },
+        {
+          "title": "一代女皇",
+          "revision": 93451242,
+          "bytes": 11015
+        },
+        {
+          "title": "一代宗師",
+          "revision": 92361518,
+          "bytes": 6160
+        },
+        {
+          "title": "一代新兵之八極少年",
+          "revision": 92137555,
+          "bytes": 2382
+        },
+        {
+          "title": "一份应予保护的干部名单",
+          "revision": 94211785,
+          "bytes": 6317
+        },
+        {
+          "title": "一体式荧光灯",
+          "revision": 89437802,
+          "bytes": 19271
+        },
+        {
+          "title": "一例一休",
+          "revision": 93855468,
+          "bytes": 66351
+        },
+        {
+          "title": "一個中國 (中華人民共和國)",
+          "revision": 93964644,
+          "bytes": 17111
+        },
+        {
+          "title": "一個中國 (中華民國)",
+          "revision": 93186507,
+          "bytes": 15336
+        },
+        {
+          "title": "一個人的○○小日子",
+          "revision": 93723396,
+          "bytes": 10440
+        },
+        {
+          "title": "一個國家的誕生",
+          "revision": 93723426,
+          "bytes": 17745
+        },
+        {
+          "title": "一個巨星的誕生 (2018年原聲帶)",
+          "revision": 92264303,
+          "bytes": 9245
+        },
+        {
+          "title": "一個部門的誕生",
+          "revision": 93726117,
+          "bytes": 8803
+        },
+        {
+          "title": "一兆＄遊戲",
+          "revision": 93723558,
+          "bytes": 4890
+        },
+        {
+          "title": "一党优势制",
+          "revision": 93765016,
+          "bytes": 31048
+        },
+        {
+          "title": "一党制",
+          "revision": 93847489,
+          "bytes": 10092
+        },
+        {
+          "title": "一八七二遊花園",
+          "revision": 93967489,
+          "bytes": 19202
+        },
+        {
+          "title": "一公升的眼淚 (電視劇)",
+          "revision": 91547764,
+          "bytes": 10565
+        },
+        {
+          "title": "一关市",
+          "revision": 93557933,
+          "bytes": 6901
+        },
+        {
+          "title": "一切經音義",
+          "revision": 85562044,
+          "bytes": 16089
+        },
+        {
+          "title": "一切都成Rumor",
+          "revision": 93593400,
+          "bytes": 7534
+        },
+        {
+          "title": "一力辽",
+          "revision": 93723755,
+          "bytes": 15490
+        },
+        {
+          "title": "一加",
+          "revision": 93954352,
+          "bytes": 5066
+        },
+        {
+          "title": "一加手机X",
+          "revision": 90517569,
+          "bytes": 5043
+        },
+        {
+          "title": "一加手機3",
+          "revision": 93723805,
+          "bytes": 8230
+        },
+        {
+          "title": "一勝千金",
+          "revision": 94315882,
+          "bytes": 56260
+        },
+        {
+          "title": "一千五百万点",
+          "revision": 93723818,
+          "bytes": 22047
+        },
+        {
+          "title": "一千個晚安",
+          "revision": 93723825,
+          "bytes": 7623
+        },
+        {
+          "title": "一千堅尼錦標",
+          "revision": 92568170,
+          "bytes": 2125
+        },
+        {
+          "title": "一千日圓紙幣",
+          "revision": 93723836,
+          "bytes": 8585
+        },
+        {
+          "title": "一千种恐惧",
+          "revision": 91467853,
+          "bytes": 4110
+        },
+        {
+          "title": "一千零一夜",
+          "revision": 93487818,
+          "bytes": 17539
+        },
+        {
+          "title": "一千零一夜 (電視劇)",
+          "revision": 90120299,
+          "bytes": 2055
+        },
+        {
+          "title": "一卡通票證公司",
+          "revision": 93956051,
+          "bytes": 5679
+        },
+        {
+          "title": "一吻爆炸",
+          "revision": 93724048,
+          "bytes": 10904
+        },
+        {
+          "title": "一周偶像",
+          "revision": 93724078,
+          "bytes": 11247
+        },
+        {
+          "title": "一周星星",
+          "revision": 94305284,
+          "bytes": 429
+        },
+        {
+          "title": "一呼百應 (台灣節目)",
+          "revision": 93970354,
+          "bytes": 14100
+        },
+        {
+          "title": "一哩冠軍南部盃",
+          "revision": 90253783,
+          "bytes": 6692
+        },
+        {
+          "title": "一哩冠軍賽",
+          "revision": 92063083,
+          "bytes": 5020
+        },
+        {
+          "title": "一国一制",
+          "revision": 90057230,
+          "bytes": 16290
+        },
+        {
+          "title": "一国两制",
+          "revision": 94101794,
+          "bytes": 83307
+        },
+        {
+          "title": "一国两区",
+          "revision": 94129336,
+          "bytes": 20669
+        },
+        {
+          "title": "一国党",
+          "revision": 93724152,
+          "bytes": 7271
+        },
+        {
+          "title": "一國兩制臺灣方案",
+          "revision": 94183042,
+          "bytes": 19280
+        },
+        {
+          "title": "一國方案",
+          "revision": 93724165,
+          "bytes": 23970
+        },
+        {
+          "title": "一國良制",
+          "revision": 90120302,
+          "bytes": 7697
+        },
+        {
+          "title": "一地兩檢",
+          "revision": 94018360,
+          "bytes": 14707
+        },
+        {
+          "title": "一夫多妻制",
+          "revision": 94257557,
+          "bytes": 25415
+        },
+        {
+          "title": "一季风暴",
+          "revision": 93747818,
+          "bytes": 23276
+        },
+        {
+          "title": "一孩政策",
+          "revision": 94342391,
+          "bytes": 6464
+        },
+        {
+          "title": "一宮",
+          "revision": 93048237,
+          "bytes": 947
+        },
+        {
+          "title": "一宮市",
+          "revision": 93561881,
+          "bytes": 6664
+        },
+        {
+          "title": "一家人 (電影)",
+          "revision": 94103349,
+          "bytes": 35010
+        },
+        {
+          "title": "一屋後生仔",
+          "revision": 90517601,
+          "bytes": 1817
+        },
+        {
+          "title": "一屋老友記",
+          "revision": 93929622,
+          "bytes": 3322
+        },
+        {
+          "title": "一屍到底",
+          "revision": 91504079,
+          "bytes": 11834
+        },
+        {
+          "title": "一带一路",
+          "revision": 94351366,
+          "bytes": 56138
+        },
+        {
+          "title": "一帶一路·與我何干",
+          "revision": 93724867,
+          "bytes": 18854
+        },
+        {
+          "title": "一年一度喜剧大赛",
+          "revision": 93971152,
+          "bytes": 1850
+        },
+        {
+          "title": "一式戰鬥機",
+          "revision": 93730826,
+          "bytes": 22019
+        },
+        {
+          "title": "一式陸上攻擊機",
+          "revision": 94258022,
+          "bytes": 22409
+        },
+        {
+          "title": "一弦定音！",
+          "revision": 93667479,
+          "bytes": 25944
+        },
+        {
+          "title": "一心論",
+          "revision": 48043979,
+          "bytes": 5239
+        },
+        {
+          "title": "一念关山",
+          "revision": 94118975,
+          "bytes": 1444
+        },
+        {
+          "title": "一戰再戰",
+          "revision": 93725148,
+          "bytes": 16564
+        },
+        {
+          "title": "一把青",
+          "revision": 94225988,
+          "bytes": 6400
+        },
+        {
+          "title": "一拳書館",
+          "revision": 93725217,
+          "bytes": 6931
+        },
+        {
+          "title": "一拳超人",
+          "revision": 94236740,
+          "bytes": 10553
+        },
+        {
+          "title": "一拳超人 (動畫)",
+          "revision": 94013954,
+          "bytes": 1762
+        },
+        {
+          "title": "一拳超人角色列表",
+          "revision": 93655453,
+          "bytes": 162498
+        },
+        {
+          "title": "一擲千金 (電視節目)",
+          "revision": 93725282,
+          "bytes": 4355
+        },
+        {
+          "title": "一方通行",
+          "revision": 94000952,
+          "bytes": 21597
+        },
+        {
+          "title": "一无所有 (歌曲)",
+          "revision": 93725305,
+          "bytes": 14884
+        },
+        {
+          "title": "一无所知 (政治运动)",
+          "revision": 93511759,
+          "bytes": 16114
+        },
+        {
+          "title": "一日三餐",
+          "revision": 93725341,
+          "bytes": 3458
+        },
+        {
+          "title": "一日系列",
+          "revision": 93725380,
+          "bytes": 1581
+        },
+        {
+          "title": "一月风暴",
+          "revision": 93827426,
+          "bytes": 23769
+        },
+        {
+          "title": "一條和矢",
+          "revision": 94359188,
+          "bytes": 27899
+        },
+        {
+          "title": "一樓一鳳",
+          "revision": 94168598,
+          "bytes": 17271
+        },
+        {
+          "title": "一樹梨花壓海棠",
+          "revision": 94331349,
+          "bytes": 15263
+        },
+        {
+          "title": "一橋大學",
+          "revision": 93725658,
+          "bytes": 10958
+        },
+        {
+          "title": "一氧化二氮",
+          "revision": 93725776,
+          "bytes": 23835
+        },
+        {
+          "title": "一氧化氮生物化学效用",
+          "revision": 93725785,
+          "bytes": 9336
+        },
+        {
+          "title": "一氧化碳脱氢酶",
+          "revision": 93952776,
+          "bytes": 13542
+        },
+        {
+          "title": "一江山岛战役",
+          "revision": 93250219,
+          "bytes": 45701
+        },
+        {
+          "title": "一流藝人品鑑中",
+          "revision": 93595835,
+          "bytes": 1930
+        },
+        {
+          "title": "一獄一世界",
+          "revision": 91263151,
+          "bytes": 11941
+        },
+        {
+          "title": "一生一世 (歌曲)",
+          "revision": 93726003,
+          "bytes": 3352
+        },
+        {
+          "title": "一生何求 (陳百強專輯)",
+          "revision": 94049762,
+          "bytes": 12388
+        },
+        {
+          "title": "一田百貨",
+          "revision": 93726045,
+          "bytes": 12442
+        },
+        {
+          "title": "一百万计划",
+          "revision": 93773557,
+          "bytes": 12109
+        },
+        {
+          "title": "一百单八将",
+          "revision": 93619684,
+          "bytes": 1463
+        },
+        {
+          "title": "一碟秘密",
+          "revision": 93726262,
+          "bytes": 15669
+        },
+        {
+          "title": "一神論",
+          "revision": 93726266,
+          "bytes": 12614
+        },
+        {
+          "title": "一秒鐘",
+          "revision": 93726299,
+          "bytes": 14948
+        },
+        {
+          "title": "一種注目",
+          "revision": 92769919,
+          "bytes": 647
+        },
+        {
+          "title": "一笑渡凡間",
+          "revision": 92249145,
+          "bytes": 1736
+        },
+        {
+          "title": "一級方程式世界車手冠軍列表",
+          "revision": 94107492,
+          "bytes": 3258
+        },
+        {
+          "title": "一級方程式出示紅旗的賽事列表",
+          "revision": 94026638,
+          "bytes": 2983
+        },
+        {
+          "title": "一級方程式賽車大獎賽列表",
+          "revision": 94014551,
+          "bytes": 1799
+        },
+        {
+          "title": "一級方程式賽車大獎賽紀錄列表",
+          "revision": 93726423,
+          "bytes": 1186
+        },
+        {
+          "title": "一級方程式賽車最快單圈車手列表",
+          "revision": 93064191,
+          "bytes": 2072
+        },
+        {
+          "title": "一級方程式賽車桿位獲得者列表",
+          "revision": 93064196,
+          "bytes": 1890
+        },
+        {
+          "title": "一級方程式賽車賽季列表",
+          "revision": 93615961,
+          "bytes": 1251
+        },
+        {
+          "title": "一級方程式賽車賽道列表",
+          "revision": 93921401,
+          "bytes": 1736
+        },
+        {
+          "title": "一級方程式賽車車手紀錄列表",
+          "revision": 93726443,
+          "bytes": 6036
+        },
+        {
+          "title": "一級方程式賽車車手號碼列表",
+          "revision": 93726447,
+          "bytes": 3558
+        },
+        {
+          "title": "一級方程式賽車車輛",
+          "revision": 93726493,
+          "bytes": 37257
+        },
+        {
+          "title": "一級方程式賽車車隊紀錄列表",
+          "revision": 93726497,
+          "bytes": 1310
+        },
+        {
+          "title": "一級玩家 (電影)",
+          "revision": 93075656,
+          "bytes": 14980
+        },
+        {
+          "title": "一级方程式世界车手亚军列表",
+          "revision": 90958201,
+          "bytes": 1976
+        },
+        {
+          "title": "一级方程式世界车队冠军列表",
+          "revision": 93365850,
+          "bytes": 2484
+        },
+        {
+          "title": "一级方程式积分系统",
+          "revision": 88038241,
+          "bytes": 3737
+        },
+        {
+          "title": "一级方程式赛车",
+          "revision": 94231079,
+          "bytes": 38088
+        },
+        {
+          "title": "一级方程式赛车制造商列表",
+          "revision": 91801074,
+          "bytes": 782
+        },
+        {
+          "title": "一级方程式赛车历史",
+          "revision": 93230543,
+          "bytes": 65331
+        },
+        {
+          "title": "一级方程式赛车大奖赛冠军列表",
+          "revision": 93088356,
+          "bytes": 2264
+        },
+        {
+          "title": "一级方程式赛车引擎",
+          "revision": 93615958,
+          "bytes": 43614
+        },
+        {
+          "title": "一级方程式赛车引擎制造商列表",
+          "revision": 92374029,
+          "bytes": 1239
+        },
+        {
+          "title": "一级方程式赛车致命事故列表",
+          "revision": 93726672,
+          "bytes": 3138
+        },
+        {
+          "title": "一级方程式赛车车手列表",
+          "revision": 90244585,
+          "bytes": 479
+        },
+        {
+          "title": "一级方程式轮胎",
+          "revision": 91684145,
+          "bytes": 3862
+        }
+      ],
+      "sha256": "b782c949524d4b4867f23a21c0e1cc3905f6a90074c9358f281effbda5ad7d78",
+      "crc32": "b3d22972",
+      "file": "static/corpus/scripts/cjk-zh.zip",
+      "member": "cjk-zh.txt"
+    },
+    {
+      "row": "cyrillic-ru",
+      "wiki": "ru.wikipedia.org",
+      "script": "Cyrillic",
+      "licence": "CC BY-SA 4.0 (Wikipedia article text; authors per article history)",
+      "bytes": 2119081,
+      "non_ascii_bytes": 1856581,
+      "articles": [
+        {
+          "title": "А-50",
+          "revision": 152486519,
+          "bytes": 30100
+        },
+        {
+          "title": "А1 (провайдер)",
+          "revision": 154905469,
+          "bytes": 53746
+        },
+        {
+          "title": "А (вагон метро)",
+          "revision": 154922935,
+          "bytes": 26890
+        },
+        {
+          "title": "АА (паровоз)",
+          "revision": 153779807,
+          "bytes": 35860
+        },
+        {
+          "title": "АДУ-1000",
+          "revision": 152219541,
+          "bytes": 27587
+        },
+        {
+          "title": "АЕК (футбольный клуб, Афины)",
+          "revision": 155052038,
+          "bytes": 29452
+        },
+        {
+          "title": "АЗ (футбольный клуб)",
+          "revision": 154943873,
+          "bytes": 8161
+        },
+        {
+          "title": "АИК (футбольный клуб)",
+          "revision": 154928970,
+          "bytes": 4052
+        },
+        {
+          "title": "АИР",
+          "revision": 154897446,
+          "bytes": 60485
+        },
+        {
+          "title": "АК-12",
+          "revision": 154965283,
+          "bytes": 25170
+        },
+        {
+          "title": "АК-74",
+          "revision": 153624247,
+          "bytes": 50340
+        },
+        {
+          "title": "АКС-74У",
+          "revision": 154729855,
+          "bytes": 35193
+        },
+        {
+          "title": "АКСМ-321",
+          "revision": 154502071,
+          "bytes": 24818
+        },
+        {
+          "title": "АМ-34",
+          "revision": 150503847,
+          "bytes": 49836
+        },
+        {
+          "title": "АМ1",
+          "revision": 153866806,
+          "bytes": 29662
+        },
+        {
+          "title": "АМО-Ф-15",
+          "revision": 154570452,
+          "bytes": 29165
+        },
+        {
+          "title": "АНТ-20",
+          "revision": 153945423,
+          "bytes": 25651
+        },
+        {
+          "title": "АПЭКС (космический проект)",
+          "revision": 155020151,
+          "bytes": 24509
+        },
+        {
+          "title": "АРХ Москва",
+          "revision": 153091674,
+          "bytes": 28833
+        },
+        {
+          "title": "АСУ-57",
+          "revision": 154275482,
+          "bytes": 127998
+        },
+        {
+          "title": "АТВ",
+          "revision": 154587304,
+          "bytes": 18290
+        },
+        {
+          "title": "АУЕ",
+          "revision": 154999480,
+          "bytes": 45821
+        },
+        {
+          "title": "АУКУС",
+          "revision": 154093107,
+          "bytes": 22929
+        },
+        {
+          "title": "АФК «Система»",
+          "revision": 154900062,
+          "bytes": 45011
+        },
+        {
+          "title": "АФК Эскильстуна",
+          "revision": 152013359,
+          "bytes": 21859
+        },
+        {
+          "title": "АЧ2",
+          "revision": 154938842,
+          "bytes": 118258
+        },
+        {
+          "title": "АЧО",
+          "revision": 153866297,
+          "bytes": 28737
+        },
+        {
+          "title": "АЭС «Аккую»",
+          "revision": 153887495,
+          "bytes": 24424
+        },
+        {
+          "title": "АЭС «Олкилуото»",
+          "revision": 147310906,
+          "bytes": 19858
+        },
+        {
+          "title": "Аалто, Алвар",
+          "revision": 154129445,
+          "bytes": 20993
+        },
+        {
+          "title": "Абадиев, Японц Арскиевич",
+          "revision": 149550602,
+          "bytes": 19505
+        },
+        {
+          "title": "Абазины",
+          "revision": 154586557,
+          "bytes": 41989
+        },
+        {
+          "title": "Абай Кунанбаев",
+          "revision": 154893438,
+          "bytes": 35520
+        },
+        {
+          "title": "Абайская область",
+          "revision": 155036179,
+          "bytes": 10948
+        },
+        {
+          "title": "Абакан",
+          "revision": 154740328,
+          "bytes": 39086
+        },
+        {
+          "title": "Абакумов, Виктор Семёнович",
+          "revision": 155044633,
+          "bytes": 43986
+        },
+        {
+          "title": "Абанква, Джеймс",
+          "revision": 155042196,
+          "bytes": 17378
+        },
+        {
+          "title": "Абаоцзи",
+          "revision": 146040362,
+          "bytes": 58968
+        },
+        {
+          "title": "Абас I",
+          "revision": 154852239,
+          "bytes": 50248
+        },
+        {
+          "title": "Абаскаль, Гильермо",
+          "revision": 155038344,
+          "bytes": 22109
+        },
+        {
+          "title": "Абасов, Мамедали Исматович",
+          "revision": 146716753,
+          "bytes": 19802
+        },
+        {
+          "title": "Абатский район",
+          "revision": 154033005,
+          "bytes": 11736
+        },
+        {
+          "title": "Абашев, Владимир Васильевич",
+          "revision": 151548656,
+          "bytes": 25934
+        },
+        {
+          "title": "Абашидзе, Аслан Хусейнович",
+          "revision": 154954110,
+          "bytes": 44282
+        },
+        {
+          "title": "Абашин, Сергей Николаевич",
+          "revision": 154377059,
+          "bytes": 19828
+        },
+        {
+          "title": "Аббас, Махмуд",
+          "revision": 154515768,
+          "bytes": 31298
+        },
+        {
+          "title": "Аббас I Великий",
+          "revision": 152642873,
+          "bytes": 44913
+        },
+        {
+          "title": "Аббас Лисани",
+          "revision": 155055663,
+          "bytes": 62814
+        },
+        {
+          "title": "Аббасидский халифат",
+          "revision": 154211860,
+          "bytes": 73505
+        },
+        {
+          "title": "Аббасиды",
+          "revision": 151068257,
+          "bytes": 24319
+        },
+        {
+          "title": "Аббасов, Али Мамед оглы",
+          "revision": 154934954,
+          "bytes": 12409
+        },
+        {
+          "title": "Аббасова, Севиндж Вагиф кызы",
+          "revision": 154922423,
+          "bytes": 36122
+        },
+        {
+          "title": "Аббатство Даунтон (сериал)",
+          "revision": 154002346,
+          "bytes": 79863
+        },
+        {
+          "title": "Аббатство Даунтон (фильм)",
+          "revision": 154879015,
+          "bytes": 18571
+        },
+        {
+          "title": "Аббревиатуры телефонии",
+          "revision": 148978882,
+          "bytes": 37497
+        },
+        {
+          "title": "Абдал-хан",
+          "revision": 148783275,
+          "bytes": 31899
+        },
+        {
+          "title": "Абдалла II ибн Хусейн",
+          "revision": 154586959,
+          "bytes": 20247
+        },
+        {
+          "title": "Абдалла Абдуррахман ат-Тани",
+          "revision": 154571527,
+          "bytes": 24920
+        },
+        {
+          "title": "Абдаллах ибн Хусейн",
+          "revision": 152975240,
+          "bytes": 38870
+        },
+        {
+          "title": "Абдалмумин-хан",
+          "revision": 152404836,
+          "bytes": 26827
+        }
+      ],
+      "sha256": "0dc56cd76c7655a7d485e13b35f8afd533385569731fe5725b31aede519c1653",
+      "crc32": "676383c4",
+      "file": "static/corpus/scripts/cyrillic-ru.zip",
+      "member": "cyrillic-ru.txt"
+    },
+    {
+      "row": "diacritics-cs",
+      "wiki": "cs.wikipedia.org",
+      "script": "Latin with diacritics",
+      "licence": "CC BY-SA 4.0 (Wikipedia article text; authors per article history)",
+      "bytes": 2100535,
+      "non_ascii_bytes": 371370,
+      "articles": [
+        {
+          "title": "A-1 Pictures",
+          "revision": 24833609,
+          "bytes": 1280
+        },
+        {
+          "title": "A-League",
+          "revision": 24546936,
+          "bytes": 8384
+        },
+        {
+          "title": "AC/DC",
+          "revision": 26069926,
+          "bytes": 39823
+        },
+        {
+          "title": "ACF Fiorentina",
+          "revision": 26198974,
+          "bytes": 7795
+        },
+        {
+          "title": "ACR Messina",
+          "revision": 25996553,
+          "bytes": 4151
+        },
+        {
+          "title": "AC Milán",
+          "revision": 26182595,
+          "bytes": 52655
+        },
+        {
+          "title": "AC Milán 2003/2004",
+          "revision": 25432681,
+          "bytes": 910
+        },
+        {
+          "title": "AC Milán 2004/2005",
+          "revision": 25432682,
+          "bytes": 976
+        },
+        {
+          "title": "AC Milán 2005/2006",
+          "revision": 25442170,
+          "bytes": 898
+        },
+        {
+          "title": "AC Milán 2006/2007",
+          "revision": 25432684,
+          "bytes": 1032
+        },
+        {
+          "title": "AC Milán 2007/2008",
+          "revision": 25432685,
+          "bytes": 782
+        },
+        {
+          "title": "AC Milán 2008/2009",
+          "revision": 25432686,
+          "bytes": 720
+        },
+        {
+          "title": "AC Milán 2009/2010",
+          "revision": 25432687,
+          "bytes": 731
+        },
+        {
+          "title": "AC Milán 2010/2011",
+          "revision": 25432688,
+          "bytes": 724
+        },
+        {
+          "title": "AC Milán 2011/2012",
+          "revision": 25432689,
+          "bytes": 1037
+        },
+        {
+          "title": "AC Milán 2012/2013",
+          "revision": 25432697,
+          "bytes": 819
+        },
+        {
+          "title": "AC Milán 2013/2014",
+          "revision": 25444308,
+          "bytes": 817
+        },
+        {
+          "title": "AC Milán 2014/2015",
+          "revision": 25432733,
+          "bytes": 966
+        },
+        {
+          "title": "AC Milán 2015/2016",
+          "revision": 25432734,
+          "bytes": 874
+        },
+        {
+          "title": "AC Milán 2017/2018",
+          "revision": 25432742,
+          "bytes": 811
+        },
+        {
+          "title": "AC Milán 2018/2019",
+          "revision": 26063652,
+          "bytes": 953
+        },
+        {
+          "title": "AC Milán 2020/2021",
+          "revision": 25432757,
+          "bytes": 772
+        },
+        {
+          "title": "AC Milán 2021/2022",
+          "revision": 25432761,
+          "bytes": 746
+        },
+        {
+          "title": "AC Milán 2022/2023",
+          "revision": 25432764,
+          "bytes": 934
+        },
+        {
+          "title": "AC Milán 2023/2024",
+          "revision": 25432770,
+          "bytes": 901
+        },
+        {
+          "title": "AC Milán 2024/2025",
+          "revision": 25432773,
+          "bytes": 934
+        },
+        {
+          "title": "AC Milán 2025/2026",
+          "revision": 25956310,
+          "bytes": 817
+        },
+        {
+          "title": "AC Monza",
+          "revision": 26205663,
+          "bytes": 5057
+        },
+        {
+          "title": "AC Perugia Calcio",
+          "revision": 25993354,
+          "bytes": 4499
+        },
+        {
+          "title": "AC Reggiana 1919",
+          "revision": 26171327,
+          "bytes": 3455
+        },
+        {
+          "title": "AC Sparta Praha",
+          "revision": 26204710,
+          "bytes": 87359
+        },
+        {
+          "title": "AC Sparta Praha 2010/2011",
+          "revision": 25486899,
+          "bytes": 6038
+        },
+        {
+          "title": "AC Sparta Praha 2012/2013",
+          "revision": 25432696,
+          "bytes": 3935
+        },
+        {
+          "title": "AC Sparta Praha 2013/2014",
+          "revision": 25432703,
+          "bytes": 2656
+        },
+        {
+          "title": "AC Sparta Praha 2014/2015",
+          "revision": 26069916,
+          "bytes": 1163
+        },
+        {
+          "title": "AC Sparta Praha 2015/2016",
+          "revision": 25432755,
+          "bytes": 1402
+        },
+        {
+          "title": "AC Sparta Praha 2016/2017",
+          "revision": 25740756,
+          "bytes": 3588
+        },
+        {
+          "title": "AC Sparta Praha 2017/2018",
+          "revision": 26105098,
+          "bytes": 3586
+        },
+        {
+          "title": "AC Sparta Praha 2018/2019",
+          "revision": 26069919,
+          "bytes": 15052
+        },
+        {
+          "title": "AC Sparta Praha 2019/2020",
+          "revision": 26069920,
+          "bytes": 14328
+        },
+        {
+          "title": "AC Sparta Praha 2020/2021",
+          "revision": 26069923,
+          "bytes": 4990
+        },
+        {
+          "title": "AC Sparta Praha 2021/2022",
+          "revision": 26023802,
+          "bytes": 3205
+        },
+        {
+          "title": "AC Sparta Praha Florbal",
+          "revision": 25821225,
+          "bytes": 11634
+        },
+        {
+          "title": "AC Sparta Praha „B“ 2019/2020",
+          "revision": 26069924,
+          "bytes": 1957
+        },
+        {
+          "title": "AC Sparta Praha „B“ 2020/2021",
+          "revision": 26202829,
+          "bytes": 1899
+        },
+        {
+          "title": "AC Sparta Praha „B“ 2021/2022",
+          "revision": 25432760,
+          "bytes": 785
+        },
+        {
+          "title": "ADHD",
+          "revision": 26203598,
+          "bytes": 50675
+        },
+        {
+          "title": "AEGON Championships 2009",
+          "revision": 25822643,
+          "bytes": 942
+        },
+        {
+          "title": "AEGON Championships 2010",
+          "revision": 25836619,
+          "bytes": 1357
+        },
+        {
+          "title": "AEGON Championships 2011",
+          "revision": 25532203,
+          "bytes": 2129
+        },
+        {
+          "title": "AEGON Championships 2012",
+          "revision": 22725804,
+          "bytes": 3571
+        },
+        {
+          "title": "AFC Ajax",
+          "revision": 26181240,
+          "bytes": 12756
+        },
+        {
+          "title": "AFC Bournemouth",
+          "revision": 26148415,
+          "bytes": 10763
+        },
+        {
+          "title": "AFK Tišnov",
+          "revision": 25968714,
+          "bytes": 6881
+        },
+        {
+          "title": "AIM-120 AMRAAM",
+          "revision": 25791724,
+          "bytes": 7529
+        },
+        {
+          "title": "AI bublina",
+          "revision": 26202882,
+          "bytes": 13470
+        },
+        {
+          "title": "AKB48",
+          "revision": 24402298,
+          "bytes": 8829
+        },
+        {
+          "title": "AMD Am2900",
+          "revision": 26069945,
+          "bytes": 10938
+        },
+        {
+          "title": "ANO 2011",
+          "revision": 26192841,
+          "bytes": 33181
+        },
+        {
+          "title": "ANSI escape kód",
+          "revision": 26069947,
+          "bytes": 19627
+        },
+        {
+          "title": "APOEL FC",
+          "revision": 25713955,
+          "bytes": 2601
+        },
+        {
+          "title": "ARM",
+          "revision": 26116056,
+          "bytes": 10729
+        },
+        {
+          "title": "ASK Blansko",
+          "revision": 25425039,
+          "bytes": 6679
+        },
+        {
+          "title": "AS Reggina 1914",
+          "revision": 26016177,
+          "bytes": 4359
+        },
+        {
+          "title": "AS Řím",
+          "revision": 26206833,
+          "bytes": 5867
+        },
+        {
+          "title": "ATP Buenos Aires",
+          "revision": 25679486,
+          "bytes": 2620
+        },
+        {
+          "title": "ATP Challenger Tour 2010",
+          "revision": 25274975,
+          "bytes": 582
+        },
+        {
+          "title": "ATP Cup 2020",
+          "revision": 20807817,
+          "bytes": 6663
+        },
+        {
+          "title": "ATP Cup 2022",
+          "revision": 23895791,
+          "bytes": 5440
+        },
+        {
+          "title": "ATP Finals 2017",
+          "revision": 25954980,
+          "bytes": 4658
+        },
+        {
+          "title": "ATP Finals 2018",
+          "revision": 25353269,
+          "bytes": 4404
+        },
+        {
+          "title": "ATP Finals 2019",
+          "revision": 25375000,
+          "bytes": 4892
+        },
+        {
+          "title": "ATP Finals 2020",
+          "revision": 25274985,
+          "bytes": 5554
+        },
+        {
+          "title": "ATP Finals 2021",
+          "revision": 26060424,
+          "bytes": 4791
+        },
+        {
+          "title": "ATP Finals 2022",
+          "revision": 26060425,
+          "bytes": 7114
+        },
+        {
+          "title": "ATP Finals 2023",
+          "revision": 25498364,
+          "bytes": 6579
+        },
+        {
+          "title": "ATP Finals 2024",
+          "revision": 25498366,
+          "bytes": 7051
+        },
+        {
+          "title": "ATP Finals 2025",
+          "revision": 25954982,
+          "bytes": 6396
+        },
+        {
+          "title": "ATP Tour 2019",
+          "revision": 25412441,
+          "bytes": 9908
+        },
+        {
+          "title": "ATP Tour 2020",
+          "revision": 25275009,
+          "bytes": 14451
+        },
+        {
+          "title": "ATP Tour 2021",
+          "revision": 25433364,
+          "bytes": 15171
+        },
+        {
+          "title": "ATP Tour 2022",
+          "revision": 25954984,
+          "bytes": 9645
+        },
+        {
+          "title": "ATP Tour 2023",
+          "revision": 25884221,
+          "bytes": 5259
+        },
+        {
+          "title": "ATP Tour 2024",
+          "revision": 26203137,
+          "bytes": 10864
+        },
+        {
+          "title": "ATP Tour 2025",
+          "revision": 25790240,
+          "bytes": 10676
+        },
+        {
+          "title": "ATP Tour 2026",
+          "revision": 26176704,
+          "bytes": 3446
+        },
+        {
+          "title": "ATP Tour 250",
+          "revision": 25275052,
+          "bytes": 2305
+        },
+        {
+          "title": "ATP Tour Masters 1000",
+          "revision": 25893505,
+          "bytes": 6529
+        },
+        {
+          "title": "ATP World Tour 2009",
+          "revision": 25794803,
+          "bytes": 1077
+        },
+        {
+          "title": "ATP World Tour 2010",
+          "revision": 25353055,
+          "bytes": 5177
+        },
+        {
+          "title": "ATP World Tour 2010/leden-červen",
+          "revision": 25796521,
+          "bytes": 1069
+        },
+        {
+          "title": "ATP World Tour 2010/červenec-prosinec",
+          "revision": 21530208,
+          "bytes": 1246
+        },
+        {
+          "title": "ATP World Tour 2011",
+          "revision": 25275067,
+          "bytes": 1593
+        },
+        {
+          "title": "ATP World Tour 2012",
+          "revision": 25275068,
+          "bytes": 1822
+        },
+        {
+          "title": "ATP World Tour 2013",
+          "revision": 25433366,
+          "bytes": 4065
+        },
+        {
+          "title": "ATP World Tour 2014",
+          "revision": 26069960,
+          "bytes": 7901
+        },
+        {
+          "title": "ATP World Tour 2015",
+          "revision": 25275077,
+          "bytes": 7317
+        },
+        {
+          "title": "ATP World Tour 2016",
+          "revision": 25275078,
+          "bytes": 6159
+        },
+        {
+          "title": "ATP World Tour 2017",
+          "revision": 26203146,
+          "bytes": 10642
+        },
+        {
+          "title": "ATP World Tour 2018",
+          "revision": 25275086,
+          "bytes": 14872
+        },
+        {
+          "title": "ATP World Tour Finals 2013",
+          "revision": 25275087,
+          "bytes": 4776
+        },
+        {
+          "title": "ATP World Tour Finals 2014",
+          "revision": 22725884,
+          "bytes": 4368
+        },
+        {
+          "title": "ATP World Tour Finals 2015",
+          "revision": 25275089,
+          "bytes": 5132
+        },
+        {
+          "title": "AVN Awards 2016",
+          "revision": 25359532,
+          "bytes": 2937
+        },
+        {
+          "title": "AVN Awards 2017",
+          "revision": 25359533,
+          "bytes": 3371
+        },
+        {
+          "title": "AZ Heimstaden Havířov",
+          "revision": 26083846,
+          "bytes": 4765
+        },
+        {
+          "title": "A Million Little Things",
+          "revision": 26174528,
+          "bytes": 6439
+        },
+        {
+          "title": "A Voyage Round the World",
+          "revision": 25400270,
+          "bytes": 61032
+        },
+        {
+          "title": "Aaron Hickey",
+          "revision": 26203214,
+          "bytes": 6295
+        },
+        {
+          "title": "Aaron Ramsey",
+          "revision": 26203222,
+          "bytes": 10873
+        },
+        {
+          "title": "Abcházie",
+          "revision": 26130751,
+          "bytes": 43692
+        },
+        {
+          "title": "Abe Lenstra",
+          "revision": 26137119,
+          "bytes": 12857
+        },
+        {
+          "title": "Able Archer 83",
+          "revision": 26139783,
+          "bytes": 21070
+        },
+        {
+          "title": "Abraham Lincoln",
+          "revision": 26131131,
+          "bytes": 22611
+        },
+        {
+          "title": "Abú Ibráhím al-Hášimí al-Kurajší",
+          "revision": 25755150,
+          "bytes": 18153
+        },
+        {
+          "title": "Accept",
+          "revision": 26154573,
+          "bytes": 24850
+        },
+        {
+          "title": "Achajský kníže",
+          "revision": 26165320,
+          "bytes": 11505
+        },
+        {
+          "title": "Achille Varzi",
+          "revision": 26083715,
+          "bytes": 28063
+        },
+        {
+          "title": "Acremonium chrysogenum",
+          "revision": 26203472,
+          "bytes": 11889
+        },
+        {
+          "title": "Adam Armstrong",
+          "revision": 24482261,
+          "bytes": 7131
+        },
+        {
+          "title": "Adam B. Bartoš",
+          "revision": 26203500,
+          "bytes": 9256
+        },
+        {
+          "title": "Adam Georgiev",
+          "revision": 26203530,
+          "bytes": 31763
+        },
+        {
+          "title": "Adam Hložek",
+          "revision": 26106797,
+          "bytes": 12885
+        },
+        {
+          "title": "Adam Lambert",
+          "revision": 26203570,
+          "bytes": 39927
+        },
+        {
+          "title": "Adam Ondra",
+          "revision": 25982667,
+          "bytes": 12654
+        },
+        {
+          "title": "Adam Pavlásek",
+          "revision": 26078783,
+          "bytes": 6447
+        },
+        {
+          "title": "Adam Vojtěch",
+          "revision": 26032037,
+          "bytes": 9382
+        },
+        {
+          "title": "Adam Václavík",
+          "revision": 25756343,
+          "bytes": 2026
+        },
+        {
+          "title": "Adam Young",
+          "revision": 26083850,
+          "bytes": 24678
+        },
+        {
+          "title": "Adama Traoré (fotbalista, 1996)",
+          "revision": 26020422,
+          "bytes": 8312
+        },
+        {
+          "title": "Adamantan",
+          "revision": 25540717,
+          "bytes": 10951
+        },
+        {
+          "title": "Adamov",
+          "revision": 26146746,
+          "bytes": 32974
+        },
+        {
+          "title": "Addisonova choroba",
+          "revision": 26138555,
+          "bytes": 17448
+        },
+        {
+          "title": "Administrativní dělení Bulharska",
+          "revision": 26147429,
+          "bytes": 2980
+        },
+        {
+          "title": "Administrativní dělení Prahy",
+          "revision": 26203945,
+          "bytes": 25688
+        },
+        {
+          "title": "Administrativní dělení Spojených států amerických",
+          "revision": 26122223,
+          "bytes": 3906
+        },
+        {
+          "title": "Administrativní dělení Česka",
+          "revision": 25682965,
+          "bytes": 4111
+        },
+        {
+          "title": "Adnan Oktar",
+          "revision": 26203833,
+          "bytes": 12681
+        },
+        {
+          "title": "Adolf Bedřich Stýblo",
+          "revision": 21980227,
+          "bytes": 7308
+        },
+        {
+          "title": "Adolf Heyduk",
+          "revision": 25974139,
+          "bytes": 9654
+        },
+        {
+          "title": "Adolf Hitler",
+          "revision": 26070142,
+          "bytes": 47954
+        },
+        {
+          "title": "Adolf Hoffmeister",
+          "revision": 26070143,
+          "bytes": 64634
+        },
+        {
+          "title": "Adolf Karlovský",
+          "revision": 26070147,
+          "bytes": 18379
+        },
+        {
+          "title": "Adolf Loos",
+          "revision": 26041971,
+          "bytes": 16160
+        },
+        {
+          "title": "Adolf Schart",
+          "revision": 25956618,
+          "bytes": 8801
+        },
+        {
+          "title": "Adolf Szczyzycki",
+          "revision": 25758400,
+          "bytes": 25707
+        },
+        {
+          "title": "Adolf Wenig",
+          "revision": 25814839,
+          "bytes": 21147
+        },
+        {
+          "title": "Adrian Zenz",
+          "revision": 26070193,
+          "bytes": 20998
+        },
+        {
+          "title": "Adultismus",
+          "revision": 26203969,
+          "bytes": 18408
+        },
+        {
+          "title": "Advanced Micro Devices",
+          "revision": 26203972,
+          "bytes": 33502
+        },
+        {
+          "title": "Advanced Passive",
+          "revision": 26070206,
+          "bytes": 22168
+        },
+        {
+          "title": "Adventisté sedmého dne",
+          "revision": 26203973,
+          "bytes": 24344
+        },
+        {
+          "title": "Adventní a vánoční vazba",
+          "revision": 26071854,
+          "bytes": 30741
+        },
+        {
+          "title": "Adventní věnec",
+          "revision": 25956887,
+          "bytes": 33386
+        },
+        {
+          "title": "Aegna",
+          "revision": 25961775,
+          "bytes": 32758
+        },
+        {
+          "title": "Aero 1000",
+          "revision": 26086241,
+          "bytes": 18063
+        },
+        {
+          "title": "Aero 50",
+          "revision": 26199183,
+          "bytes": 20761
+        },
+        {
+          "title": "Aero L-159 Alca",
+          "revision": 26070227,
+          "bytes": 20970
+        },
+        {
+          "title": "Aero L-39 Albatros",
+          "revision": 26047210,
+          "bytes": 36919
+        },
+        {
+          "title": "Aero L-39 Skyfox",
+          "revision": 26070228,
+          "bytes": 13215
+        },
+        {
+          "title": "Aero Minor",
+          "revision": 26199962,
+          "bytes": 24473
+        },
+        {
+          "title": "Aeronet",
+          "revision": 26070233,
+          "bytes": 11015
+        },
+        {
+          "title": "Aespa",
+          "revision": 25956950,
+          "bytes": 7243
+        },
+        {
+          "title": "Affiliate marketing",
+          "revision": 26070244,
+          "bytes": 29713
+        },
+        {
+          "title": "Afghánistán",
+          "revision": 26204761,
+          "bytes": 67036
+        },
+        {
+          "title": "Afghánsko-pákistánský konflikt (2026)",
+          "revision": 26204763,
+          "bytes": 28721
+        },
+        {
+          "title": "Afghánská demokratická republika",
+          "revision": 24370709,
+          "bytes": 24568
+        },
+        {
+          "title": "Africký národní kongres",
+          "revision": 26070255,
+          "bytes": 17104
+        },
+        {
+          "title": "Africký pohár národů 2008",
+          "revision": 25834559,
+          "bytes": 3243
+        },
+        {
+          "title": "Africký pohár národů 2008 – soupisky",
+          "revision": 25356563,
+          "bytes": 1144
+        },
+        {
+          "title": "Africký pohár národů 2010",
+          "revision": 25838519,
+          "bytes": 3610
+        },
+        {
+          "title": "Africký pohár národů 2013 – soupisky",
+          "revision": 25969004,
+          "bytes": 1102
+        },
+        {
+          "title": "Africký pohár národů 2015 – soupisky",
+          "revision": 25968974,
+          "bytes": 1241
+        },
+        {
+          "title": "Africký pohár národů 2017 – soupisky",
+          "revision": 25969007,
+          "bytes": 1082
+        },
+        {
+          "title": "Africký pohár národů 2019",
+          "revision": 25833064,
+          "bytes": 1226
+        },
+        {
+          "title": "Africký pohár národů 2019 – soupisky",
+          "revision": 25975912,
+          "bytes": 1581
+        },
+        {
+          "title": "Africký pohár národů 2021",
+          "revision": 25901057,
+          "bytes": 10927
+        }
+      ],
+      "sha256": "59b3fe92a86b2646133e5fb3ac5ec53ee2dc6222c03f8a85a7cfee42f21f011f",
+      "crc32": "4225072c",
+      "file": "static/corpus/scripts/diacritics-cs.zip",
+      "member": "diacritics-cs.txt"
+    },
+    {
+      "row": "diacritics-vi",
+      "wiki": "vi.wikipedia.org",
+      "script": "Latin with diacritics",
+      "licence": "CC BY-SA 4.0 (Wikipedia article text; authors per article history)",
+      "bytes": 2102489,
+      "non_ascii_bytes": 743420,
+      "articles": [
+        {
+          "title": "A-1 Pictures",
+          "revision": 74163564,
+          "bytes": 1452
+        },
+        {
+          "title": "A-dục vương",
+          "revision": 73333217,
+          "bytes": 27491
+        },
+        {
+          "title": "A-la-hán",
+          "revision": 75526922,
+          "bytes": 61897
+        },
+        {
+          "title": "A-nan-đà",
+          "revision": 74884303,
+          "bytes": 65793
+        },
+        {
+          "title": "A.C.E (nhóm nhạc Hàn Quốc)",
+          "revision": 75526935,
+          "bytes": 12280
+        },
+        {
+          "title": "A.F.C. Bournemouth",
+          "revision": 75092315,
+          "bytes": 33158
+        },
+        {
+          "title": "A.F.C. Fylde",
+          "revision": 75233587,
+          "bytes": 16840
+        },
+        {
+          "title": "A.S.D. Sorrento",
+          "revision": 74947757,
+          "bytes": 18101
+        },
+        {
+          "title": "A.S. Roma",
+          "revision": 75083578,
+          "bytes": 16157
+        },
+        {
+          "title": "AAA (nhóm nhạc)",
+          "revision": 75284041,
+          "bytes": 22556
+        },
+        {
+          "title": "AB6IX",
+          "revision": 75238031,
+          "bytes": 9801
+        },
+        {
+          "title": "AC/DC",
+          "revision": 75044414,
+          "bytes": 36274
+        },
+        {
+          "title": "AC Milan",
+          "revision": 75523969,
+          "bytes": 69342
+        },
+        {
+          "title": "AD Ceuta FC",
+          "revision": 75527235,
+          "bytes": 5424
+        },
+        {
+          "title": "AEK Larnaca FC",
+          "revision": 75527241,
+          "bytes": 18095
+        },
+        {
+          "title": "AFC Champions League 2009",
+          "revision": 75364650,
+          "bytes": 3790
+        },
+        {
+          "title": "AFC Champions League 2010",
+          "revision": 70693373,
+          "bytes": 3606
+        },
+        {
+          "title": "AFC Champions League 2011",
+          "revision": 74832161,
+          "bytes": 4186
+        },
+        {
+          "title": "AFC Champions League 2012",
+          "revision": 75053399,
+          "bytes": 7133
+        },
+        {
+          "title": "AFC Champions League 2013",
+          "revision": 75443300,
+          "bytes": 5165
+        },
+        {
+          "title": "AFC Champions League 2014",
+          "revision": 71894107,
+          "bytes": 6040
+        },
+        {
+          "title": "AFC Champions League 2015",
+          "revision": 71894101,
+          "bytes": 5013
+        },
+        {
+          "title": "AFC Champions League 2016",
+          "revision": 71894096,
+          "bytes": 6325
+        },
+        {
+          "title": "AFC Champions League 2017",
+          "revision": 74615731,
+          "bytes": 5845
+        },
+        {
+          "title": "AFC Champions League 2018",
+          "revision": 75374474,
+          "bytes": 6568
+        },
+        {
+          "title": "AFC Champions League 2019",
+          "revision": 75233684,
+          "bytes": 6477
+        },
+        {
+          "title": "AFC Champions League 2020",
+          "revision": 75444995,
+          "bytes": 8877
+        },
+        {
+          "title": "AFC Champions League 2021",
+          "revision": 74964834,
+          "bytes": 11903
+        },
+        {
+          "title": "AFC Champions League 2022",
+          "revision": 74376611,
+          "bytes": 11472
+        },
+        {
+          "title": "AFC Champions League 2023–24",
+          "revision": 74628153,
+          "bytes": 11023
+        },
+        {
+          "title": "AFC Champions League Elite",
+          "revision": 75431541,
+          "bytes": 14286
+        },
+        {
+          "title": "AFC Champions League Elite 2024–25",
+          "revision": 75006262,
+          "bytes": 5230
+        },
+        {
+          "title": "AFC Champions League Elite 2025–26",
+          "revision": 75458530,
+          "bytes": 2924
+        },
+        {
+          "title": "AFC Champions League Two",
+          "revision": 75086282,
+          "bytes": 9304
+        },
+        {
+          "title": "AFC Champions League Two 2025–26",
+          "revision": 75084476,
+          "bytes": 5252
+        },
+        {
+          "title": "AFC Rushden & Diamonds",
+          "revision": 75233685,
+          "bytes": 21680
+        },
+        {
+          "title": "AFC Unirea Slobozia",
+          "revision": 75318631,
+          "bytes": 15120
+        },
+        {
+          "title": "AFC Wimbledon",
+          "revision": 75527272,
+          "bytes": 54276
+        },
+        {
+          "title": "AFC Women's Champions League 2024–25",
+          "revision": 75035590,
+          "bytes": 6642
+        },
+        {
+          "title": "AGM-158C LRASM",
+          "revision": 74868081,
+          "bytes": 17931
+        },
+        {
+          "title": "AGM-28 Hound Dog",
+          "revision": 74760046,
+          "bytes": 16852
+        },
+        {
+          "title": "AHS Krab",
+          "revision": 75334185,
+          "bytes": 11369
+        },
+        {
+          "title": "AIDA (tiếp thị)",
+          "revision": 75358353,
+          "bytes": 20856
+        },
+        {
+          "title": "AIDC F-CK-1 Ching-kuo",
+          "revision": 73484351,
+          "bytes": 24210
+        },
+        {
+          "title": "AIK Fotboll",
+          "revision": 75192633,
+          "bytes": 8779
+        },
+        {
+          "title": "AIM-120 AMRAAM",
+          "revision": 75527292,
+          "bytes": 28315
+        },
+        {
+          "title": "AIM-9 Sidewinder",
+          "revision": 75233701,
+          "bytes": 16472
+        },
+        {
+          "title": "AIPAC",
+          "revision": 75527297,
+          "bytes": 67762
+        },
+        {
+          "title": "AK-47",
+          "revision": 75526177,
+          "bytes": 47577
+        },
+        {
+          "title": "AK-630",
+          "revision": 75527303,
+          "bytes": 12286
+        },
+        {
+          "title": "AK-74",
+          "revision": 75527304,
+          "bytes": 58466
+        },
+        {
+          "title": "AKB48",
+          "revision": 75552444,
+          "bytes": 92108
+        },
+        {
+          "title": "AKB48 Group",
+          "revision": 75546031,
+          "bytes": 8695
+        },
+        {
+          "title": "AKM",
+          "revision": 75328575,
+          "bytes": 21454
+        },
+        {
+          "title": "AKMU",
+          "revision": 75233731,
+          "bytes": 18464
+        },
+        {
+          "title": "AMD Zen",
+          "revision": 75465642,
+          "bytes": 13352
+        },
+        {
+          "title": "AMX-30",
+          "revision": 75280938,
+          "bytes": 45315
+        },
+        {
+          "title": "AM (album của Arctic Monkeys)",
+          "revision": 75233741,
+          "bytes": 3258
+        },
+        {
+          "title": "APAN Star Awards",
+          "revision": 74832208,
+          "bytes": 4135
+        },
+        {
+          "title": "APEC Nga 2012",
+          "revision": 74308873,
+          "bytes": 14417
+        },
+        {
+          "title": "APKWS",
+          "revision": 75233753,
+          "bytes": 10879
+        },
+        {
+          "title": "APOEL FC",
+          "revision": 75527324,
+          "bytes": 28952
+        },
+        {
+          "title": "AR-10",
+          "revision": 75230104,
+          "bytes": 30918
+        },
+        {
+          "title": "AR-18",
+          "revision": 75318161,
+          "bytes": 20616
+        },
+        {
+          "title": "ARA General Belgrano",
+          "revision": 75233760,
+          "bytes": 31294
+        },
+        {
+          "title": "ARPANET",
+          "revision": 74832212,
+          "bytes": 35150
+        },
+        {
+          "title": "ARrC",
+          "revision": 75520561,
+          "bytes": 11390
+        },
+        {
+          "title": "ASRAAM",
+          "revision": 75221720,
+          "bytes": 14672
+        },
+        {
+          "title": "AS FAR",
+          "revision": 75233773,
+          "bytes": 18746
+        },
+        {
+          "title": "AS Trenčín",
+          "revision": 75527339,
+          "bytes": 6497
+        },
+        {
+          "title": "ATP Cup 2020",
+          "revision": 74445635,
+          "bytes": 4556
+        },
+        {
+          "title": "ATP Cup 2022",
+          "revision": 69875078,
+          "bytes": 3809
+        },
+        {
+          "title": "ATP Finals",
+          "revision": 74457580,
+          "bytes": 5491
+        },
+        {
+          "title": "ATP Finals 2017",
+          "revision": 74377056,
+          "bytes": 6857
+        },
+        {
+          "title": "ATP Finals 2019",
+          "revision": 74445638,
+          "bytes": 8617
+        },
+        {
+          "title": "ATP Finals 2020",
+          "revision": 71817758,
+          "bytes": 7594
+        },
+        {
+          "title": "ATP Finals 2021",
+          "revision": 72028594,
+          "bytes": 7619
+        },
+        {
+          "title": "ATP Finals 2022",
+          "revision": 70676872,
+          "bytes": 5761
+        },
+        {
+          "title": "ATP Finals 2024",
+          "revision": 73533358,
+          "bytes": 4036
+        },
+        {
+          "title": "ATP Tour 2019",
+          "revision": 69846734,
+          "bytes": 4447
+        },
+        {
+          "title": "ATP Tour 2020",
+          "revision": 74832228,
+          "bytes": 4388
+        },
+        {
+          "title": "ATP Tour 2021",
+          "revision": 75527344,
+          "bytes": 3749
+        },
+        {
+          "title": "ATP Tour 2022",
+          "revision": 75527349,
+          "bytes": 2510
+        },
+        {
+          "title": "ATP Tour 2023",
+          "revision": 75527350,
+          "bytes": 2974
+        },
+        {
+          "title": "ATP Tour 2024",
+          "revision": 73522093,
+          "bytes": 2669
+        },
+        {
+          "title": "ATP Tour 250",
+          "revision": 71695837,
+          "bytes": 839
+        },
+        {
+          "title": "ATP Tour Masters 1000",
+          "revision": 74386314,
+          "bytes": 4069
+        },
+        {
+          "title": "ATP World Tour 2015",
+          "revision": 73533410,
+          "bytes": 1195
+        },
+        {
+          "title": "ATP World Tour 2016",
+          "revision": 73689602,
+          "bytes": 1922
+        },
+        {
+          "title": "ATP World Tour 2017",
+          "revision": 75323973,
+          "bytes": 1344
+        },
+        {
+          "title": "ATP World Tour 2018",
+          "revision": 69823315,
+          "bytes": 3381
+        },
+        {
+          "title": "ATP synthase",
+          "revision": 75273871,
+          "bytes": 23460
+        },
+        {
+          "title": "A Ba Thái",
+          "revision": 74962236,
+          "bytes": 19371
+        },
+        {
+          "title": "A Bridge Too Far (phim)",
+          "revision": 75349500,
+          "bytes": 19429
+        },
+        {
+          "title": "A Cruel Angel's Thesis",
+          "revision": 75527363,
+          "bytes": 38248
+        },
+        {
+          "title": "A Day Without Rain",
+          "revision": 73497416,
+          "bytes": 4427
+        },
+        {
+          "title": "A Day in the Life",
+          "revision": 75527364,
+          "bytes": 28425
+        },
+        {
+          "title": "A New Day Has Come",
+          "revision": 73479067,
+          "bytes": 4616
+        },
+        {
+          "title": "A Quế",
+          "revision": 75312794,
+          "bytes": 10993
+        },
+        {
+          "title": "A Real Pain",
+          "revision": 73531163,
+          "bytes": 16753
+        },
+        {
+          "title": "A Rush of Blood to the Head",
+          "revision": 75527374,
+          "bytes": 20215
+        },
+        {
+          "title": "A Sky Full of Stars",
+          "revision": 75345153,
+          "bytes": 2932
+        },
+        {
+          "title": "A Thousand Suns",
+          "revision": 74434577,
+          "bytes": 35874
+        },
+        {
+          "title": "A Tế Cách",
+          "revision": 74881979,
+          "bytes": 32620
+        },
+        {
+          "title": "Aarhus Gymnastikforening",
+          "revision": 75327389,
+          "bytes": 17543
+        },
+        {
+          "title": "Aaron Carter",
+          "revision": 75233847,
+          "bytes": 36732
+        },
+        {
+          "title": "Aaron Hickey",
+          "revision": 75174062,
+          "bytes": 10145
+        },
+        {
+          "title": "Aaron Judge",
+          "revision": 75233861,
+          "bytes": 41340
+        },
+        {
+          "title": "Aaron Ramsey",
+          "revision": 74953735,
+          "bytes": 21340
+        },
+        {
+          "title": "Aaron Swartz",
+          "revision": 74434620,
+          "bytes": 8445
+        },
+        {
+          "title": "Aaron Tshibola",
+          "revision": 75527397,
+          "bytes": 7561
+        },
+        {
+          "title": "Abbas I của Ba Tư",
+          "revision": 75407311,
+          "bytes": 24693
+        },
+        {
+          "title": "Abbey Road",
+          "revision": 75527410,
+          "bytes": 40535
+        },
+        {
+          "title": "Abbott Laboratories",
+          "revision": 75233955,
+          "bytes": 18556
+        },
+        {
+          "title": "Abby Wambach",
+          "revision": 75233963,
+          "bytes": 6813
+        },
+        {
+          "title": "Abdul El-Sayed",
+          "revision": 75409261,
+          "bytes": 21534
+        },
+        {
+          "title": "Abdul Fatawu Issahaku",
+          "revision": 75527432,
+          "bytes": 8823
+        },
+        {
+          "title": "Abdul Majeed Waris",
+          "revision": 75208149,
+          "bytes": 7341
+        },
+        {
+          "title": "Abdullah Al-Mayouf",
+          "revision": 75203806,
+          "bytes": 6361
+        },
+        {
+          "title": "Abdullah của Ả Rập Xê Út",
+          "revision": 75234071,
+          "bytes": 31209
+        },
+        {
+          "title": "Abdül Mecid I",
+          "revision": 74529686,
+          "bytes": 34343
+        }
+      ],
+      "sha256": "111f8e40e9bccbae5dc540f53de1786b8212914999a9c3aa210219c4f8e94099",
+      "crc32": "e114a7a5",
+      "file": "static/corpus/scripts/diacritics-vi.zip",
+      "member": "diacritics-vi.txt"
+    },
+    {
+      "row": "latin-en",
+      "wiki": "en.wikipedia.org",
+      "script": "Latin",
+      "licence": "CC BY-SA 4.0 (Wikipedia article text; authors per article history)",
+      "bytes": 2112258,
+      "non_ascii_bytes": 10164,
+      "articles": [
+        {
+          "title": "A&E (TV network)",
+          "revision": 1369921497,
+          "bytes": 13927
+        },
+        {
+          "title": "A&F Quarterly",
+          "revision": 1340113860,
+          "bytes": 25137
+        },
+        {
+          "title": "A&P",
+          "revision": 1373421742,
+          "bytes": 52739
+        },
+        {
+          "title": "A&W Restaurants",
+          "revision": 1370177800,
+          "bytes": 33984
+        },
+        {
+          "title": "A'ja Wilson",
+          "revision": 1374777371,
+          "bytes": 19412
+        },
+        {
+          "title": "A*Pop",
+          "revision": 1372302947,
+          "bytes": 13948
+        },
+        {
+          "title": "A* search algorithm",
+          "revision": 1374050155,
+          "bytes": 35400
+        },
+        {
+          "title": "A+E Global Media",
+          "revision": 1372657276,
+          "bytes": 36518
+        },
+        {
+          "title": "A-1 Pictures",
+          "revision": 1374490052,
+          "bytes": 2122
+        },
+        {
+          "title": "A-Channel",
+          "revision": 1365877565,
+          "bytes": 16154
+        },
+        {
+          "title": "A-Day (University of Alabama)",
+          "revision": 1352672552,
+          "bytes": 2390
+        },
+        {
+          "title": "A-F-R-O",
+          "revision": 1374251241,
+          "bytes": 11856
+        },
+        {
+          "title": "A-Film",
+          "revision": 1374583795,
+          "bytes": 2014
+        },
+        {
+          "title": "A-Force",
+          "revision": 1354558891,
+          "bytes": 34341
+        },
+        {
+          "title": "A-League Men",
+          "revision": 1374188149,
+          "bytes": 40276
+        },
+        {
+          "title": "A-League Men transfers for 2021–22 season",
+          "revision": 1335557827,
+          "bytes": 604
+        },
+        {
+          "title": "A-League Men transfers for 2022–23 season",
+          "revision": 1335557891,
+          "bytes": 601
+        },
+        {
+          "title": "A-League Men transfers for 2023–24 season",
+          "revision": 1357771149,
+          "bytes": 601
+        },
+        {
+          "title": "A-League Men transfers for 2024–25 season",
+          "revision": 1362634447,
+          "bytes": 599
+        },
+        {
+          "title": "A-League Men transfers for 2025–26 season",
+          "revision": 1363011694,
+          "bytes": 982
+        },
+        {
+          "title": "A-League Men transfers for 2026–27 season",
+          "revision": 1374853527,
+          "bytes": 587
+        },
+        {
+          "title": "A-League Women",
+          "revision": 1372586525,
+          "bytes": 13896
+        },
+        {
+          "title": "A-League Women records and statistics",
+          "revision": 1365204257,
+          "bytes": 4544
+        },
+        {
+          "title": "A-League Women transfers for 2021–22 season",
+          "revision": 1333979474,
+          "bytes": 422
+        },
+        {
+          "title": "A-League Women transfers for 2022–23 season",
+          "revision": 1333979485,
+          "bytes": 422
+        },
+        {
+          "title": "A-League Women transfers for 2023–24 season",
+          "revision": 1369959911,
+          "bytes": 422
+        },
+        {
+          "title": "A-League Women transfers for 2024–25 season",
+          "revision": 1366342532,
+          "bytes": 422
+        },
+        {
+          "title": "A-League Women transfers for 2025–26 season",
+          "revision": 1366646709,
+          "bytes": 806
+        },
+        {
+          "title": "A-League Women transfers for 2026–27 season",
+          "revision": 1374862868,
+          "bytes": 401
+        },
+        {
+          "title": "A-League transfers for 2011–12 season",
+          "revision": 1343123727,
+          "bytes": 1018
+        },
+        {
+          "title": "A-League transfers for 2012–13 season",
+          "revision": 1355926715,
+          "bytes": 668
+        },
+        {
+          "title": "A-League transfers for 2013–14 season",
+          "revision": 1366723564,
+          "bytes": 503
+        },
+        {
+          "title": "A-League transfers for 2014–15 season",
+          "revision": 1366723585,
+          "bytes": 526
+        },
+        {
+          "title": "A-League transfers for 2015–16 season",
+          "revision": 1335557517,
+          "bytes": 533
+        },
+        {
+          "title": "A-League transfers for 2016–17 season",
+          "revision": 1366723611,
+          "bytes": 533
+        },
+        {
+          "title": "A-League transfers for 2017–18 season",
+          "revision": 1335557631,
+          "bytes": 533
+        },
+        {
+          "title": "A-League transfers for 2018–19 season",
+          "revision": 1335557681,
+          "bytes": 542
+        },
+        {
+          "title": "A-League transfers for 2019–20 season",
+          "revision": 1335557732,
+          "bytes": 585
+        },
+        {
+          "title": "A-League transfers for 2020–21 season",
+          "revision": 1374791111,
+          "bytes": 585
+        },
+        {
+          "title": "A-Mei",
+          "revision": 1373873525,
+          "bytes": 44898
+        },
+        {
+          "title": "A-TEC Industries",
+          "revision": 1324925918,
+          "bytes": 30140
+        },
+        {
+          "title": "A-Trak",
+          "revision": 1370839661,
+          "bytes": 16997
+        },
+        {
+          "title": "A-Z of the Live Lounge",
+          "revision": 1308303925,
+          "bytes": 730
+        },
+        {
+          "title": "A-ha",
+          "revision": 1372352307,
+          "bytes": 32890
+        },
+        {
+          "title": "A-ha discography",
+          "revision": 1372139466,
+          "bytes": 2283
+        },
+        {
+          "title": "A-level",
+          "revision": 1365952792,
+          "bytes": 20913
+        },
+        {
+          "title": "A-level (United Kingdom)",
+          "revision": 1369426328,
+          "bytes": 32711
+        },
+        {
+          "title": "A-not-A question",
+          "revision": 1368918044,
+          "bytes": 27664
+        },
+        {
+          "title": "A.B. Quintanilla",
+          "revision": 1373491206,
+          "bytes": 10523
+        },
+        {
+          "title": "A.B. Quintanilla discography",
+          "revision": 1246915290,
+          "bytes": 798
+        },
+        {
+          "title": "A.C.E (South Korean band)",
+          "revision": 1370318667,
+          "bytes": 9405
+        },
+        {
+          "title": "A.D. Vision",
+          "revision": 1372657255,
+          "bytes": 17711
+        },
+        {
+          "title": "A.E.K. (sports club)",
+          "revision": 1374197683,
+          "bytes": 16883
+        },
+        {
+          "title": "A.E.K.–Olympiacos rivalry",
+          "revision": 1372795985,
+          "bytes": 2063
+        },
+        {
+          "title": "A.G. Dillard Motorsports",
+          "revision": 1316557698,
+          "bytes": 2815
+        },
+        {
+          "title": "A.I. Artificial Intelligence",
+          "revision": 1371653985,
+          "bytes": 26212
+        },
+        {
+          "title": "A.K.A. (album)",
+          "revision": 1374047691,
+          "bytes": 24144
+        },
+        {
+          "title": "A.N.S.W.E.R.",
+          "revision": 1362876450,
+          "bytes": 19579
+        },
+        {
+          "title": "A.N.T. Farm",
+          "revision": 1369631317,
+          "bytes": 10518
+        },
+        {
+          "title": "A.O. Nea Ionia F.C.",
+          "revision": 1374488768,
+          "bytes": 9319
+        },
+        {
+          "title": "A.P. Bio",
+          "revision": 1374519162,
+          "bytes": 9660
+        },
+        {
+          "title": "A.V. Undercover",
+          "revision": 1372144457,
+          "bytes": 2073
+        },
+        {
+          "title": "A. A. K. Niazi",
+          "revision": 1372020858,
+          "bytes": 21935
+        },
+        {
+          "title": "A. A. Milne",
+          "revision": 1374617113,
+          "bytes": 25386
+        },
+        {
+          "title": "A. B. Masilamani",
+          "revision": 1372262888,
+          "bytes": 23610
+        },
+        {
+          "title": "A. C. Bhaktivedanta Swami Prabhupada",
+          "revision": 1372800170,
+          "bytes": 86030
+        },
+        {
+          "title": "A. C. Ewing",
+          "revision": 1362200159,
+          "bytes": 17163
+        },
+        {
+          "title": "A. C. Probert",
+          "revision": 1351142969,
+          "bytes": 32228
+        },
+        {
+          "title": "A. E. Heath",
+          "revision": 1372883335,
+          "bytes": 16160
+        },
+        {
+          "title": "A. E. Housman",
+          "revision": 1372393068,
+          "bytes": 24097
+        },
+        {
+          "title": "A. E. van Vogt",
+          "revision": 1371328400,
+          "bytes": 28363
+        },
+        {
+          "title": "A. G. Cook",
+          "revision": 1372197953,
+          "bytes": 17769
+        },
+        {
+          "title": "A. G. Cook discography",
+          "revision": 1372619060,
+          "bytes": 1248
+        },
+        {
+          "title": "A. H. Bull Steamship Company",
+          "revision": 1370820389,
+          "bytes": 29402
+        },
+        {
+          "title": "A. I. Namm & Son Department Store",
+          "revision": 1350932583,
+          "bytes": 23158
+        },
+        {
+          "title": "A. J. Allmendinger",
+          "revision": 1374763205,
+          "bytes": 34156
+        },
+        {
+          "title": "A. J. Ayer",
+          "revision": 1369993317,
+          "bytes": 20261
+        },
+        {
+          "title": "A. J. Balaban",
+          "revision": 1356882050,
+          "bytes": 42745
+        },
+        {
+          "title": "A. J. Bouye",
+          "revision": 1362195676,
+          "bytes": 12845
+        },
+        {
+          "title": "A. J. Brown",
+          "revision": 1374456457,
+          "bytes": 16331
+        },
+        {
+          "title": "A. J. Burnett",
+          "revision": 1370820439,
+          "bytes": 21337
+        },
+        {
+          "title": "A. J. Cronin",
+          "revision": 1372935165,
+          "bytes": 25224
+        },
+        {
+          "title": "A. J. Foyt",
+          "revision": 1371332859,
+          "bytes": 17522
+        },
+        {
+          "title": "A. J. Foyt IV",
+          "revision": 1370226857,
+          "bytes": 10388
+        },
+        {
+          "title": "A. J. Foyt Racing",
+          "revision": 1373720348,
+          "bytes": 11928
+        },
+        {
+          "title": "A. J. Francis",
+          "revision": 1372668849,
+          "bytes": 12265
+        },
+        {
+          "title": "A. J. Green",
+          "revision": 1364137342,
+          "bytes": 22110
+        },
+        {
+          "title": "A. J. McCarron",
+          "revision": 1371386910,
+          "bytes": 20913
+        },
+        {
+          "title": "A. J. McKee",
+          "revision": 1374283532,
+          "bytes": 9466
+        },
+        {
+          "title": "A. J. Mundella",
+          "revision": 1368688870,
+          "bytes": 49305
+        },
+        {
+          "title": "A. J. Orr and D. W. Orr",
+          "revision": 1331263618,
+          "bytes": 21292
+        },
+        {
+          "title": "A. J. P. Taylor",
+          "revision": 1374718531,
+          "bytes": 52841
+        },
+        {
+          "title": "A. J. Pierzynski",
+          "revision": 1356308693,
+          "bytes": 14844
+        },
+        {
+          "title": "A. J. Raffles",
+          "revision": 1366991692,
+          "bytes": 24830
+        },
+        {
+          "title": "A. James Clark School of Engineering",
+          "revision": 1371107612,
+          "bytes": 24525
+        },
+        {
+          "title": "A. K. Antony",
+          "revision": 1373141645,
+          "bytes": 12712
+        },
+        {
+          "title": "A. K. Fazlul Huq",
+          "revision": 1371448670,
+          "bytes": 25281
+        },
+        {
+          "title": "A. L. Zissu",
+          "revision": 1372089867,
+          "bytes": 70324
+        },
+        {
+          "title": "A. Lange & Söhne",
+          "revision": 1374117408,
+          "bytes": 25414
+        },
+        {
+          "title": "A. Lawrence Lowell",
+          "revision": 1373598316,
+          "bytes": 37279
+        },
+        {
+          "title": "A. Leon Higginbotham Jr.",
+          "revision": 1358791036,
+          "bytes": 25378
+        },
+        {
+          "title": "A. M. Azahari",
+          "revision": 1369237063,
+          "bytes": 24785
+        },
+        {
+          "title": "A. M. Naik",
+          "revision": 1374254524,
+          "bytes": 8462
+        },
+        {
+          "title": "A. M. Rajah",
+          "revision": 1363958615,
+          "bytes": 4642
+        },
+        {
+          "title": "A. Mitchell Palmer",
+          "revision": 1372663144,
+          "bytes": 27230
+        },
+        {
+          "title": "A. P. Herbert",
+          "revision": 1371328487,
+          "bytes": 29803
+        },
+        {
+          "title": "A. P. Hill",
+          "revision": 1373517796,
+          "bytes": 26252
+        },
+        {
+          "title": "A. P. J. Abdul Kalam",
+          "revision": 1373882003,
+          "bytes": 29647
+        },
+        {
+          "title": "A. P. Komala",
+          "revision": 1331752374,
+          "bytes": 1687
+        },
+        {
+          "title": "A. Philip Randolph",
+          "revision": 1364331590,
+          "bytes": 25882
+        },
+        {
+          "title": "A. R. Rahman",
+          "revision": 1374879941,
+          "bytes": 31375
+        },
+        {
+          "title": "A. R. Rahman discography",
+          "revision": 1373705249,
+          "bytes": 2537
+        },
+        {
+          "title": "A. S. Byatt",
+          "revision": 1374118456,
+          "bytes": 20245
+        },
+        {
+          "title": "A. S. King",
+          "revision": 1371328514,
+          "bytes": 8558
+        },
+        {
+          "title": "A. Sreekar Prasad filmography",
+          "revision": 1373832131,
+          "bytes": 1968
+        },
+        {
+          "title": "A. W. Hamilton",
+          "revision": 1371986291,
+          "bytes": 17919
+        },
+        {
+          "title": "A. W. Tozer",
+          "revision": 1373645346,
+          "bytes": 30912
+        },
+        {
+          "title": "A. de Herz",
+          "revision": 1372960407,
+          "bytes": 47152
+        },
+        {
+          "title": "A.mar, donde el amor teje sus redes",
+          "revision": 1367588334,
+          "bytes": 2961
+        },
+        {
+          "title": "A12 road (England)",
+          "revision": 1364825679,
+          "bytes": 19694
+        }
+      ],
+      "sha256": "be479c33275116f264aafeb347eb585b4cbdaa2a6f46e384231b81ee40fb3bef",
+      "crc32": "9533a6ec",
+      "file": "static/corpus/scripts/latin-en.zip",
+      "member": "latin-en.txt"
+    }
+  ]
+}

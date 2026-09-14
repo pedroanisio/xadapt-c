@@ -1,6 +1,9 @@
 # Encoding telemetry
 
-<!-- Implementation authored with Codex (GPT-6). Telemetry values are measured by the executable tools. -->
+<!-- Implementation authored with Codex (GPT-6); fetch_scripts.py with Claude Opus 5 (Claude Code). Telemetry values are measured by the executable tools. -->
+
+Part of [adapt](../README.md); this directory holds the benchmark and the
+corpus fetcher.
 
 `telemetry.py` runs the C encoder against a corpus, keeps every run's evidence,
 and plots all numeric totals and sampled metrics. The default fixture is
@@ -151,3 +154,25 @@ dependency or full-corpus benchmark:
 ```sh
 python3 -B bench/test_telemetry.py adpat/c/build/cadapt
 ```
+
+## The per-script corpus rows
+
+`fetch_scripts.py` builds the rows `FMT-8` measures — Latin (English),
+Cyrillic (Russian), CJK (Chinese, Japanese) and diacritic-heavy Latin
+(Vietnamese, Czech), about 2 MiB of Wikipedia article text each, CC BY-SA —
+into `static/corpus/scripts/<row>.zip` (member `<row>.txt`) with a
+`manifest.json` naming every article, its revision and the row's hash.
+Selection is deterministic (the first non-redirect articles above a size
+floor, in title order); content drifts with edits, and the manifest's hashes
+say whether it did. Standard library only.
+
+```sh
+python3 bench/fetch_scripts.py                                   # every row
+python3 bench/fetch_scripts.py --rows cjk-ja --target 1MiB
+python3 bench/fetch_scripts.py --from-manifest static/corpus/scripts/manifest.json
+python3 bench/telemetry.py run --corpus static/corpus/scripts/cyrillic-ru.zip --member cyrillic-ru.txt
+```
+
+The measurements the rows gave are in
+[research/scripts-measurement.md](../research/scripts-measurement.md).
+
