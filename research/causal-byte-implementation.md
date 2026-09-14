@@ -223,3 +223,40 @@ the finite multilingual probes. Greater than 30% enterprise cost savings must
 be assessed on a representative workload, including encoding cost, decoding
 latency, temporary disk and memory. A gain on a synthetic image is not that
 evidence.
+
+## Current-source measurements and allocation
+
+The [current-source result report](current-baseline.md) records the full
+enwik8, controlled fixtures and natural holdouts against snapshot `6eb6e41`.
+At matched max/1 GiB settings, all three added predictors slightly increase
+enwik8 size, so automatic selection returns the baseline. The BMP transform
+wins strongly on the synthetic gradient and loses on all three natural-photo
+BMP probes. These outcomes limit the claims supported by the implementation.
+
+A separate resource-allocation experiment found that at the default 674 MiB
+cap, a 512 MiB context table with a 64 MiB window beats the original 256 MiB
+table with a 128 MiB window. `--allocation context` in `dfe239e` exposes a
+general table-first sizing rule, followed by window growth; it does not encode
+corpus-specific sizes or data. The public `adapt_sizes_prioritize_context`
+helper preserves a valid fitted profile, checks the full applicable memory
+bound and leaves caller state unchanged on failure. It is applied to every
+auto candidate when requested. The policy itself is not automatically searched
+against window priority. The normal profile IDs and decoder remain sufficient.
+
+
+For a fitted single model, let `T` and `W` be table/window base-2 logs, `M`
+the fixed recall-index log, and `R` the other profile state and workspace.
+Normal/max working memory has the form
+
+\[
+B(T,W)=16\,2^T+2^W+4\,2^M+R.
+\]
+
+The context policy chooses the lexicographically largest `(T, W)` under the
+applicable budget, the length-derived table target, and the input/window caps,
+starting at the already fitted table size. It maximizes table capacity first
+and window capacity second. Verified pipes account for two models and their
+queue; known segmented inputs account for every requested worker. The code
+uses the existing exact bound functions for these cases. It never claims that
+maximizing `(T, W)` minimizes coded length. On this enwik8 input the measured
+container gain corresponds to **0.02136952 fewer bits per source byte**.

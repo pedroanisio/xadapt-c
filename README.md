@@ -16,6 +16,9 @@ native filesystem APIs to restore metadata.
 
 The [experimental implementation report](research/causal-byte-implementation.md)
 specifies the new algorithms, format versions, limits and measurement protocol.
+The [current-source results](research/current-baseline.md) record a 1.42%
+enwik8 improvement at the default max-profile budget with `--allocation context`,
+plus the measured limits of the predictor and BMP experiments.
 
 The code began as an integer-for-integer port of a Rust crate and keeps that
 crate's layout and names; since format 13 it defines its own format and
@@ -87,11 +90,10 @@ chooses the model. Models shrink only to their supported minimum: **1 MiB is
 insufficient**. `--help` prints the minimum normal single-model budget; an
 insufficient budget fails before publication and reports required and allowed
 bytes. Verification and segments can require more. A decoder holds the same
-model, so a file made at `-9` needs about 370 MB to decode; `decode` allocates
-whatever the container's header names — the container alone decodes (`FMT-6`
+model and window; `decode` allocates whatever the container's header names — the container alone decodes (`FMT-6`
 in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)) — and `--max-memory` is the one
-cap that can refuse a valid container; the format bounds what a header can
-name at about 1.2 GiB (the largest tables and window). `--max-output`
+memory cap that can refuse a valid container; the format also bounds table
+and window sizes. `--max-output`
 (default 1 GiB) caps the bytes `decode` writes. Folder encoding additionally
 retains an entry/path inventory, and restoration retains pending directory
 metadata; this CLI bookkeeping is outside the codec's working-memory bound.
