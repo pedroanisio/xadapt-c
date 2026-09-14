@@ -1,0 +1,175 @@
+# adapt — a self-adaptive lossless codec, in C
+
+`adapt` compresses bytes with a context-mixing predictor and a binary
+arithmetic coder: every bit is predicted from a set of hashed contexts
+(orders 1–6, word, field, record, sparse, class history), recall of earlier
+matches, and run memories, arbitrated by small online mixers. The container
+frames the input in 256 KiB blocks, each modelled, stored-and-observed, or
+stored-and-skipped, and ends with the original length and its CRC-32. The
+implementation is C99 with nothing beyond the C standard library (POSIX
+threads for the encoder's optional proof), and reads and writes format
+versions 13 (normal), 14 (fast) and 15 (max).
+
+The code began as an integer-for-integer port of a Rust crate and keeps that
+crate's layout and names; since format 13 it defines its own format and
+refuses the crate's versions 10–12. The header of
+[adapt.h](adpat/c/adapt.h) records what changed.
+
+## Layout
+
+| Path | What |
+|---|---|
+| [adpat/c/](adpat/c/) | The codec: `adapt.h` (public interface), `adapt_model.h` (the predictor, coder and framing, shared by both units), `adapt_decode.c`, `adapt_encode.c`, `adapt_archive.c` (the folder archive stream), `cadapt.c` (the command line), `Makefile` |
+| [adpat/c/tests/](adpat/c/tests/) | C unit tests for both units, the CLI's Python tests, the coverage gate's tests, and the committed vectors |
+| [adpat/c/fuzz/](adpat/c/fuzz/) | A libFuzzer harness for the two decoders |
+| [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |
+| [bench/](bench/README.md) | Encoding telemetry on the enwik8 corpus, run history and plots |
+| [research/](research/arxiv-compression-review.md) | A review of the compression literature against this codec, and the enwik8 baseline |
+| [CLAUDE.md](CLAUDE.md) | Working rules for contributors and agents |
+
+## Build
+
+```sh
+make            # adpat/c/build/libadapt.a and adpat/c/build/cadapt
+make test       # the C unit tests on the committed vectors
+make check      # build, the C tests, the Python tests, then the coverage gate
+make clean
+```
+
+Two more targets live in [adpat/c/Makefile](adpat/c/Makefile): `make coverage`
+(the branch-coverage gate on its own) and `make sanitize` (the C suites under
+the sanitizers); both are described under *Tests and gates*.
+
+The root `Makefile` forwards these to [adpat/c/Makefile](adpat/c/Makefile),
+which honours `CC`, `CFLAGS`, `LDFLAGS` and `BUILD=`. The defaults are the
+strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
+-Werror`. Two build switches:
+
+- `THREADS=` builds the encoder's proof in line instead of on a POSIX
+  thread, with nothing beyond the C standard library.
+- `-DADAPT_NO_MULTIVERSION` (add it to `CFLAGS`) builds the per-bit path for
+  the baseline instruction set only. By default, on x86-64 under GCC or
+  Clang, it is compiled twice — baseline and x86-64-v3 — and bound at
+  program start through an ifunc, which needs a glibc-style loader; on
+  musl or another platform without ifunc support pass the switch.
+  `-DADAPT_NO_HUGEPAGES` likewise takes the `calloc` path for the model's
+  tables instead of an anonymous mapping advised `MADV_HUGEPAGE`.
+
+## Command line
+
+```
+cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max]
+              [--max-memory <bytes>] [--threads <n>] [--segment-bytes <bytes>]
+cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
+cadapt info   <file>
+cadapt --version
+```
+
+`<input>` or `<output>` may be `-` for standard input or output. Without
+`-o`, `encode` writes `<input>.adpt` and `decode` strips that suffix (or
+appends `.out`). An existing output is kept unless `--force` is given. Both
+directions stream: memory is the model and one block, whatever the length,
+and `--max-memory` (default 64 MiB) bounds it — a smaller budget means a
+smaller model, never a refused input. A decoder needs the budget the file's
+header names, so a file encoded under a large budget wants the same budget
+to decode.
+
+- `--fast` writes the fast profile (version 14): two hashed contexts, one
+  arbiter, about three times the decoding speed for about a twelfth more
+  bytes. `--max` writes the max profile (version 15): more contexts and run
+  memories, fewer bytes for about twice the time in the same memory.
+- `--verify` proves the output as it is written, with a second model
+  decoding every block, when the budget holds two models; for a file
+  written to a file it falls back to a second pass with one. Encoding skips
+  the proof by default and says so on stderr; `--no-verify` skips it
+  explicitly.
+- `--threads <n>` with `n ≥ 2` cuts the input into segments of
+  `--segment-bytes` (default 16 MiB, whole 256 KiB blocks) that each start
+  the model afresh. This implementation codes and decodes the segments in
+  order, on one thread; the option exists for files that expect segments.
+- An `<input>` that is a folder is walked into one archive stream and coded
+  as one container (the header carries an archive flag; `info` reports
+  "holds a folder"). `decode` restores it under the output name — every
+  file byte for byte, every directory and symbolic link in its place — and
+  refuses to write a folder to standard output. On Windows a symbolic link
+  is neither packed nor restored.
+
+A file output is staged beside its target and published by name only once
+complete, so an interrupted run leaves no partial target. Without
+`--force` the publish uses `link()`, which refuses a target that appeared
+meanwhile but is unavailable on filesystems without hard links (FAT, exFAT,
+some network mounts); pass `--force` there.
+
+```sh
+cadapt encode corpus.txt                   # corpus.txt.adpt, not verified
+cadapt encode corpus.txt --verify --max    # proven as written, max profile
+cadapt decode corpus.txt.adpt -o back.txt
+cadapt info corpus.txt.adpt                # header, sizes, contexts, crc32
+cat corpus.txt | cadapt encode - | cadapt decode - > back.txt
+```
+
+Exit codes: 0 success, 1 a codec or I/O failure, 2 a usage error.
+
+## Library
+
+[adapt.h](adpat/c/adapt.h) is the whole interface. In brief:
+
+- `adapt_decode()` decodes a file held in memory and returns its bytes only
+  after the checksum matched; `adapt_decode_stream()` pulls a file through a
+  reader callback and pushes each block to a writer as it is recovered.
+- `adapt_encode()` codes bytes in memory into one file;
+  `adapt_encode_stream()` reads a stream once and writes as it goes.
+  `adapt_encode_verified()` and `adapt_encode_stream_verified()` prove the
+  result decodes back to the input before returning it;
+  `adapt_verify_stream()` is the same proof after the fact.
+- `adapt_sizes_for_input()` fits the model's tables and window to an input's
+  length and a memory budget; `adapt_sizes_fast()` and `adapt_sizes_max()`
+  turn sizes to those profiles; the `_memory_bound()` functions say what a
+  run at given sizes needs, before anything is allocated.
+- Every failure is a typed `adapt_status`, with the numbers a message needs
+  in an `adapt_error`; `adapt_error_message()` renders it.
+
+Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
+
+## Tests and gates
+
+- `make test` runs the C suites — `tests/test_adapt_decode.c` and
+  `tests/test_adapt_encode.c` on the vectors in `tests/vectors/`, and
+  `tests/test_adapt_archive.c` on the archive stream: the
+  library's contract, every framing fault on hand-built bytes, the limits,
+  the stream callbacks, the messages, round trips through every profile, and
+  the encoder's output pinned byte for byte to the committed vectors. The
+  short vectors (`abc`, `hello`, `empty`) cover one block; the larger ones
+  pin the choices a short input never reaches — `text` (49,152 bytes of
+  enwik8, the Wikipedia excerpt the benchmark uses, CC BY-SA) chooses a
+  class width and a context set, in all three profiles; `records` (a
+  synthetic raw RGB image) a record period; `segmented` (300,000 bytes of
+  enwik8) two segments. Regenerate them with `cadapt encode` after a
+  deliberate format change, never to make a test pass.
+- `make check` adds the Python tests — the CLI command by command
+  (`tests/test_cadapt.py`), the coverage gate's own tests
+  (`tests/test_check_gcov.py`), the benchmark's (`bench/test_telemetry.py`)
+  — and then runs the coverage gate.
+- **Branch coverage** is gated by `check-gcov.py` at 80 % for the library
+  and 60 % for the CLI; `make coverage` builds every unit with GCC's
+  instrumentation into `build-cov/` (one instantiation of the per-bit path,
+  so the instruction-set clones a machine does not run are not counted as
+  branches never taken), runs the C suites and the CLI tests against it, and
+  feeds gcov's JSON to the gate.
+- **Sanitizers**: `make sanitize` builds the C suites with clang under
+  AddressSanitizer and UndefinedBehaviorSanitizer (leak detection included,
+  every fault fatal) into `build-sanitize/` and runs them.
+
+- **Fuzzing**: [fuzz/fuzz_decode.c](adpat/c/fuzz/fuzz_decode.c) feeds
+  arbitrary bytes to both decoders under libFuzzer and aborts if they
+  disagree; its header holds the build line.
+
+## Format
+
+A file is an 8-byte fixed header (signature `ADPT`, version, table size and
+class code, recall size and context-set code, window size and flags), an
+optional 2-byte record period, blocks, an optional segment table, and a
+13-byte trailer. The constants that pin it are the `ADAPT_*` macros at the
+top of [adapt.h](adpat/c/adapt.h); a change to any of them is a new version.
+Versions 13, 14 and 15 are the normal, fast and max profiles of the same
+container; every other version byte is refused.
