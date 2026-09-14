@@ -29,6 +29,9 @@ what changed.
 | [bench/](bench/README.md) | Encoding telemetry on the enwik8 corpus, run history and plots |
 | [research/](research/arxiv-compression-review.md) | A review of the compression literature against this codec, the enwik8 baseline, and the [per-script measurements](research/scripts-measurement.md) |
 | [static/corpus/](static/corpus/scripts/manifest.json) | The benchmark's fixtures: enwik8, text8, and the six per-script rows with their manifest |
+| [tools/](tools/provenance.py) | The provenance tool: the SPDX SBOM, the build manifest, and the rebuild that confirms it |
+| [sbom.spdx.json](sbom.spdx.json), [build-manifest.json](build-manifest.json) | What the codec is made of, and the build it reproduces |
+| [LICENSE](LICENSE), [SECURITY.md](SECURITY.md), [SUPPORT.md](SUPPORT.md), [CHANGELOG.md](CHANGELOG.md) | The terms, the security policy, what support exists, and what changed |
 | [CLAUDE.md](CLAUDE.md) | Working rules for contributors and agents |
 
 ## Build
@@ -243,6 +246,34 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
 - **Fuzzing**: [fuzz/fuzz_decode.c](adpat/c/fuzz/fuzz_decode.c) feeds
   arbitrary bytes to both decoders under libFuzzer and aborts if they
   disagree; its header holds the build line.
+
+## Licence, security, support, provenance
+
+The code and documentation are **MIT** ([LICENSE](LICENSE)); the corpus
+fixtures are Wikipedia text under CC BY-SA, as the licence file states.
+Security problems go to the address in [SECURITY.md](SECURITY.md), not the
+issue tracker — the policy names the threat model, the supported versions
+and the response windows. [SUPPORT.md](SUPPORT.md) says what support exists
+and how to arrange more; [CHANGELOG.md](CHANGELOG.md) what changed, release
+by release.
+
+Every release carries its provenance (`DLV-2` in
+[docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)): an SPDX 2.3 SBOM,
+[sbom.spdx.json](sbom.spdx.json), naming the package, every source by hash
+and each dependency with its licence; and a build manifest,
+[build-manifest.json](build-manifest.json), recording the sources' hashes,
+the compiler and flags, and the hash of every output. Both come from
+[tools/provenance.py](tools/provenance.py):
+
+```sh
+make sbom        # regenerate sbom.spdx.json for the tree as it is
+make manifest    # record the build in adpat/c/build
+make reproduce   # rebuild in a scratch directory; identical bytes, or the reason
+```
+
+`make check` fails when the committed SBOM is stale, so a source change
+carries its SBOM with it; `make reproduce` against the committed manifest
+confirms that the toolchain it names rebuilds the same bytes.
 
 ## Format
 
