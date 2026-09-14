@@ -12,8 +12,7 @@ in commits, tests, reviews and design notes. Codes are `<category>-<n>`.
 | `DLV`  | Delivery | What surrounds the codec: format versioning, SDK, builds, metrics, support. |
 
 `FMT-1` to `FMT-6` are invariants — a change that breaks one is wrong
-whatever it measures (CLAUDE.md, *one output file*; `targets.md`, L2). The
-rest are required capabilities.
+whatever it measures. The rest are required capabilities.
 
 | Code    | Category | Constraint                          | Required behavior |
 | ------- | -------- | ----------------------------------- | ----------------- |

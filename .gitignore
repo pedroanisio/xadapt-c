@@ -4,3 +4,5 @@ static/corpus/enwik8
 /bench/plots/
 __pycache__/
 .repo/
+adpat/c/build-cov/
+static/corpus/text8
