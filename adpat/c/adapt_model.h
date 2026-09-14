@@ -7,8 +7,10 @@
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
- * A port of the Rust crate in `../src`, kept in the same order and under
- * the same names so the two can be read side by side:
+ * Began as a port of the Rust crate in `../src`, and is kept in the same
+ * order and under the same names so the two can be read side by side;
+ * where format versions 13 to 15 depart from the crate's 10 to 12 is
+ * said in adapt.h and at each place below:
  *
  *   state.rs     the bit-history state machine and the learned map
  *   coder.rs     the binary arithmetic encoder and decoder
@@ -100,7 +102,7 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
  * --------------------------------------------------------------------- */
 
 #define TABLE_LOG_MIN 10
-#define TABLE_LOG_MAX 22
+#define TABLE_LOG_MAX 24
 #define MATCH_LOG_MIN 10
 #define MATCH_LOG_MAX 24
 #define WINDOW_LOG_MIN 16
@@ -122,10 +124,16 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
 #define MIXER_COUNT_MAX 4095
 #define MIXER_SKIP 8
 #define APM_RATE 7
-/* Blocks a context may occupy within its cache line. */
-#define WAYS 2
+/* Blocks a context may occupy within its cache line: four of sixteen
+ * bytes fill the line, and a claim inspects it once. */
+#define WAYS 4
 
-#define HASHED 10
+/* The hashed context kinds: ten every profile may run, then four the
+ * max profile adds — the previous word with the current one, the first
+ * and third bytes back, the byte history that followed the order-2
+ * context, and the high nibbles of the last four bytes. */
+#define HASHED 14
+#define BASE_HASHED 10
 #define H_O1 0
 #define H_O2 1
 #define H_O3 2
@@ -136,11 +144,27 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
 #define H_SPARSE 7
 #define H_RECORD 8
 #define H_CLASS 9
-#define RUNS 2
+#define H_WORD2 10
+#define H_SPARSE2 11
+#define H_INDIRECT 12
+#define H_NIBBLES 13
+/* The kinds only the max profile runs, as a mask over the hashed kinds. */
+#define MAX_KINDS (1u << H_WORD2 | 1u << H_SPARSE2 | 1u << H_INDIRECT | 1u << H_NIBBLES)
+/* Run memories: order-2 and the word for every profile; the max profile
+ * adds order-1, -3, -4 and -6, keyed by the hashes their blocks are. */
+#define RUNS 6
+#define BASE_RUNS 2
 #define RUN_SLOTS (1u << 16)
-/* Inputs every first-layer arbiter takes: order-0, the hashed contexts,
- * the runs, recall's two, and a bias. */
-#define INPUTS (1 + HASHED + RUNS + 2 + 1)
+/* Lanes each memory context (order-0 and the hashed ones) feeds the
+ * arbiters: its stretched probability alone under the normal and fast
+ * profiles; under the max profile two more — the probability in the
+ * linear domain and, for a context that has seen one value only, that
+ * value's probability signed by it, so an arbiter can weigh a
+ * never-contradicted context apart from a mixed one. */
+#define CTX_LANES(max) ((max) ? 3 : 1)
+/* Inputs a first-layer arbiter takes at most: order-0, the hashed
+ * contexts, the runs, recall's two, and a bias, under the max profile. */
+#define INPUTS (CTX_LANES(1) * (1 + HASHED) + RUNS + 2 + 1)
 
 /* ---- profiles ----
  * Format version 6 is the normal profile: the model as written, with the
@@ -165,21 +189,20 @@ static const uint16_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
 #define O1_BYTES ((uint64_t)O1_BLOCKS * BLOCK)
 /* Its arbiter lane, the order-2 run's, which the fast profile does not
  * run; and its map, the slot after the profile's two hashed contexts. */
-#define O1_LANE RUN_BASE(1)
+#define O1_LANE RUN_BASE(1, 0)
 #define O1_MAP 3
 /* Whether run memory i (order-2, word) runs under a profile: the fast
  * profile keeps the word run only. */
 #define RUN_ON(fast, i) (!(fast) || (i) == 1)
-/* The arbiter lane of the first run input: after every context slot in
- * the normal profile, after the fast profile's two. */
-#define RUN_BASE(fast) ((fast) ? 1 + 2 : 1 + HASHED)
-/* Arbiter lanes a profile uses: order-0, its context slots, the two run
+/* The arbiter lane of the first run input: after every context slot a
+ * profile has, the fast profile's two. */
+#define RUN_BASE(fast, max) ((fast) ? CTX_LANES(max) * (1 + 2) : CTX_LANES(max) * (1 + ((max) ? HASHED : BASE_HASHED)))
+/* Run memories a profile keeps. */
+#define RUNS_OF(max) ((max) ? RUNS : BASE_RUNS)
+/* Arbiter lanes a profile uses: order-0, its context slots, its run
  * lanes, recall's two, and the bias. */
-#define LANES(fast) (RUN_BASE(fast) + RUNS + 2 + 1)
+#define LANES(fast, max) (RUN_BASE(fast, max) + RUNS_OF(max) + 2 + 1)
 #define MIXER_SETS (3 * 8 * 256)
-/* The max profile's first-arbiter sets: 3 recall states, 256 previous
- * bytes, 256 partial bytes. */
-#define MIXER_SETS_MAX (3 * 256 * 256)
 #define MIXER2_SETS (3 * 2 * 256)
 #define FINAL_INPUTS 3
 #define FINAL_SETS (3 * 2 * 256)
@@ -209,7 +232,8 @@ static const uint16_t CONTEXT_SETS[ADAPT_CONTEXT_SETS] = {
     1 << H_WORD | 1 << H_FIELD | 1 << H_RECORD | NO_RUNS,
 };
 /* The hashed contexts by name, in slot order, for reports. */
-static const char *const CONTEXT_NAMES[HASHED] = {"o1", "o2", "o3", "o4", "o6", "word", "field", "sparse", "record", "class"};
+static const char *const CONTEXT_NAMES[HASHED] = {"o1",    "o2",     "o3",       "o4",     "o6",    "word",  "field",
+                                                   "sparse", "record", "class",   "word2",  "sparse2", "indirect", "nibbles"};
 
 /* ------------------------------------------------------------------------
  * container.rs — constants
@@ -229,6 +253,90 @@ static const char *const CONTEXT_NAMES[HASHED] = {"o1", "o2", "o3", "o4", "o6", 
 #define SCAN_SLOTS (1u << 16)
 /* Stack, allocator slack and runtime overhead the memory bounds allow for. */
 #define HEADROOM ((uint64_t)8 << 20)
+
+/* ------------------------------------------------------------------------
+ * container.rs — the x86 branch transform
+ * --------------------------------------------------------------------- */
+
+/* Rewrite, in place, the four-byte little-endian operand after every E8
+ * (call) and E9 (jmp) opcode from a target relative to the next
+ * instruction into one relative to the block's start, when the
+ * displacement is small — a sign-extended 25-bit value, as a branch
+ * within a module is — so that repeated calls to one function become
+ * identical byte sequences. The result is stored in the same 25-bit
+ * form, so the inverse recognises a converted operand by the test that
+ * selected it, and an unconverted one, which failed that test, still
+ * fails it. Every operand is skipped by both passes and an opcode byte is
+ * never rewritten, so the two passes visit the same positions. Per block,
+ * so a segment and a stream see the same bytes. (Measured against the
+ * alternatives: converting every operand, or storing the address most
+ * significant byte first, both coded machine code larger.) */
+static inline uint32_t x86_load(const uint8_t *b) {
+    return (uint32_t)b[3] << 24 | (uint32_t)b[2] << 16 | (uint32_t)b[1] << 8 | (uint32_t)b[0];
+}
+
+static inline void x86_store(uint8_t *b, uint32_t v) {
+    b[3] = (uint8_t)(v >> 24);
+    b[2] = (uint8_t)(v >> 16);
+    b[1] = (uint8_t)(v >> 8);
+    b[0] = (uint8_t)v;
+}
+
+/* Sign-extend from 25 bits: the operands the transform takes are the
+ * fixed points of this function, and it stores results in the same form. */
+static inline uint32_t x86_sext(uint32_t v) {
+    return (v & 0x01FFFFFFu) | ((v >> 24 & 1) ? 0xFE000000u : 0);
+}
+
+static inline void x86_forward(uint8_t *b, size_t n) {
+    size_t i = 0;
+    while (i + 5 <= n) {
+        if (b[i] == 0xE8 || b[i] == 0xE9) {
+            uint32_t v = x86_load(b + i + 1);
+            if (x86_sext(v) == v) {
+                x86_store(b + i + 1, x86_sext(v + (uint32_t)(i + 5)));
+            }
+            i += 5;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+static inline void x86_inverse(uint8_t *b, size_t n) {
+    size_t i = 0;
+    while (i + 5 <= n) {
+        if (b[i] == 0xE8 || b[i] == 0xE9) {
+            uint32_t v = x86_load(b + i + 1);
+            if (x86_sext(v) == v) {
+                x86_store(b + i + 1, x86_sext(v - (uint32_t)(i + 5)));
+            }
+            i += 5;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/* Whether the first block announces machine code the transform helps:
+ * an ELF, MZ (DOS, PE) or Mach-O (thin, either byte order, or fat)
+ * signature. */
+static inline int x86_detect(const uint8_t *b, size_t n) {
+    if (n >= 4 && b[0] == 0x7F && b[1] == 'E' && b[2] == 'L' && b[3] == 'F') {
+        return 1;
+    }
+    if (n >= 2 && b[0] == 'M' && b[1] == 'Z') {
+        return 1;
+    }
+    if (n >= 4 && ((b[0] == 0xCF && b[1] == 0xFA && b[2] == 0xED && b[3] == 0xFE) ||
+                   (b[0] == 0xCE && b[1] == 0xFA && b[2] == 0xED && b[3] == 0xFE) ||
+                   (b[0] == 0xFE && b[1] == 0xED && b[2] == 0xFA && b[3] == 0xCF) ||
+                   (b[0] == 0xFE && b[1] == 0xED && b[2] == 0xFA && b[3] == 0xCE) ||
+                   (b[0] == 0xCA && b[1] == 0xFE && b[2] == 0xBA && b[3] == 0xBE))) {
+        return 1;
+    }
+    return 0;
+}
 
 /* ------------------------------------------------------------------------
  * state.rs — bit-history states
@@ -349,6 +457,26 @@ static inline void state_map_init(uint32_t *cells, const state_table *t) {
 static inline int32_t map_p12(const uint32_t *cells, uint8_t s) {
     int32_t p = (int32_t)(cells[s] >> 20);
     return p > 1 ? p : 1;
+}
+
+/* A memory context's three inputs under the max profile, from its state
+ * and its map. */
+static inline void context_lanes_max(int32_t *lane, const int16_t *stretch, const uint32_t *cells, const state_table *t,
+                                     uint8_t s) {
+    int32_t p = map_p12(cells, s);
+    lane[0] = stretch[p];
+    lane[1] = (p - 2048) >> 2;
+    lane[2] = s == 0 ? 0 : (t->n0[s] == 0 ? (p >> 2) : (t->n1[s] == 0 ? -((4096 - p) >> 2) : 0));
+}
+
+/* A memory context's CTX_LANES(max) inputs. */
+static inline ADAPT_ALWAYS_INLINE void context_lanes(int32_t *lane, const int16_t *stretch, const uint32_t *cells,
+                                                     const state_table *t, uint8_t s, const int max) {
+    if (max) {
+        context_lanes_max(lane, stretch, cells, t, s);
+    } else {
+        lane[0] = stretch[map_p12(cells, s)];
+    }
 }
 
 /* Learn that `bit` followed `state`; rate[n] is 65536 / (2n + 3). */
@@ -546,11 +674,10 @@ static inline int is_word_byte(uint8_t b) {
     return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b >= 0x80;
 }
 
-/* One arbiter's weights and the number of updates they have had. */
-typedef struct arbiter {
-    int32_t w[INPUTS];
-    int32_t n;
-} arbiter;
+/* A first-layer arbiter is LANES(fast, max) weights and, after them, the
+ * number of updates they have had: ARBITER_STRIDE ints per set, in a flat
+ * array sized for the profile. */
+#define ARBITER_STRIDE(fast, max) (LANES(fast, max) + 1)
 
 typedef struct arbiter_final {
     int32_t w[FINAL_INPUTS];
@@ -646,6 +773,10 @@ typedef struct model {
     uint64_t n;
     uint64_t c8;
     uint64_t word;
+    /* The hash of the last complete word, for the word-pair context. */
+    uint64_t word_prev;
+    /* What followed each order-2 context the last two times. */
+    uint16_t followed[1 << 16];
     /* runs: tag << 16 | count << 8 | byte, directly indexed */
     uint32_t *rtab;
     uint32_t rtag[RUNS];
@@ -665,10 +796,10 @@ typedef struct model {
     size_t msm_idx;
     /* arbiters */
     int32_t st[INPUTS];
-    arbiter *weights;
+    int32_t *weights;
     size_t wset;
     int32_t pmix;
-    arbiter *weights2;
+    int32_t *weights2;
     size_t wset2;
     int32_t pmix2;
     arbiter_final *wfinal;
@@ -678,13 +809,6 @@ typedef struct model {
     uint16_t (*apm)[APM_BUCKETS];
     size_t apm_ctx;
     size_t apm_j;
-    /* The max profile's first arbiter (MIXER_SETS_MAX sets keyed by the
-     * whole previous byte) and its second estimation stage, keyed by a
-     * hash of the previous two bytes; absent under the other profiles. */
-    arbiter *weights_max;
-    uint16_t (*apm2)[APM_BUCKETS];
-    size_t apm2_ctx;
-    size_t apm2_j;
     /* the current line's bytes and the previous line's, for the record context */
     uint8_t *row;
     uint8_t *prow;
@@ -728,13 +852,11 @@ static inline size_t model_layout(model *m, uint8_t *base, adapt_sizes sizes) {
     } while (0)
     ADAPT_PLACE(table, uint8_t *, ((size_t)1 << sizes.table_log) * BLOCK, 4096);
     ADAPT_PLACE(apm, uint16_t(*)[APM_BUCKETS], APM_CONTEXTS * sizeof(*m->apm), 4096);
-    ADAPT_PLACE(weights_max, arbiter *, sizes.max ? MIXER_SETS_MAX * sizeof(arbiter) : 0, 4096);
-    ADAPT_PLACE(apm2, uint16_t(*)[APM_BUCKETS], sizes.max ? APM_CONTEXTS * sizeof(*m->apm2) : 0, 4096);
     ADAPT_PLACE(mtab, uint32_t *, ((size_t)1 << sizes.match_log) * sizeof(uint32_t), 4096);
-    ADAPT_PLACE(rtab, uint32_t *, RUNS * RUN_SLOTS * sizeof(uint32_t), 4096);
+    ADAPT_PLACE(rtab, uint32_t *, (size_t)RUNS_OF(sizes.max) * RUN_SLOTS * sizeof(uint32_t), 4096);
     ADAPT_PLACE(hist, uint8_t *, (size_t)1 << sizes.window_log, 4096);
-    ADAPT_PLACE(weights, arbiter *, MIXER_SETS * sizeof(arbiter), 64);
-    ADAPT_PLACE(weights2, arbiter *, MIXER2_SETS * sizeof(arbiter), 64);
+    ADAPT_PLACE(weights, int32_t *, MIXER_SETS * (size_t)ARBITER_STRIDE(sizes.fast, sizes.max) * sizeof(int32_t), 64);
+    ADAPT_PLACE(weights2, int32_t *, MIXER2_SETS * (size_t)ARBITER_STRIDE(0, sizes.max) * sizeof(int32_t), 64);
     ADAPT_PLACE(wfinal, arbiter_final *, FINAL_SETS * sizeof(arbiter_final), 64);
     ADAPT_PLACE(row, uint8_t *, ROW_MAX, 64);
     ADAPT_PLACE(prow, uint8_t *, ROW_MAX, 64);
@@ -857,6 +979,15 @@ static inline void start_byte(model *m, int fast) {
     }
     hk[H_SPARSE] = m->on[H_SPARSE] ? mix64((c & 0xFFFF0000ull) | ((uint64_t)10 << 56)) : 0;
     hk[H_CLASS] = m->class_bits != 0 ? mix64((m->classes & (((uint64_t)1 << m->class_bits) - 1)) | ((uint64_t)11 << 56)) : 0;
+    /* the max profile's kinds; off under the others, so never hashed */
+    hk[H_WORD2] = m->on[H_WORD2] ? mix64((m->word_prev * 0x9E3779B97F4A7C15ull) ^ (m->word != 0 ? m->word : (c & 0xFF)) ^
+                                         ((uint64_t)12 << 56))
+                                 : 0;
+    hk[H_SPARSE2] = m->on[H_SPARSE2] ? mix64((c & 0xFF00FFull) | ((uint64_t)14 << 56)) : 0;
+    hk[H_INDIRECT] = m->on[H_INDIRECT]
+                         ? mix64((c & 0xFFFF) | (uint64_t)m->followed[c & 0xFFFF] << 16 | ((uint64_t)16 << 56))
+                         : 0;
+    hk[H_NIBBLES] = m->on[H_NIBBLES] ? mix64((c & 0xF0F0F0F0ull) | ((uint64_t)18 << 56)) : 0;
     for (i = 0; i < m->hashed; i++) {
         m->h[i] = hk[m->kind[i]];
     }
@@ -865,6 +996,16 @@ static inline void start_byte(model *m, int fast) {
     m->ridx[1] = RUN_SLOTS + ((size_t)rh & (RUN_SLOTS - 1));
     m->rtag[0] = 1;
     m->rtag[1] = ((uint32_t)(rh >> 40) & 0xFF) | 1;
+    if (m->runs > BASE_RUNS) {
+        /* the max profile's runs, on the hashes of order-1, -3, -4 and -6,
+         * which every set keeps */
+        static const uint8_t RUN_KINDS[RUNS - BASE_RUNS] = {H_O1, H_O3, H_O4, H_O6};
+        for (i = 0; i < RUNS - BASE_RUNS; i++) {
+            uint64_t h = hk[RUN_KINDS[i]];
+            m->ridx[BASE_RUNS + i] = RUN_SLOTS * (BASE_RUNS + i) + ((size_t)h & (RUN_SLOTS - 1));
+            m->rtag[BASE_RUNS + i] = ((uint32_t)(h >> 40) & 0xFF) | 1;
+        }
+    }
     for (i = 0; i < m->runs; i++) {
         uint32_t e;
         if (!RUN_ON(fast, i)) {
@@ -905,6 +1046,11 @@ static inline void end_byte(model *m, uint8_t b, int fast) {
     m->hist[(size_t)m->n & m->hmask] = b;
     m->n += 1;
     m->c8 = (m->c8 << 8) | b;
+    /* the order-2 context before this byte, and what followed it */
+    m->followed[(m->c8 >> 8) & 0xFFFF] = (uint16_t)(m->followed[(m->c8 >> 8) & 0xFFFF] << 8 | b);
+    if (!is_word_byte(b) && m->word != 0) {
+        m->word_prev = m->word;
+    }
     m->word = is_word_byte(b) ? mix64(m->word ^ ((uint64_t)b + 1)) + b : 0;
     m->classes = (m->classes << 3) | byte_class(b);
     if (fast) {
@@ -995,11 +1141,11 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     size_t i, mstate, ctx, j, key;
     int32_t m_sm = 0, m_fixed = 0, s, w, a, b, papm, p;
     const uint16_t *row;
-    m->st[0] = st[map_p12(m->maps[0], m->o0[m->o0_blk & 31][node])];
+    context_lanes(m->st, st, m->maps[0], &m->states, m->o0[m->o0_blk & 31][node], max);
     for (i = 0; i < m->hashed; i++) {
         uint8_t *cell = m->table + (m->blk[i] & mask) * BLOCK + node;
         m->cell[i] = cell;
-        m->st[1 + i] = st[map_p12(m->maps[1 + i], *cell)];
+        context_lanes(m->st + CTX_LANES(max) * (1 + i), st, m->maps[1 + i], &m->states, *cell, max);
     }
     /* runs: the byte that followed this context last time, while its bits
      * so far agree with the byte being coded */
@@ -1021,7 +1167,7 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
                 m->rcnt[i] = 0;
             }
         }
-        m->st[RUN_BASE(fast) + i] = v;
+        m->st[RUN_BASE(fast, max) + i] = v;
     }
     if (fast) {
         /* the direct order-1 memory, in the lane the order-2 run would take */
@@ -1041,9 +1187,9 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
             m->mmiss = 1;
         }
     }
-    m->st[RUN_BASE(fast) + RUNS] = m_sm;
-    m->st[RUN_BASE(fast) + RUNS + 1] = m_fixed;
-    m->st[RUN_BASE(fast) + RUNS + 2] = 256;
+    m->st[RUN_BASE(fast, max) + RUNS_OF(max)] = m_sm;
+    m->st[RUN_BASE(fast, max) + RUNS_OF(max) + 1] = m_fixed;
+    m->st[RUN_BASE(fast, max) + RUNS_OF(max) + 2] = 256;
     /* first arbiter: weights by partial byte, the top three bits of the
      * previous byte, and recall state */
     mstate = (m->mlen == 0 || m->mmiss) ? 0 : (m->mlen < 16 ? 1 : 2);
@@ -1051,15 +1197,8 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
      * bits; the fast profile's only arbiter on whether the word run has an
      * answer and two of those bits. */
     key = fast ? ((size_t)(m->rcnt[1] > 0) << 2 | (size_t)((m->c8 >> 6) & 3)) : (size_t)((m->c8 >> 5) & 7);
-    if (max) {
-        /* the max profile keys its first arbiter by the whole previous
-         * byte: 256 sets where the others have 8, in their own table */
-        m->wset = (mstate * 256 + (size_t)(m->c8 & 0xFF)) * 256 + (m->c0 & 255);
-        m->pmix = m->squashed[dot(m->weights_max[m->wset].w, m->st, LANES(fast)) + 2047];
-    } else {
-        m->wset = (mstate * 8 + key) * 256 + (m->c0 & 255);
-        m->pmix = m->squashed[dot(m->weights[m->wset].w, m->st, LANES(fast)) + 2047];
-    }
+    m->wset = (mstate * 8 + key) * 256 + (m->c0 & 255);
+    m->pmix = m->squashed[dot(m->weights + m->wset * ARBITER_STRIDE(fast, max), m->st, LANES(fast, max)) + 2047];
     if (fast) {
         /* the fast profile: one arbiter is the whole verdict */
         m->pfinal = m->pmix;
@@ -1074,7 +1213,7 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     }
     /* second arbiter: weights by the previous byte */
     m->wset2 = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (size_t)(m->c8 & 0xFF);
-    m->pmix2 = m->squashed[dot(m->weights2[m->wset2].w, m->st, INPUTS) + 2047];
+    m->pmix2 = m->squashed[dot(m->weights2 + m->wset2 * ARBITER_STRIDE(0, max), m->st, LANES(0, max)) + 2047];
     /* final arbiter: weights by the partial byte */
     m->stf[0] = st[m->pmix];
     m->stf[1] = st[m->pmix2];
@@ -1093,21 +1232,6 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     b = row[j + 1];
     papm = (a * (128 - w) + b * w) >> 11;
     p = (m->pfinal + 3 * papm + 2) >> 2;
-    if (max) {
-        /* a second estimation stage, keyed by a hash of the previous two
-         * bytes and the partial byte, over the first stage's answer */
-        int32_t pc = p < 1 ? 1 : (p > (int32_t)PROB_ONE - 1 ? (int32_t)PROB_ONE - 1 : p);
-        int32_t s2 = st[pc] + 2048;
-        size_t j2 = ((size_t)s2 >> 7) & 31;
-        int32_t w2 = s2 & 127;
-        size_t h = (size_t)(mix64((m->c8 & 0xFFFF) | ((uint64_t)21 << 56)) >> 48);
-        size_t ctx2 = (((h & 0xFF) << 8) | m->c0) & (APM_CONTEXTS - 1);
-        const uint16_t *row2 = m->apm2[ctx2];
-        int32_t papm2 = ((int32_t)row2[j2] * (128 - w2) + (int32_t)row2[j2 + 1] * w2) >> 11;
-        m->apm2_ctx = ctx2;
-        m->apm2_j = j2;
-        p = (p + papm2 + 1) >> 1;
-    }
     if (p < 1) {
         p = 1;
     }
@@ -1143,13 +1267,13 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
     bit &= 1;
     target = (int32_t)(bit << 12);
     /* arbiters */
-    if (max) {
-        train(m->weights_max[m->wset].w, &m->weights_max[m->wset].n, m->st, LANES(fast), target - m->pmix, m->mixer_rate);
-    } else {
-        train(m->weights[m->wset].w, &m->weights[m->wset].n, m->st, LANES(fast), target - m->pmix, m->mixer_rate);
+    {
+        int32_t *w = m->weights + m->wset * ARBITER_STRIDE(fast, max);
+        train(w, w + LANES(fast, max), m->st, LANES(fast, max), target - m->pmix, m->mixer_rate);
     }
     if (!fast) {
-        train(m->weights2[m->wset2].w, &m->weights2[m->wset2].n, m->st, INPUTS, target - m->pmix2, m->mixer_rate);
+        int32_t *w2 = m->weights2 + m->wset2 * ARBITER_STRIDE(0, max);
+        train(w2, w2 + LANES(0, max), m->st, LANES(0, max), target - m->pmix2, m->mixer_rate);
         train(m->wfinal[m->wsetf].w, &m->wfinal[m->wsetf].n, m->stf, FINAL_INPUTS, target - m->pfinal, m->mixer_rate);
         /* secondary estimation: move both neighbours toward the outcome */
         g = (int32_t)(bit << 16) + (int32_t)(bit << APM_RATE) - (int32_t)bit * 2;
@@ -1159,14 +1283,6 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
         row[j] = (uint16_t)(v < 65535 ? v : 65535);
         v = row[j + 1] + ((g - row[j + 1]) >> APM_RATE);
         row[j + 1] = (uint16_t)(v < 65535 ? v : 65535);
-        if (max) {
-            row = m->apm2[m->apm2_ctx & (APM_CONTEXTS - 1)];
-            j = m->apm2_j & 31;
-            v = row[j] + ((g - row[j]) >> APM_RATE);
-            row[j] = (uint16_t)(v < 65535 ? v : 65535);
-            v = row[j + 1] + ((g - row[j + 1]) >> APM_RATE);
-            row[j + 1] = (uint16_t)(v < 65535 ? v : 65535);
-        }
     }
     /* memories */
     node = m->node & (BLOCK - 1);
@@ -1242,6 +1358,16 @@ static void update_fast(model *m, uint32_t bit) {
     update_impl(m, bit, 1, 0);
 }
 
+/* The starting weight of arbiter lane j under a profile: 1/4 for a
+ * context's stretched probability, 0 for its other lanes and the runs'. */
+static inline int32_t initial_weight(size_t j, int fast, int max) {
+    size_t base = (size_t)RUN_BASE(fast, max);
+    if (j < base) {
+        return j % (size_t)CTX_LANES(max) == 0 ? 1 << 14 : 0;
+    }
+    return j < base + (size_t)RUNS_OF(max) ? 0 : 1 << 14;
+}
+
 static inline model *model_new(adapt_sizes sizes) {
     model *m = calloc(1, sizeof(model));
     size_t blocks, i, j, x, pi;
@@ -1291,7 +1417,8 @@ static inline model *model_new(adapt_sizes sizes) {
     m->period = sizes.period;
     {
         uint16_t set = m->fast ? FAST_SETS[sizes.set_code] : CONTEXT_SETS[sizes.set_code];
-        uint16_t dropped = set | (sizes.class_code == 0 ? (1u << H_CLASS) : 0);
+        /* the max profile's kinds run only under it */
+        uint16_t dropped = set | (sizes.class_code == 0 ? (1u << H_CLASS) : 0) | (m->max ? 0 : MAX_KINDS);
         m->hashed = 0;
         for (i = 0; i < HASHED; i++) {
             m->on[i] = (dropped >> i & 1) == 0;
@@ -1299,7 +1426,7 @@ static inline model *model_new(adapt_sizes sizes) {
                 m->kind[m->hashed++] = (uint8_t)i;
             }
         }
-        m->runs = (set & NO_RUNS) ? 0 : RUNS;
+        m->runs = (set & NO_RUNS) ? 0 : RUNS_OF(m->max);
     }
     m->hmask = ((size_t)1 << sizes.window_log) - 1;
     for (i = 0; i < RUNS * RUN_BUCKETS; i++) {
@@ -1309,22 +1436,24 @@ static inline model *model_new(adapt_sizes sizes) {
     for (i = 0; i < MATCH_BUCKETS * 2; i++) {
         m->msm[i] = CELL_INIT;
     }
-    /* Weights of one first-layer arbiter at the start: the context inputs
-     * begin trusted, the run inputs earn it. */
-    for (i = 0; i < MIXER_SETS + MIXER2_SETS; i++) {
-        arbiter *a = i < MIXER_SETS ? &m->weights[i] : &m->weights2[i - MIXER_SETS];
-        for (j = 0; j < INPUTS; j++) {
-            a->w[j] = (j >= (size_t)RUN_BASE(m->fast) && j < (size_t)RUN_BASE(m->fast) + RUNS) ? 0 : 1 << 14;
-        }
-        a->n = 0;
-    }
-    if (m->max) {
-        for (i = 0; i < MIXER_SETS_MAX; i++) {
-            arbiter *a = &m->weights_max[i];
-            for (j = 0; j < INPUTS; j++) {
-                a->w[j] = (j >= (size_t)RUN_BASE(0) && j < (size_t)RUN_BASE(0) + RUNS) ? 0 : 1 << 14;
+    /* Weights of one first-layer arbiter at the start: the context inputs'
+     * stretched probabilities begin trusted; their other lanes and the run
+     * inputs earn it. */
+    {
+        size_t lanes = (size_t)LANES(m->fast, m->max), lanes2 = (size_t)LANES(0, m->max);
+        for (i = 0; i < MIXER_SETS; i++) {
+            int32_t *w = m->weights + i * (lanes + 1);
+            for (j = 0; j < lanes; j++) {
+                w[j] = initial_weight(j, m->fast, m->max);
             }
-            a->n = 0;
+            w[lanes] = 0;
+        }
+        for (i = 0; i < MIXER2_SETS; i++) {
+            int32_t *w = m->weights2 + i * (lanes2 + 1);
+            for (j = 0; j < lanes2; j++) {
+                w[j] = initial_weight(j, 0, m->max);
+            }
+            w[lanes2] = 0;
         }
     }
     for (i = 0; i < FINAL_SETS; i++) {
@@ -1338,11 +1467,6 @@ static inline model *model_new(adapt_sizes sizes) {
     }
     for (i = 0; i < APM_CONTEXTS; i++) {
         memcpy(m->apm[i], apm_row, sizeof(apm_row));
-    }
-    if (m->max) {
-        for (i = 0; i < APM_CONTEXTS; i++) {
-            memcpy(m->apm2[i], apm_row, sizeof(apm_row));
-        }
     }
     m->pmix = 2048;
     m->pmix2 = 2048;
@@ -1475,7 +1599,7 @@ static inline int sizes_valid(adapt_sizes s) {
            s.match_log <= MATCH_LOG_MAX && s.window_log >= WINDOW_LOG_MIN && s.window_log <= WINDOW_LOG_MAX &&
            s.class_code < 3 && s.set_code < ADAPT_CONTEXT_SETS && s.fast <= 1 &&
            (!s.fast || s.set_code < ADAPT_FAST_SETS) && s.period != 1 && s.period <= ADAPT_PERIOD_MAX &&
-           (!s.fast || s.period == 0) && s.segmented <= 1 && s.max <= 1 && !(s.fast && s.max);
+           (!s.fast || s.period == 0) && s.segmented <= 1 && s.max <= 1 && !(s.fast && s.max) && s.x86 <= 1;
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {
@@ -1564,11 +1688,11 @@ static inline adapt_status read_block(const uint8_t *src, size_t len, size_t *po
     return ADAPT_OK;
 }
 
-/* Bytes the run tables, arbiter weights and line buffers occupy. */
-static inline uint64_t side_table_bytes(int max) {
-    return (max ? (uint64_t)MIXER_SETS_MAX * (INPUTS + 1) * 4 + (uint64_t)APM_CONTEXTS * APM_BUCKETS * 2 : 0) +
-           (uint64_t)RUNS * RUN_SLOTS * 4 + (uint64_t)MIXER_SETS * (INPUTS + 1) * 4 + (uint64_t)MIXER2_SETS * (INPUTS + 1) * 4 +
-           (uint64_t)FINAL_SETS * (FINAL_INPUTS + 1) * 4 + 2 * ROW_MAX;
+/* Bytes the run tables, arbiter weights and line buffers occupy under a
+ * profile. */
+static inline uint64_t side_table_bytes(int fast, int max) {
+    return (uint64_t)RUNS_OF(max) * RUN_SLOTS * 4 + (uint64_t)MIXER_SETS * ARBITER_STRIDE(fast, max) * 4 +
+           (uint64_t)MIXER2_SETS * ARBITER_STRIDE(0, max) * 4 + (uint64_t)FINAL_SETS * (FINAL_INPUTS + 1) * 4 + 2 * ROW_MAX;
 }
 
 /* Bytes one block's workspace takes: the block, its coded form, the framed

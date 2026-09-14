@@ -62,7 +62,9 @@ int adapt_sizes_valid(adapt_sizes sizes) {
 }
 
 uint64_t adapt_encode_memory_bound(adapt_sizes sizes) {
-    return adapt_decode_memory_bound(sizes);
+    /* With the x86 transform the encoder keeps the untransformed block as
+     * well, for the proof to compare against. */
+    return adapt_decode_memory_bound(sizes) + (sizes.x86 ? (uint64_t)ADAPT_BLOCK_BYTES : 0);
 }
 
 uint64_t adapt_verified_memory_bound(adapt_sizes sizes) {
@@ -178,7 +180,7 @@ static uint8_t clamp_u8(unsigned v, uint8_t lo, uint8_t hi) {
 uint8_t adapt_table_log_for(uint64_t length) {
     unsigned b = bits(length);
     uint8_t sweet = clamp_u8(b + 5, 18, 20);
-    uint8_t grown = clamp_u8(b > 5 ? b - 5 : 0, 18, TABLE_LOG_MAX);
+    uint8_t grown = clamp_u8(b > 3 ? b - 3 : 0, 18, TABLE_LOG_MAX);
     return sweet > grown ? sweet : grown;
 }
 
@@ -199,6 +201,7 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
     floor.period = 0;
     floor.segmented = 0;
     floor.max = (uint8_t)max;
+    floor.x86 = 0;
     bound = (!length_known && adapt_verified_memory_bound(floor) <= max_memory) ? adapt_verified_memory_bound
                                                                                 : adapt_encode_memory_bound;
     if (length_known) {
@@ -215,6 +218,7 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
     s.period = 0;
     s.segmented = 0;
     s.max = (uint8_t)max;
+    s.x86 = 0;
     while (bound(s) > max_memory) {
         uint64_t table_bytes = (uint64_t)16 << s.table_log;
         uint64_t match_bytes = (uint64_t)4 << s.match_log;
@@ -300,6 +304,7 @@ static adapt_status sizes_for_threads_profile(uint64_t length, uint64_t max_memo
     floor.period = 0;
     floor.segmented = 1;
     floor.max = (uint8_t)max;
+    floor.x86 = 0;
     least = adapt_threads_encode_memory_bound(floor, threads, segment_bytes);
     status = check_memory(least, max_memory, error);
     if (status != ADAPT_OK) {
@@ -964,6 +969,9 @@ static adapt_status verifier_block(verifier *v, const uint8_t *source, size_t n,
     if (decode_block(&v->decoder, method, raw, payload, payload_len, v->scratch, &cause) != ADAPT_OK) {
         return fail_verification(error, &cause);
     }
+    if (v->sizes.x86) {
+        x86_inverse(v->scratch, raw);
+    }
     if (raw != n || memcmp(v->scratch, source, n) != 0) {
         return fail_verification(error, NULL);
     }
@@ -1033,6 +1041,8 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     uint8_t *block = NULL;
     uint8_t *framed = NULL;
     uint8_t *table = NULL;
+    /* The block as read, kept for the proof when `block` is transformed. */
+    uint8_t *orig = NULL;
     segment_counter segments;
     crc32_table crc_table;
     uint32_t crc = CRC32_INIT;
@@ -1080,6 +1090,20 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
             goto done;
         }
     }
+    /* Machine code goes through the branch transform, when the budget
+     * holds the extra block the proof needs; otherwise it is declined. */
+    sizes.x86 = x86_detect(block, n);
+    if (sizes.x86) {
+        if (adapt_encode_memory_bound(sizes) > max_memory) {
+            sizes.x86 = 0;
+        } else {
+            orig = malloc(ADAPT_BLOCK_BYTES);
+            if (orig == NULL) {
+                status = fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+                goto done;
+            }
+        }
+    }
     /* The verifier's model must share the width just chosen. */
     if (v != NULL) {
         status = verifier_init(v, sizes, error);
@@ -1095,7 +1119,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     header[5] = (uint8_t)(sizes.table_log | sizes.class_code << 5);
     header[6] = (uint8_t)(sizes.match_log | sizes.set_code << 5);
     header[7] = (uint8_t)(sizes.window_log | (sizes.period != 0 ? ADAPT_PERIOD_FLAG : 0) |
-                          (sizes.segmented ? ADAPT_SEGMENT_FLAG : 0));
+                          (sizes.segmented ? ADAPT_SEGMENT_FLAG : 0) | (sizes.x86 ? ADAPT_X86_FLAG : 0));
     header_len = ADAPT_HEADER_BYTES;
     if (sizes.period != 0) {
         header[8] = (uint8_t)sizes.period;
@@ -1149,6 +1173,10 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         }
         input_bytes += n;
         crc = crc32_update(&crc_table, crc, block, n);
+        if (sizes.x86) {
+            memcpy(orig, block, n);
+            x86_forward(block, n);
+        }
         if (m == NULL) {
             m = model_new(sizes);
             if (m == NULL) {
@@ -1189,7 +1217,8 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         segments.raw += n;
         segments.coded += ADAPT_BLOCK_HEADER_BYTES + payload_len;
         if (v != NULL) {
-            status = verifier_submit(v, block, n, framed, ADAPT_BLOCK_HEADER_BYTES + payload_len, error);
+            status = verifier_submit(v, sizes.x86 ? orig : block, n, framed, ADAPT_BLOCK_HEADER_BYTES + payload_len,
+                                     error);
             if (status != ADAPT_OK) {
                 goto done;
             }
@@ -1261,6 +1290,7 @@ done:
     free(table);
     free(scan);
     free(block);
+    free(orig);
     free(framed);
     return status;
 }
@@ -1435,7 +1465,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);

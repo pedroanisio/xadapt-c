@@ -325,7 +325,7 @@ def inspect_container(path: Path) -> dict[str, Any]:
             return data
 
         header = read(8)
-        if header[:4] != b"ADPT" or header[4] not in (10, 11, 12):
+        if header[:4] != b"ADPT" or header[4] not in (13, 14, 15):
             raise ValueError("unsupported container header")
         period = int.from_bytes(read(2), "little") if header[7] & 0x80 else 0
         result: dict[str, Any] = dict(
@@ -333,6 +333,7 @@ def inspect_container(path: Path) -> dict[str, Any]:
             context_table_bytes=16 << (header[5] & 31),
             recall_table_bytes=4 << (header[6] & 31),
             window_bytes=1 << (header[7] & 31),
+            x86_transform=bool(header[7] & 0x20),
             class_history_bytes=(0, 8, 21)[header[5] >> 5],
             context_set=header[6] >> 5,
             record_period_bytes=period,

@@ -144,7 +144,9 @@ static void test_sizes(void) {
         bad.table_log = 9;
         CHECK(!adapt_sizes_valid(bad));
         bad = good;
-        bad.table_log = 23;
+        bad.table_log = 24;
+        CHECK(adapt_sizes_valid(bad));
+        bad.table_log = 25;
         CHECK(!adapt_sizes_valid(bad));
         bad = good;
         bad.match_log = 9;
@@ -194,12 +196,15 @@ static void test_sizes(void) {
         bad.max = 1;
         CHECK(adapt_sizes_valid(bad));
     }
-    /* the table past its sweet spot: an input of 32 MiB or more, a window
-     * at the input's length, a budget that holds it — the crate's numbers */
+    /* the table past its sweet spot: a block per eight input bytes from
+     * 8 MiB, the largest from 16 MiB, a window at the input's length, a
+     * budget that holds it */
     CHECK(adapt_table_log_for(0) == 18 && adapt_table_log_for(1u << 14) == 20);
-    CHECK(adapt_table_log_for((32u << 20) - 1) == 20 && adapt_table_log_for(32u << 20) == 21);
-    CHECK(adapt_table_log_for(64u << 20) == 22 && adapt_table_log_for(100000000) == 22);
-    CHECK(adapt_table_log_for((uint64_t)1 << 40) == 22);
+    CHECK(adapt_table_log_for(4u << 20) == 20 && adapt_table_log_for(8u << 20) == 21);
+    CHECK(adapt_table_log_for((16u << 20) - 1) == 21 && adapt_table_log_for(16u << 20) == 22);
+    CHECK(adapt_table_log_for((32u << 20) - 1) == 22 && adapt_table_log_for(32u << 20) == 23);
+    CHECK(adapt_table_log_for(64u << 20) == 24 && adapt_table_log_for(100000000) == 24);
+    CHECK(adapt_table_log_for((uint64_t)1 << 40) == 24);
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20 && s.match_log == 20 && s.window_log == 24);
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, (uint64_t)256 << 20, &s, &error), ADAPT_OK);
@@ -212,8 +217,12 @@ static void test_sizes(void) {
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, two - 1, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20);
     CHECK_STATUS(adapt_sizes_for_input(1, 40u << 20, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
-    CHECK(s.table_log == 21 && s.window_log == 26);
+    CHECK(s.table_log == 23 && s.window_log == 26);
     CHECK_STATUS(adapt_sizes_for_input(1, 16u << 20, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
+    CHECK(s.table_log == 22);
+    CHECK_STATUS(adapt_sizes_for_input(1, 8u << 20, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
+    CHECK(s.table_log == 21);
+    CHECK_STATUS(adapt_sizes_for_input(1, 4u << 20, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20);
     CHECK_STATUS(adapt_sizes_for_input(0, 0, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20);
@@ -683,7 +692,7 @@ static void test_segments(void) {
      * share of the budget, and a refusal below the floor */
     CHECK_STATUS(adapt_sizes_for_threads((uint64_t)1 << 30, (uint64_t)1 << 30, 4, ADAPT_SEGMENT_BYTES, &threads, &error),
                  ADAPT_OK);
-    CHECK(threads.segmented == 1 && threads.window_log == 24 && threads.table_log == 20);
+    CHECK(threads.segmented == 1 && threads.window_log == 24 && threads.table_log == 22);
     CHECK(adapt_threads_encode_memory_bound(threads, 4, ADAPT_SEGMENT_BYTES) <= ((uint64_t)1 << 30));
     CHECK_STATUS(adapt_sizes_for_threads((uint64_t)1 << 30, (uint64_t)32 << 20, 4, ADAPT_SEGMENT_BYTES, &threads, &error),
                  ADAPT_ERROR_MEMORY_LIMIT);
@@ -740,8 +749,10 @@ static void test_max_profile(void) {
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
     CHECK(out_len == n && memcmp(out, data, n) == 0);
     adapt_free(out);
-    /* the max model is larger, and a budget fitted for it counts that */
-    CHECK(adapt_model_bytes(sizes) > adapt_model_bytes(plain) + ((uint64_t)12 << 20));
+    /* the max model is larger — its arbiters' lanes and its four more run
+     * memories, under 4 MiB — and a budget fitted for it counts that */
+    CHECK(adapt_model_bytes(sizes) > adapt_model_bytes(plain));
+    CHECK(adapt_model_bytes(sizes) < adapt_model_bytes(plain) + ((uint64_t)4 << 20));
     {
         adapt_sizes big;
         CHECK_STATUS(adapt_sizes_for_input(1, (uint64_t)1 << 30, (uint64_t)1 << 30, &big, &error), ADAPT_OK);
@@ -936,6 +947,155 @@ static void test_fast_profile(void) {
 
 /* ---- in memory: arguments, budgets, the proof after the fact ----------- */
 
+/* The x86 branch transform: chosen by the first block's signature, flagged
+ * in the header, undone by every decoder and by the proof alongside; each
+ * operand shape the transform decides on is in the input. */
+static void test_x86_transform(void) {
+    size_t n = 2 * ADAPT_BLOCK_BYTES + 4321, i, out_len, at;
+    uint8_t *data = malloc(n);
+    uint8_t *coded = malloc(n + 256);
+    uint8_t *out = NULL;
+    reader r;
+    writer w;
+    adapt_sizes sizes, read;
+    adapt_stats stats;
+    adapt_error error;
+    static const uint8_t elf[4] = {0x7F, 'E', 'L', 'F'};
+    static const uint8_t macho_le[4] = {0xCF, 0xFA, 0xED, 0xFE};
+    static const uint8_t macho_be[4] = {0xFE, 0xED, 0xFA, 0xCE};
+    static const uint8_t fat[4] = {0xCA, 0xFE, 0xBA, 0xBE};
+    /* "code": a call to one of a few targets every dozen bytes, relative to
+     * the instruction, so the operands differ everywhere the targets agree;
+     * a far call (a large displacement, left alone), a call whose operand
+     * holds an E8 (skipped, not an opcode), and one cut by the block's end */
+    for (i = 0; i < n; i++) {
+        data[i] = (uint8_t)(0x40 + (i * 7) % 60);
+    }
+    for (at = 4; at + 5 <= n; at += 12) {
+        uint32_t target = (uint32_t)(3000 + 500 * (at % 5));
+        uint32_t rel = target - (uint32_t)(at % ADAPT_BLOCK_BYTES + 5);
+        data[at] = (at % 24 == 4) ? 0xE9 : 0xE8;
+        data[at + 1] = (uint8_t)rel;
+        data[at + 2] = (uint8_t)(rel >> 8);
+        data[at + 3] = (uint8_t)(rel >> 16);
+        data[at + 4] = (uint8_t)(rel >> 24);
+    }
+    data[100] = 0xE8;
+    data[101] = 0x12;
+    data[102] = 0x34;
+    data[103] = 0x56;
+    data[104] = 0x78; /* far: the top byte is neither 0 nor 0xFF */
+    data[200] = 0xE8;
+    data[201] = 0xE8;
+    data[202] = 0xE8;
+    data[203] = 0x00;
+    data[204] = 0x00; /* an E8 inside an operand */
+    data[ADAPT_BLOCK_BYTES - 3] = 0xE8; /* an opcode without room for its operand */
+    data[n - 2] = 0xE9;
+    memcpy(data, elf, 4);
+    /* in memory, both ways, with the flag in the header */
+    CHECK_STATUS(adapt_encode(data, n, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK((out[7] & ADAPT_X86_FLAG) != 0);
+    CHECK_STATUS(adapt_read_header(out, out_len, &read, &error), ADAPT_OK);
+    CHECK(read.x86 == 1 && adapt_sizes_valid(read));
+    memcpy(coded, out, out_len);
+    at = out_len;
+    adapt_free(out);
+    CHECK_STATUS(adapt_decode(coded, at, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == n && memcmp(out, data, n) == 0);
+    adapt_free(out);
+    /* the same bytes proven alongside, and streamed in segments */
+    CHECK_STATUS(adapt_encode_verified(data, n, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == at && memcmp(out, coded, at) == 0);
+    adapt_free(out);
+    CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error), ADAPT_OK);
+    sizes.segmented = 1;
+    reset(&r, data, n, 5000, &w, coded, n + 256);
+    CHECK_STATUS(adapt_encode_stream_segments(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY,
+                                              ADAPT_BLOCK_BYTES, &stats, &error),
+                 ADAPT_OK);
+    CHECK(stats.segments == 3 && (coded[7] & ADAPT_X86_FLAG) != 0 && (coded[7] & ADAPT_SEGMENT_FLAG) != 0);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == n && memcmp(out, data, n) == 0);
+    adapt_free(out);
+    /* the fast and max profiles carry it too */
+    sizes.segmented = 0;
+    reset(&r, data, n, 5000, &w, coded, n + 256);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, adapt_sizes_fast(sizes), ADAPT_DEFAULT_MAX_MEMORY,
+                                     &stats, &error),
+                 ADAPT_OK);
+    CHECK(coded[4] == ADAPT_FAST_VERSION && (coded[7] & ADAPT_X86_FLAG) != 0);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == n && memcmp(out, data, n) == 0);
+    adapt_free(out);
+    reset(&r, data, n, 5000, &w, coded, n + 256);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, adapt_sizes_max(sizes), ADAPT_DEFAULT_MAX_MEMORY,
+                                     &stats, &error),
+                 ADAPT_OK);
+    CHECK(coded[4] == ADAPT_MAX_VERSION && (coded[7] & ADAPT_X86_FLAG) != 0);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == n && memcmp(out, data, n) == 0);
+    adapt_free(out);
+    /* the transform pays: the same bytes without the signature are coded
+     * without it, and larger */
+    data[0] = 'x';
+    reset(&r, data, n, 5000, &w, coded, n + 256);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error),
+                 ADAPT_OK);
+    CHECK((coded[7] & ADAPT_X86_FLAG) == 0 && w.len > at);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == n && memcmp(out, data, n) == 0);
+    adapt_free(out);
+    /* a budget that holds the model but not the untransformed block
+     * declines the transform rather than the input */
+    memcpy(data, elf, 4);
+    reset(&r, data, n, 5000, &w, coded, n + 256);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, adapt_encode_memory_bound(sizes), &stats,
+                                     &error),
+                 ADAPT_OK);
+    CHECK((coded[7] & ADAPT_X86_FLAG) == 0);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == n && memcmp(out, data, n) == 0);
+    adapt_free(out);
+    {
+        adapt_sizes flagged = sizes;
+        flagged.x86 = 1;
+        CHECK(adapt_encode_memory_bound(flagged) == adapt_encode_memory_bound(sizes) + ADAPT_BLOCK_BYTES);
+        flagged.x86 = 2;
+        CHECK(!adapt_sizes_valid(flagged));
+    }
+    /* every signature the encoder knows, on a short input */
+    memcpy(data, macho_le, 4);
+    CHECK_STATUS(adapt_encode(data, 64, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK((out[7] & ADAPT_X86_FLAG) != 0);
+    adapt_free(out);
+    memcpy(data, macho_be, 4);
+    CHECK_STATUS(adapt_encode(data, 64, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK((out[7] & ADAPT_X86_FLAG) != 0);
+    adapt_free(out);
+    memcpy(data, fat, 4);
+    CHECK_STATUS(adapt_encode(data, 64, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK((out[7] & ADAPT_X86_FLAG) != 0);
+    adapt_free(out);
+    data[0] = 'M';
+    data[1] = 'Z';
+    CHECK_STATUS(adapt_encode(data, 64, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK((out[7] & ADAPT_X86_FLAG) != 0);
+    CHECK_STATUS(adapt_decode(out, out_len, adapt_default_limits(), &coded, &at, &error), ADAPT_OK);
+    CHECK(at == 64 && memcmp(coded, data, 64) == 0);
+    adapt_free(coded);
+    adapt_free(out);
+    /* one byte of signature, or one short of it, is none */
+    CHECK_STATUS(adapt_encode(data, 1, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK((out[7] & ADAPT_X86_FLAG) == 0);
+    adapt_free(out);
+    memcpy(data, elf, 4);
+    CHECK_STATUS(adapt_encode(data, 3, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK((out[7] & ADAPT_X86_FLAG) == 0);
+    adapt_free(out);
+    free(data);
+}
+
 static void test_in_memory(void) {
     uint8_t *out = (uint8_t *)1;
     size_t out_len = 1, n = 30000, i;
@@ -1009,6 +1169,7 @@ int main(int argc, char **argv) {
     test_max_profile();
     test_edges();
     test_record_period();
+    test_x86_transform();
     test_in_memory();
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);

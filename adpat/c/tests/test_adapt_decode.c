@@ -216,10 +216,12 @@ static void test_stream_failures(void) {
 
 /* ---- framing errors on hand-built bytes ------------------------------- */
 
-static const uint8_t EMPTY_FILE[21] = {'A', 'D', 'P', 'T', 10, 20, 12, 16, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static const uint8_t EMPTY_FILE[21] = {'A', 'D', 'P', 'T', ADAPT_FORMAT_VERSION, 20, 12, 16, 3, 0, 0,
+                                       0,   0,   0,   0,   0,                    0,  0,  0,  0, 0};
 /* the same input, segmented: one empty segment in the table */
-static const uint8_t EMPTY_SEGMENTED[34] = {'A', 'D', 'P', 'T', 10, 20, 12, 16 | 0x40, 5, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
-                                            3,   0,   0,   0,   0,  0,  0,  0,         0, 0, 0, 0, 0};
+static const uint8_t EMPTY_SEGMENTED[34] = {'A', 'D', 'P', 'T', ADAPT_FORMAT_VERSION, 20, 12, 16 | 0x40, 5, 0, 0, 0,
+                                            0,   0,   0,   0,   0,                    1,  0,  0,        0, 3, 0, 0,
+                                            0,   0,   0,   0,   0,                    0,  0,  0,        0, 0};
 
 static adapt_status decode_bytes(const uint8_t *file, size_t len, adapt_limits limits, adapt_error *error) {
     uint8_t *out = NULL;
@@ -268,9 +270,14 @@ static void test_segmented_framing(void) {
     memcpy(file, EMPTY_SEGMENTED, sizeof(EMPTY_SEGMENTED));
     file[9] = 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_SEGMENTED), limits, &error), ADAPT_ERROR_BAD_BLOCK);
-    /* an unknown flag bit is a bad header */
+    /* every bit of the window byte is spoken for: the transform flag on an
+     * empty file is a valid, idle choice, and a window past the largest is
+     * a bad header */
     memcpy(file, EMPTY_FILE, sizeof(EMPTY_FILE));
-    file[7] |= 0x20;
+    file[7] |= ADAPT_X86_FLAG;
+    CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_OK);
+    memcpy(file, EMPTY_FILE, sizeof(EMPTY_FILE));
+    file[7] = (uint8_t)((file[7] & ~31) | 31);
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_BAD_HEADER);
     /* A hand-built file of seventeen one-byte segments, each one stored
      * block: the counter's table of entries grows past its first sixteen,
@@ -557,7 +564,9 @@ static void test_framing(void) {
     memcpy(file, EMPTY_FILE, sizeof(EMPTY_FILE));
     file[5] = 9; /* table_log below the minimum */
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_BAD_HEADER);
-    file[5] = 23;
+    file[5] = 24; /* the largest table */
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    file[5] = 25;
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
     file[5] = 20 | 3 << 5; /* an unknown class code */
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
@@ -843,6 +852,64 @@ static void test_arguments_and_messages(void) {
 
 /* ---- the checksum ------------------------------------------------------ */
 
+/* The x86 flag on hand-built bytes: a stored block holds the transformed
+ * bytes, and both decoders return the original — a small call rewritten to
+ * a block-relative address, a far call and a trailing opcode left alone —
+ * with the checksum over the original. */
+static void test_x86_flag(void) {
+    static const uint8_t original[13] = {0x90, 0xE8, 0x01, 0x00, 0x00, 0x00, 0x90, 0xE8, 0x12, 0x34, 0x56, 0x78, 0xE9};
+    static const uint8_t stored[13] = {0x90, 0xE8, 0x07, 0x00, 0x00, 0x00, 0x90, 0xE8, 0x12, 0x34, 0x56, 0x78, 0xE9};
+    uint8_t file[8 + 9 + 13 + 13];
+    uint8_t *out = NULL;
+    size_t out_len = 0, i;
+    uint32_t crc = adapt_crc32(original, sizeof(original));
+    adapt_sizes sizes, plain;
+    adapt_error error;
+    adapt_limits limits = adapt_default_limits();
+    memcpy(file, EMPTY_FILE, 8);
+    file[7] |= ADAPT_X86_FLAG;
+    memset(file + 8, 0, sizeof(file) - 8);
+    file[8] = 2;
+    file[9] = 13;
+    file[13] = 13;
+    memcpy(file + 17, stored, 13);
+    file[30] = 3;
+    file[31] = 13;
+    for (i = 0; i < 4; i++) {
+        file[39 + i] = (uint8_t)(crc >> (8 * i));
+    }
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.x86 == 1 && sizes.window_log == 16 && adapt_sizes_valid(sizes));
+    plain = sizes;
+    plain.x86 = 0;
+    CHECK(adapt_decode_memory_bound(sizes) == adapt_decode_memory_bound(plain));
+    CHECK_STATUS(adapt_decode(file, sizeof(file), limits, &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == 13 && memcmp(out, original, 13) == 0);
+    adapt_free(out);
+    {
+        chunked_reader src;
+        sink s;
+        uint8_t back[64];
+        adapt_stats stats;
+        src.src = file;
+        src.len = sizeof(file);
+        src.pos = 0;
+        src.reads = 0;
+        src.fail_after = -1;
+        src.chunk = 5;
+        s.out = back;
+        s.cap = sizeof(back);
+        s.len = 0;
+        s.fail = 0;
+        CHECK_STATUS(adapt_decode_stream(chunked_read, &src, sink_write, &s, limits, &stats, &error), ADAPT_OK);
+        CHECK(s.len == 13 && memcmp(back, original, 13) == 0 && stats.crc32 == crc);
+    }
+    /* without the flag the stored bytes are the output, and the checksum
+     * of the original no longer matches them */
+    file[7] = (uint8_t)(file[7] & ~ADAPT_X86_FLAG);
+    CHECK_STATUS(decode_bytes(file, sizeof(file), limits, &error), ADAPT_ERROR_CHECKSUM);
+}
+
 static void test_crc32(void) {
     CHECK(adapt_crc32((const uint8_t *)"", 0) == 0);
     CHECK(adapt_crc32((const uint8_t *)"a", 1) == 0xE8B7BE43u);
@@ -866,6 +933,7 @@ int main(int argc, char **argv) {
     test_framing();
     test_segmented_framing();
     test_limits();
+    test_x86_flag();
     test_arguments_and_messages();
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);

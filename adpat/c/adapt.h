@@ -1,17 +1,21 @@
 /*
- * adapt.h — the adapt codec, format versions 10 and 11, in C99 with
+ * adapt.h — the adapt codec, format versions 13, 14 and 15, in C99 with
  * nothing beyond the C standard library (and POSIX threads for the
  * encoder's proof, when built with ADAPT_THREADS).
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
- * The format is defined by the Rust crate in `../src`: `container.rs` for
- * the framing and `model.rs` for the predictor. This is a port of that
- * code, integer for integer, so that a file either encoder writes the
- * other decodes to the same bytes, the two encoders write the same bytes
- * for the same input and budget, and a file one decoder refuses the other
- * refuses with the same name. The constants below restate the crate's; a
- * change to any of them is a new format version.
+ * The format began as a port of the Rust crate in `../src`, integer for
+ * integer: `container.rs` for the framing and `model.rs` for the
+ * predictor. Versions 13 to 15 are defined by this implementation and
+ * differ from the crate's 10 to 12 in four measured ways — an x86 branch
+ * transform before the model, four blocks to a table line instead of two,
+ * a context table twice the size for the same input, and a max profile
+ * that adds contexts, run memories and per-context evidence in place of
+ * the larger arbiter — so a file of theirs is refused here by version,
+ * and the crate must be brought up to these before the two agree again.
+ * The layout and names still follow the crate's so the two can be read
+ * side by side; a change to any constant below is a new format version.
  *
  * Decoding: adapt_decode() holds a file in memory and returns its bytes
  * only after their checksum matched; adapt_decode_stream() pulls it through
@@ -41,8 +45,10 @@
 extern "C" {
 #endif
 
-/* The container version this reader implements: the normal profile. */
-#define ADAPT_FORMAT_VERSION 10u
+/* The container version this reader implements: the normal profile.
+ * Versions 10 to 12, the crate's, are refused like every version no file
+ * was published in. */
+#define ADAPT_FORMAT_VERSION 13u
 /* The header's window byte carries this bit when a record period follows
  * the fixed header as ADAPT_PERIOD_BYTES more bytes; the period is the
  * distance the record and field contexts read across (a raw image's
@@ -60,6 +66,14 @@ extern "C" {
  * crate does so on threads; this port codes and decodes segments in order,
  * on one thread, to the same bytes. */
 #define ADAPT_SEGMENT_FLAG 0x40u
+/* The header's window byte carries this bit when every block's bytes went
+ * through the x86 branch transform before modelling: the four-byte
+ * relative target after each E8 (call) and E9 (jmp) opcode is rewritten
+ * as a block-relative absolute address, so repeated calls to one function
+ * become identical byte sequences. The encoder turns it on for an input
+ * whose first block carries an ELF, MZ or Mach-O signature; the decoder
+ * undoes it on every recovered block before the checksum. */
+#define ADAPT_X86_FLAG 0x20u
 /* Input bytes per segment when a caller asks for segments and no other
  * length: 16 MiB. */
 #define ADAPT_SEGMENT_BYTES ((uint64_t)1 << 24)
@@ -73,12 +87,14 @@ extern "C" {
  * profile of 0.7.0 with one fixed pair, and version 8, the fast profile
  * before segments, are refused like every version no file was published
  * in. */
-#define ADAPT_FAST_VERSION 11u
-/* The version a max-profile file carries: the normal model with its first
- * arbiter keyed by the whole previous byte (MIXER_SETS_MAX weight sets)
- * and a second estimation stage keyed by a hash of the previous two
- * bytes; fewer bytes for more memory and time. `cadapt encode --max`. */
-#define ADAPT_MAX_VERSION 12u
+#define ADAPT_FAST_VERSION 14u
+/* The version a max-profile file carries: the normal model with four
+ * more hashed contexts (the previous word with the current, the first and
+ * third bytes back, the bytes that followed the order-2 context, the high
+ * nibbles of the last four bytes), run memories on orders 1, 3, 4 and 6,
+ * and three arbiter inputs per context instead of one; the same memory,
+ * about twice the time, fewer bytes. `cadapt encode --max`. */
+#define ADAPT_MAX_VERSION 15u
 /* The fast profile's context sets: order-2 and class, order-2 and
  * order-4, order-1 and order-2. */
 #define ADAPT_FAST_SETS 3u
@@ -190,8 +206,12 @@ typedef struct adapt_sizes {
     uint8_t segmented;
     /* 1 for the max profile (ADAPT_MAX_VERSION); never with `fast`.
      * adapt_sizes_max turns it on; adapt_sizes_for_input_max fits sizes
-     * to a budget with the max profile's larger model counted. */
+     * to a budget as adapt_sizes_for_input does, with `max` set. */
     uint8_t max;
+    /* 1 when the blocks carry the x86 branch transform (ADAPT_X86_FLAG).
+     * Chosen by the encoder from the first block; adapt_sizes_for_input
+     * leaves it 0. Any profile may carry it. */
+    uint8_t x86;
 } adapt_sizes;
 
 /* Context sets a file may choose, by header code. */
@@ -234,8 +254,8 @@ void adapt_fast_contexts(adapt_sizes sizes, char *buf, size_t len);
  * ADAPT_FAST_TABLE_LOG_MAX, the set code cleared for the encoder to
  * choose. */
 adapt_sizes adapt_sizes_fast(adapt_sizes sizes);
-/* `sizes` for the max profile: the normal profile's sizes and choices,
- * the larger model, as `adapt encode --max` does. */
+/* `sizes` for the max profile: the normal profile's sizes and choices
+ * with `max` set, as `adapt encode --max` does. */
 adapt_sizes adapt_sizes_max(adapt_sizes sizes);
 
 /* Rough size in bytes of one model at these sizes, as the crate counts it. */
@@ -258,8 +278,13 @@ int adapt_sizes_valid(adapt_sizes sizes);
 
 /* The largest context table, as a log2 of blocks, an input of `length`
  * bytes grows into when the budget holds it and the window has its cap:
- * the sweet spot the length chooses below 32 MiB, 2^21 from 32 MiB, 2^22
- * from 64 MiB (the crate's `table_log_for`). */
+ * the sweet spot the length chooses below 8 MiB, then a block per eight
+ * input bytes to 2^24 from 64 MiB — four times the crate's
+ * `table_log_for`. Measured on text and tables, the table the crate chose
+ * was the model's bottleneck: every context added to it was evicted
+ * rather than learned; twice the table coded an 8 MiB text 1.6 % smaller
+ * and four times the table, on 100 MB of it, 1.9 % smaller again. The
+ * budget still bounds it: the default budget holds the sizes it did. */
 uint8_t adapt_table_log_for(uint64_t length);
 
 /* The sizes for an input of `length` bytes (`length_known` 0 when the
@@ -277,9 +302,8 @@ uint8_t adapt_table_log_for(uint64_t length);
  * budget cannot hold the smallest model the format allows. */
 adapt_status adapt_sizes_for_input(int length_known, uint64_t length, uint64_t max_memory, adapt_sizes *sizes,
                                    adapt_error *error);
-/* adapt_sizes_for_input for the max profile: the same rule, the tables and
- * window fitted with the max profile's larger model counted; the result
- * has `max` set. */
+/* adapt_sizes_for_input for the max profile: the same rule and the same
+ * memory; the result has `max` set. */
 adapt_status adapt_sizes_for_input_max(int length_known, uint64_t length, uint64_t max_memory, adapt_sizes *sizes,
                                        adapt_error *error);
 

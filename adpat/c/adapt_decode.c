@@ -77,10 +77,11 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     }
     s.table_log = header[5] & 31;
     s.match_log = header[6] & 31;
-    s.window_log = (uint8_t)(header[7] & ~(ADAPT_PERIOD_FLAG | ADAPT_SEGMENT_FLAG));
+    s.window_log = (uint8_t)(header[7] & ~(ADAPT_PERIOD_FLAG | ADAPT_SEGMENT_FLAG | ADAPT_X86_FLAG));
     s.class_code = header[5] >> 5;
     s.set_code = header[6] >> 5;
     s.segmented = (header[7] & ADAPT_SEGMENT_FLAG) != 0;
+    s.x86 = (header[7] & ADAPT_X86_FLAG) != 0;
     if (!sizes_valid(s)) {
         return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
     }
@@ -105,14 +106,16 @@ uint32_t adapt_class_width(adapt_sizes sizes) {
 
 void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len) {
     uint16_t mask = sizes.set_code < ADAPT_CONTEXT_SETS ? CONTEXT_SETS[sizes.set_code] : 0;
+    /* the max profile's kinds are not the normal profile's to drop */
+    size_t kinds = sizes.max ? HASHED : BASE_HASHED;
     size_t i, at = 0;
     if (len == 0) {
         return;
     }
     buf[0] = 0;
-    for (i = 0; i <= HASHED; i++) {
-        const char *name = i < HASHED ? CONTEXT_NAMES[i] : "runs";
-        int dropped = i < HASHED ? (mask >> i & 1) != 0 : (mask & NO_RUNS) != 0;
+    for (i = 0; i <= kinds; i++) {
+        const char *name = i < kinds ? CONTEXT_NAMES[i] : "runs";
+        int dropped = i < kinds ? (mask >> i & 1) != 0 : (mask & NO_RUNS) != 0;
         if (dropped) {
             int w = snprintf(buf + at, len - at, "%s%s", at == 0 ? "" : ", ", name);
             if (w < 0 || (size_t)w >= len - at) {
@@ -125,7 +128,7 @@ void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len) {
 
 uint64_t adapt_model_bytes(adapt_sizes sizes) {
     return ((uint64_t)1 << sizes.table_log) * 16 + (sizes.fast ? O1_BYTES : 0) + ((uint64_t)1 << sizes.match_log) * 4 +
-           (uint64_t)(1 << 16) * 33 * 2 + side_table_bytes(sizes.max) + ((uint64_t)1 << sizes.window_log);
+           (uint64_t)(1 << 16) * 33 * 2 + side_table_bytes(sizes.fast, sizes.max) + ((uint64_t)1 << sizes.window_log);
 }
 
 void adapt_fast_contexts(adapt_sizes sizes, char *buf, size_t len) {
@@ -357,6 +360,9 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
         status = decode_block(&decoder, method, raw, payload, payload_len, scratch, error);
         if (status != ADAPT_OK) {
             goto done;
+        }
+        if (sizes.x86) {
+            x86_inverse(scratch, raw);
         }
         crc = crc32_update(&crc_table, crc, scratch, raw);
         written += raw;

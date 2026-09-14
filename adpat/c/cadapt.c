@@ -57,7 +57,7 @@ typedef long long cadapt_off;
 typedef off_t cadapt_off;
 #endif
 
-#define CADAPT_VERSION "0.10.0"
+#define CADAPT_VERSION "0.11.0"
 
 /* Format numbers and memory defaults come from the codec constants.
  * Verification is opt-in, and segment coding runs on one thread. */
@@ -77,8 +77,8 @@ static void print_usage(FILE *stream) {
             "Existing output files are kept unless --force is given. --fast writes the\n"
             "fast profile (format version %u), which decodes about three times faster\n"
             "for about a twelfth more bytes; --max the max profile (%u), which writes\n"
-            "fewer bytes for more memory and time and wants a budget above the default\n"
-            "on a large input; the default is the normal profile (%u).\n"
+            "fewer bytes for about twice the time in the same memory; the default is\n"
+            "the normal profile (%u).\n"
             "Both encode and decode stream, so an input of any length takes the memory\n"
             "of the model and its window; --max-memory <bytes> (default %llu) bounds\n"
             "that, and a smaller budget means a smaller model, never a refused input.\n"
@@ -996,6 +996,7 @@ static int info_command(int argc, char **argv) {
         }
     }
     printf("profile         %s\n", sizes.fast ? "fast" : (sizes.max ? "max" : "normal"));
+    printf("x86 transform   %s\n", sizes.x86 ? "yes" : "no");
     printf("model memory    ~%llu MiB, whatever the length\n", (unsigned long long)(adapt_model_bytes(sizes) >> 20));
     printf("crc32           %08lx\n", (unsigned long)crc);
     return fflush(stdout) == 0 ? 0 : other_error(input, strerror(errno));
