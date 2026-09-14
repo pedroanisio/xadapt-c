@@ -26,7 +26,8 @@ refuses the crate's versions 10–12. The header of
 | [adpat/c/fuzz/](adpat/c/fuzz/) | A libFuzzer harness for the two decoders |
 | [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |
 | [bench/](bench/README.md) | Encoding telemetry on the enwik8 corpus, run history and plots |
-| [research/](research/arxiv-compression-review.md) | A review of the compression literature against this codec, and the enwik8 baseline |
+| [research/](research/arxiv-compression-review.md) | A review of the compression literature against this codec, the enwik8 baseline, and the [per-script measurements](research/scripts-measurement.md) |
+| [static/corpus/](static/corpus/scripts/manifest.json) | The benchmark's fixtures: enwik8, text8, and the six per-script rows with their manifest |
 | [CLAUDE.md](CLAUDE.md) | Working rules for contributors and agents |
 
 ## Build
@@ -209,6 +210,15 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   encoder and their explicit sizes/profile/segment settings after a
   deliberate format change, never to make a test pass. Named CLI inputs
   now include metadata and are unsuitable as metadata-free golden vectors.
+- **Every script, measured** (`FMT-8`): the corpus holds six rows of about
+  2 MiB of Wikipedia article text each — Latin (English), Cyrillic
+  (Russian), CJK (Chinese, Japanese) and diacritic-heavy Latin (Vietnamese,
+  Czech) — in [static/corpus/scripts/](static/corpus/scripts/), fetched
+  reproducibly by [bench/fetch_scripts.py](bench/fetch_scripts.py) with a
+  manifest naming every article and revision. Their measurements, by the
+  benchmark on one binary, are in
+  [research/scripts-measurement.md](research/scripts-measurement.md); the
+  model is byte-level throughout, so a script is never decoded, only seen.
 - `make check` adds the Python tests — the CLI command by command
   (`tests/test_cadapt.py`), the coverage gate's own tests
   (`tests/test_check_gcov.py`), the benchmark's (`bench/test_telemetry.py`)
