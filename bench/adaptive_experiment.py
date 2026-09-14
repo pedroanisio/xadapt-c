@@ -272,6 +272,50 @@ def compare_restoration(
     }
 
 
+def check_search_trace(
+    log: str, base: str, bmp: bool, selected_bytes: int
+) -> list[dict[str, Any]]:
+    """Reject missing, duplicate or inconsistent complete-container evidence."""
+    prefix = "max-" if base == "max" else ""
+    names = {prefix + mode for mode in ("normal", "rates", "sparse", "retained")}
+    if bmp:
+        names |= {name + "-bmp" for name in names}
+    trials: dict[str, dict[str, Any]] = {}
+    selected = []
+    for line in log.splitlines():
+        match = re.fullmatch(r"adaptive trial ([^:]+): (\d+) bytes", line)
+        skipped = re.fullmatch(r"adaptive trial ([^:]+) skipped: memory", line)
+        winner = re.fullmatch(r"adaptive selected ([^:]+): (\d+) bytes", line)
+        if match or skipped:
+            name = (match or skipped)[1]
+            if name not in names or name in trials:
+                raise ValueError("unknown or duplicate search candidate")
+            trials[name] = (
+                {"profile": name, "container_bytes": int(match[2])}
+                if match
+                else {"profile": name, "skipped": "memory"}
+            )
+        elif winner:
+            selected.append((winner[1], int(winner[2])))
+        elif line.startswith("adaptive "):
+            raise ValueError("malformed search trace")
+    successful = {
+        name: row["container_bytes"]
+        for name, row in trials.items()
+        if "container_bytes" in row
+    }
+    if trials.keys() != names or len(selected) != 1 or not successful:
+        raise ValueError("incomplete search trace")
+    name, size = selected[0]
+    if (
+        successful.get(name) != size
+        or size != selected_bytes
+        or size != min(successful.values())
+    ):
+        raise ValueError("search winner disagrees with complete container sizes")
+    return list(trials.values())
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run a finite matrix and checkpoint both successful and failed trials."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -294,8 +338,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--memory", type=int, default=64 << 20)
     parser.add_argument("--base-profile", choices=("normal", "max"), default="normal")
-    parser.add_argument("--search-only", action="store_true",
-                        help="measure baseline and full search; trial sizes are logged, only the winner is decoded")
+    parser.add_argument(
+        "--search-only",
+        action="store_true",
+        help="measure baseline and full search; trial sizes are logged, only the winner is decoded",
+    )
     parser.add_argument(
         "--quick",
         action="store_true",
@@ -349,7 +396,8 @@ def main(argv: list[str] | None = None) -> int:
             ["git", "rev-parse", "HEAD"], cwd=telemetry.ROOT, text=True
         ).strip(),
         "expected_runs": sum(
-            2 if args.search_only else (9 if source.suffix == ".bmp" else 5) for source in fixtures
+            2 if args.search_only else (9 if source.suffix == ".bmp" else 5)
+            for source in fixtures
         ),
         "fixtures": {},
         "runs": [],
@@ -409,12 +457,13 @@ def main(argv: list[str] | None = None) -> int:
                     record["codec"] = telemetry.inspect_container(encoded)
                     record["selection_log"] = (directory / "stderr.txt").read_text()
                     if profile == "auto":
-                        record["candidate_trials"] = [
-                            {"profile": match[1], "container_bytes": int(match[2])}
-                            for match in re.finditer(r"^adaptive trial ([^:\n]+): (\d+) bytes$", record["selection_log"], re.MULTILINE)
-                        ]
-                        if not record["candidate_trials"]:
-                            raise ValueError("search produced no candidate size evidence")
+                        record["candidate_trials"] = check_search_trace(
+                            record["selection_log"],
+                            args.base_profile,
+                            source.suffix == ".bmp"
+                            or "-bmp" in record["selection_log"],
+                            record["container_bytes"],
+                        )
                     decode_dir = directory / "decode"
                     decode_dir.mkdir()
                     command = [str(binary), "decode", str(encoded), "-o", str(restored)]
@@ -465,9 +514,15 @@ def main(argv: list[str] | None = None) -> int:
                     "auto_bytes": chosen,
                     "saved_percent": 100 * (base - chosen) / base,
                     "auto_equals_smallest": chosen
-                    == min([r["container_bytes"] for r in rows] + [
-                        trial["container_bytes"] for r in rows for trial in r.get("candidate_trials", [])
-                    ]),
+                    == min(
+                        [r["container_bytes"] for r in rows]
+                        + [
+                            trial["container_bytes"]
+                            for r in rows
+                            for trial in r.get("candidate_trials", [])
+                            if "container_bytes" in trial
+                        ]
+                    ),
                 }
             )
     report["comparisons"] = comparisons

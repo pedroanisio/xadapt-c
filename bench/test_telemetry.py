@@ -44,6 +44,29 @@ class TelemetryTest(unittest.TestCase):
         self.assertEqual([r["codec"]["adaptive_profile"] for r in records[:3]], ["rates", "sparse", "retained"])
         self.assertTrue(all(r["status"] == "ok" for r in records))
 
+    def test_search_trace_requires_every_candidate_and_correct_winner(self) -> None:
+        import adaptive_experiment
+
+        trace = (
+            "adaptive trial max-normal: 105 bytes\n"
+            "adaptive trial max-rates: 107 bytes\n"
+            "adaptive trial max-sparse skipped: memory\n"
+            "adaptive trial max-retained: 104 bytes\n"
+            "adaptive selected max-retained: 104 bytes\n"
+        )
+        trials = adaptive_experiment.check_search_trace(trace, "max", False, 104)
+        self.assertEqual(len(trials), 4)
+        self.assertEqual(trials[2]["skipped"], "memory")
+        for invalid in (
+            trace.replace("adaptive trial max-rates: 107 bytes\n", ""),
+            trace.replace("max-rates", "max-normal"),
+            trace.replace("selected max-retained: 104", "selected max-rates: 104"),
+            trace.replace("selected max-retained: 104", "selected max-retained: 108"),
+        ):
+            with self.subTest(trace=invalid), self.assertRaises(ValueError):
+                adaptive_experiment.check_search_trace(invalid, "max", False, 104)
+
+
     def test_max_search_experiment_accounts_for_all_trials(self) -> None:
         import adaptive_experiment
 
