@@ -3,18 +3,19 @@
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
- *   cadapt encode <input> [-o <output>] [--force] [--no-verify] [--fast | --max] [--max-memory <bytes>]
+ *   cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [--max-memory <bytes>]
  *                 [--threads <n>] [--segment-bytes <bytes>]
  *   cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
  *   cadapt info   <file>
  *
- * The same commands, options, messages and exit codes as `adapt` in the
- * Rust crate, so a script can swap one for the other. Both directions
- * stream: memory is the model and one block, whatever the length. `encode`
- * proves what it wrote decodes to the input — with a second model checking
+ * The commands and container follow `adapt` in the Rust crate; this CLI
+ * makes encoding verification opt-in. Both directions stream: memory is
+ * the model and one block, whatever the length. `encode --verify` proves
+ * what it wrote decodes to the input — with a second model checking
  * every block as it is written when the budget holds two, or, for a file
- * input written to a file, in a second pass with one — unless --no-verify
- * declines the proof. A file output is staged beside its target and
+ * input written to a file, in a second pass with one. Encoding skips this
+ * proof by default; --no-verify remains accepted for existing scripts.
+ * A file output is staged beside its target and
  * published only once complete and, when asked, proven; without --force an
  * existing target is kept. `-` names standard input or output; bytes
  * written to standard output before an error was found are not to be
@@ -58,16 +59,14 @@ typedef off_t cadapt_off;
 
 #define CADAPT_VERSION "0.10.0"
 
-/* The usage text: the crate's, under this program's name, its format
- * numbers and defaults from the constants; the crate's tests/c_codec.rs
- * holds the three command lines' texts to one another. The last paragraph
- * is this port's own, since it codes segments in order on one thread. */
+/* Format numbers and memory defaults come from the codec constants.
+ * Verification is opt-in, and segment coding runs on one thread. */
 static void print_usage(FILE *stream) {
     fprintf(stream,
             "cadapt — the adapt self-adaptive lossless codec, in C\n"
             "\n"
             "usage:\n"
-            "  cadapt encode <input> [-o <output>] [--force] [--no-verify] [--fast | --max] [--max-memory <bytes>]\n"
+            "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [--max-memory <bytes>]\n"
             "                [--threads <n>] [--segment-bytes <bytes>]\n"
             "  cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]\n"
             "  cadapt info   <file>\n"
@@ -83,9 +82,10 @@ static void print_usage(FILE *stream) {
             "Both encode and decode stream, so an input of any length takes the memory\n"
             "of the model and its window; --max-memory <bytes> (default %llu) bounds\n"
             "that, and a smaller budget means a smaller model, never a refused input.\n"
-            "encode proves its output as it writes it when the budget holds two models,\n"
-            "or, for a file written to a file, in a second pass with one; --no-verify\n"
-            "declines the proof. decode also accepts --max-output <bytes> (default 1 GiB).\n"
+            "encode skips round-trip verification by default. --verify proves its output\n"
+            "as it writes it when the budget holds two models, or, for a file written\n"
+            "to a file, in a second pass with one. --no-verify explicitly skips this proof.\n"
+            "decode also accepts --max-output <bytes> (default 1 GiB).\n"
             "--threads <n> (default 1) with n of two or more cuts the input into segments\n"
             "of --segment-bytes (default %llu, whole blocks of %llu) that start the\n"
             "model afresh, the file the crate's threads write; this port codes and\n"
@@ -592,7 +592,7 @@ static int input_length(FILE *file, uint64_t *length) {
 
 static int encode_command(int argc, char **argv) {
     static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", NULL};
-    static const char *const known[] = {"--force", "--no-verify", "--fast", "--max", NULL};
+    static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", NULL};
     args a;
     const char *input, *o, *text, *how;
     char *output = NULL;
@@ -620,6 +620,9 @@ static int encode_command(int argc, char **argv) {
     input = a.positional[0];
     if (has_flag(&a, "--fast") && has_flag(&a, "--max")) {
         return usage_error("--fast and --max are two profiles; pass one%s", "");
+    }
+    if (has_flag(&a, "--verify") && has_flag(&a, "--no-verify")) {
+        return usage_error("--verify and --no-verify cannot be used together%s", "");
     }
     o = value_of(&a, "-o");
     if (o != NULL) {
@@ -665,7 +668,7 @@ static int encode_command(int argc, char **argv) {
         }
     }
     force = has_flag(&a, "--force");
-    verify = !has_flag(&a, "--no-verify");
+    verify = has_flag(&a, "--verify");
     binary_stdio();
     if (strcmp(input, "-") == 0) {
         in.file = stdin;
@@ -714,7 +717,7 @@ static int encode_command(int argc, char **argv) {
     if (verify && !alongside && (in.file == stdin || !known_length || strcmp(output, "-") == 0)) {
         snprintf(message, sizeof(message),
                  "proving the output here needs a memory budget of %llu bytes for two models, "
-                 "or a file input written to a file; raise --max-memory or pass --no-verify",
+                 "or a file input written to a file; raise --max-memory or omit --verify",
                  (unsigned long long)adapt_verified_memory_bound(sizes));
         rc = other_error(input, message);
         if (in.file != stdin) {
@@ -808,7 +811,7 @@ static int encode_command(int argc, char **argv) {
             return rc;
         }
     } else {
-        how = "not verified (--no-verify)";
+        how = has_flag(&a, "--no-verify") ? "not verified (--no-verify)" : "not verified (pass --verify to enable)";
     }
     if (in.file != NULL && in.file != stdin) {
         fclose(in.file);

@@ -65,6 +65,7 @@ test: $(TESTS)
 
 check: all test
 	$(PYTHON) -B tests/test_check_gcov.py
+	$(PYTHON) -B tests/test_cadapt.py "$(BIN)"
 
 clean:
 	rm -rf $(BUILD)
