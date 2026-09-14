@@ -167,15 +167,17 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
 #define INPUTS (CTX_LANES(1) * (1 + HASHED) + RUNS + 2 + 1)
 
 /* ---- profiles ----
- * Format version 6 is the normal profile: the model as written, with the
- * contexts a file keeps chosen per file. Version 8 is the fast profile:
- * two hashed contexts chosen per file from FAST_SETS, a direct order-1
- * memory, the word run, recall, order-0 and the first arbiter keyed by
- * the word run's state, no second or final arbiter and no estimation
- * stage, over a table of at most ADAPT_FAST_TABLE_LOG_MAX blocks
- * (model.rs, `Model<FAST>`). predict() and update() are compiled once per
- * profile with `fast` a constant, so a profile pays only for the parts
- * it runs. */
+ * Format version ADAPT_FORMAT_VERSION (13) is the normal profile: the
+ * model as written, with the contexts a file keeps chosen per file.
+ * ADAPT_FAST_VERSION (14) is the fast profile: two hashed contexts chosen
+ * per file from FAST_SETS, a direct order-1 memory, the word run, recall,
+ * order-0 and the first arbiter keyed by the word run's state, no second
+ * or final arbiter and no estimation stage, over a table of at most
+ * ADAPT_FAST_TABLE_LOG_MAX blocks (the crate's `Model<FAST>`).
+ * ADAPT_MAX_VERSION (15) is the max profile, described at adapt.h and
+ * under the `max` flag below. predict() and update() are compiled once
+ * per profile with `fast` and `max` constants, so a profile pays only for
+ * the parts it runs. */
 
 /* A set that keeps hashed contexts a and b: the contexts it leaves out. */
 #define KEEP2(a, b) ((uint16_t)(((1u << HASHED) - 1) & ~(1u << (a) | 1u << (b))))

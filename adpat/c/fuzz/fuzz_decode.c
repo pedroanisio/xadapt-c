@@ -1,11 +1,18 @@
 /* The C decoder under libFuzzer with the address and undefined-behaviour
  * sanitizers: arbitrary bytes into adapt_decode() and adapt_decode_stream(),
  * which return the original or a named fault, never read out of bounds,
- * never leak, and agree with each other. Built and run by scripts/fuzz.sh:
+ * never leak, and agree with each other. Built with clang (libFuzzer needs
+ * its C++ runtime, libstdc++ or libc++, installed) and run from this
+ * directory, seeded with the committed vectors:
  *
  *   clang -std=c99 -O1 -g -fsanitize=fuzzer,address,undefined \
  *         adapt_decode.c adapt_encode.c fuzz/fuzz_decode.c -o build/fuzz_decode
- *   build/fuzz_decode corpus -max_total_time=60
+ *   build/fuzz_decode tests/vectors -max_total_time=60
+ *
+ * The limits below hold one execution to the smallest models and 32 KiB of
+ * output, so a seed that names a larger model is refused at its header:
+ * to reach the modelled path, add seeds encoded under a budget the limits
+ * hold (`cadapt encode --max-memory 15000000`).
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-14. */
 #include <stdint.h>

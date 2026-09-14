@@ -30,7 +30,9 @@
  * link() for publishing without replacing a target, a 64-bit ftell for
  * `info` on large files, and directory listing, lstat, readlink, mkdir
  * and symlink for folders. Windows equivalents are named below; there a
- * symbolic link is neither seen in a folder nor restored from one.
+ * symbolic link is neither seen in a folder nor restored from one. A
+ * filesystem without hard links (FAT, exFAT, some network mounts) refuses
+ * link(), so publishing there needs --force, which renames instead.
  */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200112L
