@@ -446,6 +446,7 @@ static void print_usage(FILE *stream) {
             "usage:\n"
             "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -9]\n"
             "                [--max-memory <bytes>] [--threads <n>] [--segment-bytes <bytes>]\n"
+            "                [--adaptive rates|sparse|retained|auto] [--transform bmp]\n"
             "  cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]\n"
             "  cadapt info   <file>\n"
             "  cadapt --version\n"
@@ -458,6 +459,14 @@ static void print_usage(FILE *stream) {
             "fewer bytes for about three times the time in the same memory; the default is\n"
             "the normal profile. Normal/fast/max streams use versions %u/%u/%u;\n"
             "named files and folders include metadata in versions %u/%u/%u.\n"
+            "--adaptive rates/sparse/retained select experimental causal predictors\n"
+            "(stream formats 19/20/21, metadata formats 22/23/24). auto spools the\n"
+            "source once to temporary disk and selects the smallest complete container\n"
+            "from normal and these three profiles that fit the memory budget. Search\n"
+            "also tries BMP24 color/row residuals on eligible files (formats 25--32).\n"
+            "--transform bmp explicitly selects that reversible transform. Search\n"
+            "uses up to eight encodes, temporary disk of input plus two containers, and\n"
+            "verifies only with --verify (one model, also for pipes).\n"
             "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
             "preset: 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset below the\n"
             "smallest model of the profile raised to it; -9 is the default, since memory buys ratio\n"
@@ -2404,14 +2413,127 @@ static int input_length(FILE *file, uint64_t *length) {
     return 1;
 }
 
+static const char *adaptive_name(unsigned mode) {
+    static const char *const names[] = {"normal", "rates", "sparse", "retained"};
+    return names[mode];
+}
+
+/* Spool the source once, encode each eligible profile sequentially, compare
+ * complete containers including metadata, and publish only the winner.
+ * No second model is live. The fixed 16 KiB buffer and stdio buffers fit in
+ * the codec's existing 8 MiB headroom. Temporary disk use is input + at most
+ * two candidate containers, with at most eight trials. I/O failure aborts; only budget ineligibility
+ * skips a candidate. The original known/unknown length sizing is preserved. */
+static adapt_status encode_search(adapt_read_fn read, void *context, stream *out,
+                                  const adapt_metadata *metadata, adapt_sizes *sizes,
+                                  int known_length, uint64_t length, uint64_t memory,
+                                  uint64_t threads, uint64_t segment_bytes, int verify,
+                                  adapt_stats *stats, adapt_error *error) {
+    stream source = {NULL, 0}, candidate = {NULL, 0}, best = {NULL, 0};
+    uint8_t buffer[16384];
+    size_t got;
+    uint64_t best_bytes = UINT64_MAX;
+    unsigned mode, trial_index;
+    adapt_sizes bmp = {0};
+    int has_bmp;
+    adapt_sizes chosen = *sizes;
+    adapt_status status = ADAPT_OK;
+    source.file = tmpfile();
+    if (source.file == NULL) goto io_failure;
+    for (;;) {
+        if (read(context, buffer, sizeof(buffer), &got) != 0) goto io_failure;
+        if (got == 0) break;
+        if (write_stream(&source, buffer, got) != 0) goto io_failure;
+    }
+    if (fflush(source.file) != 0) goto io_failure;
+    if (fseek(source.file, 0, SEEK_SET) != 0 || read_stream(&source, buffer, 54, &got) != 0) goto io_failure;
+    has_bmp = !sizes->archive && adapt_bmp_probe(buffer, got, &bmp);
+    for (trial_index = 0; trial_index < (has_bmp ? 8u : 4u); trial_index++) {
+        int transform = trial_index >= 4;
+        uint64_t budget = transform ? memory - ADAPT_BLOCK_BYTES : memory;
+        mode = trial_index % 4;
+        adapt_sizes trial = *sizes;
+        adapt_stats measured;
+        metadata_writer writer;
+        if (mode != 0 || transform) {
+            status = threads >= 2 && known_length ?
+                adapt_sizes_for_threads_adaptive(length, budget, threads, segment_bytes, mode, &trial, error) :
+                adapt_sizes_for_input_adaptive(known_length, length, budget, mode, &trial, error);
+            if (status == ADAPT_ERROR_MEMORY_LIMIT) {
+                fprintf(stderr, "adaptive trial %s%s skipped: memory\n", adaptive_name(mode), transform ? "-bmp" : "");
+                status = ADAPT_OK;
+                continue;
+            }
+            if (status != ADAPT_OK) goto done;
+            trial.archive = sizes->archive;
+            trial.segmented = sizes->segmented;
+        }
+        trial.bmp = (uint8_t)transform;
+        if (fseek(source.file, 0, SEEK_SET) != 0) goto io_failure;
+        candidate.file = tmpfile();
+        candidate.error = 0;
+        if (candidate.file == NULL) goto io_failure;
+        writer.out = &candidate;
+        writer.metadata = metadata;
+        writer.header_written = 0;
+        status = adapt_encode_stream_segments(read_stream, &source, write_metadata_stream, &writer,
+                                              trial, memory, segment_bytes, &measured, error);
+        if (status != ADAPT_OK) goto done;
+        if (fflush(candidate.file) != 0) goto io_failure;
+        if (metadata != NULL) measured.output_bytes += ADAPT_METADATA_HEADER_BYTES;
+        fprintf(stderr, "adaptive trial %s%s: %llu bytes\n", adaptive_name(mode), transform ? "-bmp" : "", (unsigned long long)measured.output_bytes);
+        if (measured.output_bytes < best_bytes) {
+            if (best.file != NULL && fclose(best.file) != 0) { best.file = NULL; goto io_failure; }
+            best = candidate;
+            candidate.file = NULL;
+            best_bytes = measured.output_bytes;
+            *stats = measured;
+            chosen = trial;
+        } else {
+            int closed = fclose(candidate.file);
+            candidate.file = NULL;
+            if (closed != 0) goto io_failure;
+        }
+    }
+    if (fseek(best.file, 0, SEEK_SET) != 0) goto io_failure;
+    if (verify) {
+        if (fseek(source.file, 0, SEEK_SET) != 0) goto io_failure;
+        status = adapt_verify_stream(read_stream, &source, read_stream, &best, memory, NULL, error);
+        if (status != ADAPT_OK) goto done;
+        if (fseek(best.file, 0, SEEK_SET) != 0) goto io_failure;
+    }
+    for (;;) {
+        if (read_stream(&best, buffer, sizeof(buffer), &got) != 0) goto io_failure;
+        if (got == 0) break;
+        if (write_stream(out, buffer, got) != 0) goto io_failure;
+    }
+    *sizes = chosen;
+    fprintf(stderr, "adaptive selected %s%s: %llu bytes\n", adaptive_name(chosen.adaptive), chosen.bmp ? "-bmp" : "", (unsigned long long)best_bytes);
+    goto done;
+
+io_failure:
+    status = ADAPT_ERROR_IO;
+    out->error = errno != 0 ? errno : EIO;
+    memset(error, 0, sizeof(*error));
+    error->status = status;
+done:
+    if (source.file != NULL) fclose(source.file);
+    if (candidate.file != NULL) fclose(candidate.file);
+    if (best.file != NULL) fclose(best.file);
+    return status;
+}
+
 static int encode_command(int argc, char **argv) {
-    static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", NULL};
+    static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", NULL};
     static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", "-0", "-1", "-2", "-3",
                                         "-4",      "-5",       "-6",          "-7",     "-8",    "-9", NULL};
     args a;
     const char *input, *o, *text, *how;
     char *output = NULL;
     int force, verify, alongside, rc, known_length;
+    unsigned adaptive = 0;
+    int bmp_transform_requested = 0;
+    uint64_t profile_memory;
     uint64_t max_memory = ADAPT_DEFAULT_MAX_MEMORY, length = 0, hundredths, threads, segment_bytes = ADAPT_SEGMENT_BYTES;
     char segments[96];
     adapt_sizes sizes;
@@ -2459,6 +2581,23 @@ static int encode_command(int argc, char **argv) {
         memcpy(folder_name, input, n);
         folder_name[n] = '\0';
         is_folder = 1;
+    }
+    text = value_of(&a, "--adaptive");
+    if (text != NULL) {
+        if (strcmp(text, "rates") == 0) adaptive = 1;
+        else if (strcmp(text, "sparse") == 0) adaptive = 2;
+        else if (strcmp(text, "retained") == 0) adaptive = 3;
+        else if (strcmp(text, "auto") == 0) adaptive = 4;
+        else return usage_error("--adaptive: expected rates, sparse, retained or auto: %s", text);
+        if (has_flag(&a, "--fast") || has_flag(&a, "--max"))
+            return usage_error("--adaptive cannot be combined with --fast or --max%s", "");
+    }
+    text = value_of(&a, "--transform");
+    if (text != NULL) {
+        if (strcmp(text, "bmp") != 0) return usage_error("--transform: expected bmp: %s", text);
+        if (has_flag(&a, "--fast") || has_flag(&a, "--max") || adaptive == 4 || is_folder)
+            return usage_error("--transform bmp requires a file/pipe and normal or an explicit adaptive profile%s", "");
+        bmp_transform_requested = 1;
     }
     if (has_flag(&a, "--fast") && has_flag(&a, "--max")) {
         return usage_error("--fast and --max are two profiles; pass one%s", "");
@@ -2562,14 +2701,19 @@ static int encode_command(int argc, char **argv) {
             has_metadata = 1;
         }
     }
-    if (threads >= 2 && known_length) {
+    profile_memory = bmp_transform_requested ? (max_memory > ADAPT_BLOCK_BYTES ? max_memory - ADAPT_BLOCK_BYTES : 0) : max_memory;
+    if (adaptive > 0 && adaptive < 4) {
+        status = threads >= 2 && known_length ?
+            adapt_sizes_for_threads_adaptive(length, profile_memory, threads, segment_bytes, adaptive, &sizes, &error) :
+            adapt_sizes_for_input_adaptive(known_length, length, profile_memory, adaptive, &sizes, &error);
+    } else if (threads >= 2 && known_length) {
         /* A file's sizes are the crate's for its threads: each model fitted
          * to a segment and to one thread's share of the budget. */
-        status = has_flag(&a, "--max") ? adapt_sizes_for_threads_max(length, max_memory, threads, segment_bytes, &sizes, &error)
-                                       : adapt_sizes_for_threads(length, max_memory, threads, segment_bytes, &sizes, &error);
+        status = has_flag(&a, "--max") ? adapt_sizes_for_threads_max(length, profile_memory, threads, segment_bytes, &sizes, &error)
+                                       : adapt_sizes_for_threads(length, profile_memory, threads, segment_bytes, &sizes, &error);
     } else {
-        status = has_flag(&a, "--max") ? adapt_sizes_for_input_max(known_length, length, max_memory, &sizes, &error)
-                                       : adapt_sizes_for_input(known_length, length, max_memory, &sizes, &error);
+        status = has_flag(&a, "--max") ? adapt_sizes_for_input_max(known_length, length, profile_memory, &sizes, &error)
+                                       : adapt_sizes_for_input(known_length, length, profile_memory, &sizes, &error);
     }
     if (status != ADAPT_OK) {
         /* the crate's command line names this one without the input */
@@ -2589,6 +2733,7 @@ static int encode_command(int argc, char **argv) {
         sizes = adapt_sizes_max(sizes);
     }
     sizes.archive = (uint8_t)is_folder;
+    sizes.bmp = (uint8_t)bmp_transform_requested;
     if (threads >= 2) {
         /* The crate cuts a file's segments on threads and a pipe's in
          * order; this port cuts them in order either way, to the same
@@ -2596,8 +2741,8 @@ static int encode_command(int argc, char **argv) {
          * segments are coded in changes nothing. */
         sizes.segmented = 1;
     }
-    alongside = verify && adapt_verified_memory_bound(sizes) <= max_memory;
-    if (verify && !alongside && (in.file == stdin || !known_length || strcmp(output, "-") == 0)) {
+    alongside = verify && adaptive != 4 && adapt_verified_memory_bound(sizes) <= max_memory;
+    if (verify && adaptive != 4 && !alongside && (in.file == stdin || !known_length || strcmp(output, "-") == 0)) {
         snprintf(message, sizeof(message),
                  "proving the output here needs a memory budget of %llu bytes for two models, "
                  "or a file input written to a file; raise --max-memory or omit --verify",
@@ -2630,7 +2775,10 @@ static int encode_command(int argc, char **argv) {
         metadata_output.out = &out;
         metadata_output.metadata = has_metadata ? &source_metadata : NULL;
         metadata_output.header_written = 0;
-        if (alongside) {
+        if (adaptive == 4) {
+            status = encode_search(source, source_context, &out, metadata_output.metadata, &sizes,
+                                   known_length, length, max_memory, threads, segment_bytes, verify, &stats, &error);
+        } else if (alongside) {
             status = adapt_encode_stream_verified_segments(source, source_context, write_metadata_stream, &metadata_output, sizes, max_memory,
                                                            segment_bytes, &stats, &error);
         } else {
@@ -2638,7 +2786,7 @@ static int encode_command(int argc, char **argv) {
                                                   segment_bytes, &stats, &error);
         }
     }
-    if (status == ADAPT_OK && has_metadata) {
+    if (status == ADAPT_OK && has_metadata && adaptive != 4) {
         stats.output_bytes += ADAPT_METADATA_HEADER_BYTES;
     }
     packer_close(&pack);
@@ -2661,7 +2809,7 @@ static int encode_command(int argc, char **argv) {
         free(output);
         return rc;
     }
-    if (alongside) {
+    if (alongside || (adaptive == 4 && verify)) {
         how = "verified";
     } else if (verify) {
         /* One model at a time: prove the staged file against the input
@@ -2921,8 +3069,10 @@ static int info_command(int argc, char **argv) {
             printf("contexts        all but %s\n", dropped);
         }
     }
-    printf("profile         %s\n", sizes.fast ? "fast" : (sizes.max ? "max" : "normal"));
+    printf("profile         %s\n", sizes.adaptive ? adaptive_name(sizes.adaptive) : (sizes.fast ? "fast" : (sizes.max ? "max" : "normal")));
     printf("x86 transform   %s\n", sizes.x86 ? "yes" : "no");
+    if (sizes.bmp) printf("bmp transform   %lu x %lu, pixel offset %lu\n", (unsigned long)sizes.bmp_width,
+                          (unsigned long)sizes.bmp_rows, (unsigned long)sizes.bmp_offset);
     printf("holds           %s\n", sizes.archive ? "a folder (an adapt archive)" : "a file");
     printf("model memory    ~%llu MiB, whatever the length\n", (unsigned long long)(adapt_model_bytes(sizes) >> 20));
     printf("crc32           %08lx\n", (unsigned long)crc);

@@ -10,7 +10,12 @@ implementation is C99 with nothing beyond the C standard library (POSIX
 threads for the encoder's optional proof). Byte streams use format versions
 13 (normal), 14 (fast) and 15 (max); named files and folders use versions
 16, 17 and 18 respectively to carry filesystem metadata. The decoder reads
-all six versions. The CLI uses native filesystem APIs to restore metadata.
+all six versions. This experimental worktree also reads versions 19–32 for
+causal adaptive predictors and a reversible BMP24 transform. The CLI uses
+native filesystem APIs to restore metadata.
+
+The [experimental implementation report](research/causal-byte-implementation.md)
+specifies the new algorithms, format versions, limits and measurement protocol.
 
 The code began as an integer-for-integer port of a Rust crate and keeps that
 crate's layout and names; since format 13 it defines its own format and
@@ -100,6 +105,23 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   written to a file it falls back to a second pass with one. Encoding skips
   the proof by default and says so on stderr; `--no-verify` skips it
   explicitly.
+- `--adaptive rates|sparse|retained` selects experimental causal predictors:
+  fast/slow calibration, then sparse byte contexts, then retained calibration
+  states. Each adds 2,837,272 bytes of model state on the tested platform,
+  charged to the memory budget. These profiles can increase size or runtime.
+- `--adaptive auto` spools the input once and tries normal plus all three
+  adaptive profiles that fit the budget. For eligible BMP24 files it also
+  tries their transformed variants, retaining the smallest complete container
+  including metadata. It uses up to eight sequential encodes and temporary
+  disk space for the source plus two containers. Verification remains opt-in;
+  `auto --verify` checks the selected container with one model, including
+  for pipes. This is a finite candidate search, not a global optimality claim.
+- `--transform bmp` explicitly selects reversible color differences and
+  horizontal residuals for uncompressed 24-bit BMP files. It combines with
+  normal or an explicit adaptive profile and preserves headers, row padding,
+  tails and boundary pixels. It adds a 12-byte descriptor and a 256 KiB encoder
+  workspace reservation. Automatic selection tries this transform on whole
+  BMP inputs; embedded images inside folders/PDF/EPUB are not transformed.
 - `--threads <n>` with `n ≥ 2` cuts the input into segments of
   `--segment-bytes` (default 16 MiB, whole 256 KiB blocks) that each start
   the model afresh. This implementation codes and decodes the segments in

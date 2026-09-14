@@ -31,6 +31,19 @@ class TelemetryTest(unittest.TestCase):
         self.source = self.root / "source.bin"
         self.source.write_bytes(b"Telemetry should preserve failed runs.\n" * 128)
 
+    def test_adaptive_versions_and_measurement_profiles(self) -> None:
+        output = self.root / "adaptive-history"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = telemetry.main([
+                "run", "--binary", str(CADAPT), "--corpus", str(self.source),
+                "--output", str(output), "--profiles", "rates", "sparse", "retained", "auto", "--no-plots",
+            ])
+        self.assertEqual(rc, 0)
+        records = telemetry.load_runs([output])
+        self.assertEqual([r["codec"]["format_version"] for r in records[:3]], [28, 29, 30])
+        self.assertEqual([r["codec"]["adaptive_profile"] for r in records[:3]], ["rates", "sparse", "retained"])
+        self.assertTrue(all(r["status"] == "ok" for r in records))
+
     def test_byte_units_and_nonfinite_arguments(self) -> None:
         self.assertEqual(telemetry.byte_count("64MiB"), 64 << 20)
         self.assertEqual(telemetry.byte_count("262144"), 262144)
@@ -203,6 +216,8 @@ class TelemetryTest(unittest.TestCase):
                     "--output",
                     str(output),
                     "--verify",
+                    "--memory",
+                    str(256 << 20),
                     "--threads",
                     "2",
                     "--segment-bytes",

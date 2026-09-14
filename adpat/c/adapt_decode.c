@@ -27,13 +27,22 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len) {
  * container.rs — framing
  * --------------------------------------------------------------------- */
 
+int adapt_bmp_probe(const uint8_t *prefix, size_t length, adapt_sizes *sizes) {
+    return bmp_probe(prefix, length, sizes);
+}
+static int header_has_bmp(const uint8_t *header) {
+    return header[4] >= ADAPT_BMP_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION;
+}
+
 int adapt_header_has_metadata(const uint8_t *header) {
-    return header != NULL && header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION;
+    return header != NULL && ((header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION) ||
+                              (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
+                              (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION));
 }
 
 size_t adapt_header_len(const uint8_t *fixed) {
     return ADAPT_HEADER_BYTES + ((fixed[7] & ADAPT_PERIOD_FLAG) ? ADAPT_PERIOD_BYTES : 0) +
-           (adapt_header_has_metadata(fixed) ? ADAPT_METADATA_HEADER_BYTES : 0);
+           (adapt_header_has_metadata(fixed) ? ADAPT_METADATA_HEADER_BYTES : 0) + (header_has_bmp(fixed) ? ADAPT_BMP_BYTES : 0);
 }
 
 size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_metadata *metadata,
@@ -50,7 +59,7 @@ size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_
         return 0;
     }
     memcpy(out, header, len);
-    out[4] = (uint8_t)(header[4] + ADAPT_METADATA_VERSION - ADAPT_FORMAT_VERSION);
+    out[4] = (uint8_t)(header[4] + (header_has_bmp(header) ? 4 : 3));
     crc = adapt_crc32(out, total - 4);
     for (i = 0; i < 4; i++) {
         out[total - 4 + i] = (uint8_t)(crc >> (8 * i));
@@ -59,7 +68,7 @@ size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_
 }
 
 size_t adapt_sizes_header_bytes(adapt_sizes sizes) {
-    return ADAPT_HEADER_BYTES + (sizes.period != 0 ? ADAPT_PERIOD_BYTES : 0);
+    return ADAPT_HEADER_BYTES + (sizes.period != 0 ? ADAPT_PERIOD_BYTES : 0) + (sizes.bmp ? ADAPT_BMP_BYTES : 0);
 }
 
 size_t adapt_segment_table_len(uint64_t count) {
@@ -71,7 +80,7 @@ int adapt_segment_bytes_valid(uint64_t segment_bytes) {
 }
 
 adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *sizes, adapt_error *error) {
-    adapt_sizes s;
+    adapt_sizes s = {0};
     uint8_t version;
     if (header == NULL || sizes == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
@@ -99,9 +108,10 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         if (!adapt_metadata_read(header + n - ADAPT_METADATA_HEADER_BYTES, &metadata)) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
-        version = (uint8_t)(version - ADAPT_METADATA_VERSION + ADAPT_FORMAT_VERSION);
+        version = (uint8_t)(version - (header_has_bmp(header) ? 4 : 3));
     }
     s.max = 0;
+    s.adaptive = 0;
     if (version == ADAPT_FORMAT_VERSION) {
         s.fast = 0;
     } else if (version == ADAPT_FAST_VERSION) {
@@ -109,6 +119,12 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     } else if (version == ADAPT_MAX_VERSION) {
         s.fast = 0;
         s.max = 1;
+    } else if (version >= ADAPT_ADAPTIVE_VERSION && version <= ADAPT_ADAPTIVE_LAST_VERSION) {
+        s.fast = 0;
+        s.adaptive = (uint8_t)(version - ADAPT_ADAPTIVE_VERSION + 1);
+    } else if (version >= ADAPT_BMP_VERSION && version <= ADAPT_BMP_LAST_VERSION) {
+        s.bmp = 1;
+        s.adaptive = (uint8_t)(version - ADAPT_BMP_VERSION);
     } else {
         return fail(error, ADAPT_ERROR_UNSUPPORTED_VERSION, header[4], 0);
     }
@@ -121,6 +137,14 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         if (s.period == 0) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
+    }
+    if (s.bmp) {
+        size_t at = ADAPT_HEADER_BYTES + (s.period ? ADAPT_PERIOD_BYTES : 0);
+        if (len < at + ADAPT_BMP_BYTES) return fail(error, ADAPT_ERROR_TRUNCATED, 0, 0);
+        s.bmp_offset = bmp_load32(header + at);
+        s.bmp_width = bmp_load32(header + at + 4);
+        s.bmp_rows = bmp_load32(header + at + 8);
+        if (!bmp_descriptor_valid(s)) return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
     }
     s.table_log = header[5] & 31;
     s.match_log = header[6] & 31;
@@ -194,7 +218,7 @@ void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len) {
 uint64_t adapt_model_bytes(adapt_sizes sizes) {
     return ((uint64_t)1 << sizes.table_log) * 16 + (sizes.fast ? O1_BYTES : 0) + ((uint64_t)1 << sizes.match_log) * 4 +
            (uint64_t)(APM_CONTEXTS + APM2_CONTEXTS(sizes.max)) * APM_BUCKETS * 2 + side_table_bytes(sizes.fast, sizes.max) +
-           ((uint64_t)1 << sizes.window_log);
+           ((uint64_t)1 << sizes.window_log) + (sizes.adaptive ? sizeof(adaptive_model) : 0);
 }
 
 void adapt_fast_contexts(adapt_sizes sizes, char *buf, size_t len) {
@@ -430,6 +454,7 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
         if (sizes.x86) {
             x86_inverse(scratch, raw);
         }
+        if (sizes.bmp) bmp_transform(scratch, raw, written, sizes, 1);
         crc = crc32_update(&crc_table, crc, scratch, raw);
         written += raw;
         {

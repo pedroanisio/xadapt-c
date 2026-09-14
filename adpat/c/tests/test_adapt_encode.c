@@ -944,6 +944,7 @@ static void test_edges(void) {
     CHECK(adapt_detect_period(text, 40000) == 0);
     /* the fast profile's table cap leaves a table under it alone: the
      * smallest model, under the budget that holds exactly it */
+    memset(&sizes, 0, sizeof(sizes));
     sizes.table_log = 10;
     sizes.match_log = 10;
     sizes.window_log = 16;

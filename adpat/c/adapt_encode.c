@@ -69,7 +69,7 @@ int adapt_sizes_valid(adapt_sizes sizes) {
 uint64_t adapt_encode_memory_bound(adapt_sizes sizes) {
     /* With the x86 transform the encoder keeps the untransformed block as
      * well, for the proof to compare against. */
-    return adapt_decode_memory_bound(sizes) + (sizes.x86 ? (uint64_t)ADAPT_BLOCK_BYTES : 0);
+    return adapt_decode_memory_bound(sizes) + ((sizes.x86 || sizes.bmp) ? (uint64_t)ADAPT_BLOCK_BYTES : 0);
 }
 
 uint64_t adapt_verified_memory_bound(adapt_sizes sizes) {
@@ -80,12 +80,18 @@ uint64_t adapt_verified_memory_bound(adapt_sizes sizes) {
 adapt_sizes adapt_sizes_max(adapt_sizes sizes) {
     sizes.max = 1;
     sizes.fast = 0;
+    sizes.adaptive = 0;
+    sizes.bmp = 0;
+    sizes.bmp_offset = sizes.bmp_width = sizes.bmp_rows = 0;
     return sizes;
 }
 
 adapt_sizes adapt_sizes_fast(adapt_sizes sizes) {
     sizes.fast = 1;
     sizes.max = 0;
+    sizes.adaptive = 0;
+    sizes.bmp = 0;
+    sizes.bmp_offset = sizes.bmp_width = sizes.bmp_rows = 0;
     if (sizes.table_log > ADAPT_FAST_TABLE_LOG_MAX) {
         sizes.table_log = ADAPT_FAST_TABLE_LOG_MAX;
     }
@@ -189,9 +195,9 @@ uint8_t adapt_table_log_for(uint64_t length) {
     return sweet > grown ? sweet : grown;
 }
 
-static adapt_status sizes_for_input_profile(int length_known, uint64_t length, uint64_t max_memory, int max,
+static adapt_status sizes_for_input_profile(int length_known, uint64_t length, uint64_t max_memory, int max, unsigned adaptive,
                                             adapt_sizes *sizes, adapt_error *error) {
-    adapt_sizes floor, s;
+    adapt_sizes floor = {0}, s = {0};
     uint64_t (*bound)(adapt_sizes);
     uint8_t cap;
     if (sizes == NULL) {
@@ -208,6 +214,7 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
     floor.max = (uint8_t)max;
     floor.x86 = 0;
     floor.archive = 0;
+    floor.adaptive = (uint8_t)adaptive;
     bound = (!length_known && adapt_verified_memory_bound(floor) <= max_memory) ? adapt_verified_memory_bound
                                                                                 : adapt_encode_memory_bound;
     if (length_known) {
@@ -226,6 +233,7 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
     s.max = (uint8_t)max;
     s.x86 = 0;
     s.archive = 0;
+    s.adaptive = (uint8_t)adaptive;
     while (bound(s) > max_memory) {
         uint64_t table_bytes = (uint64_t)16 << s.table_log;
         uint64_t match_bytes = (uint64_t)4 << s.match_log;
@@ -271,12 +279,18 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
 
 adapt_status adapt_sizes_for_input(int length_known, uint64_t length, uint64_t max_memory, adapt_sizes *sizes,
                                    adapt_error *error) {
-    return sizes_for_input_profile(length_known, length, max_memory, 0, sizes, error);
+    return sizes_for_input_profile(length_known, length, max_memory, 0, 0, sizes, error);
 }
 
 adapt_status adapt_sizes_for_input_max(int length_known, uint64_t length, uint64_t max_memory, adapt_sizes *sizes,
                                        adapt_error *error) {
-    return sizes_for_input_profile(length_known, length, max_memory, 1, sizes, error);
+    return sizes_for_input_profile(length_known, length, max_memory, 1, 0, sizes, error);
+}
+
+adapt_status adapt_sizes_for_input_adaptive(int length_known, uint64_t length, uint64_t max_memory,
+                                           unsigned mode, adapt_sizes *sizes, adapt_error *error) {
+    if (mode > 3) return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, mode, 3);
+    return sizes_for_input_profile(length_known, length, max_memory, 0, mode, sizes, error);
 }
 
 /* segments.rs — the crate's threads: the most bytes one segment can take
@@ -292,8 +306,8 @@ uint64_t adapt_threads_encode_memory_bound(adapt_sizes sizes, uint64_t threads, 
 }
 
 static adapt_status sizes_for_threads_profile(uint64_t length, uint64_t max_memory, uint64_t threads,
-                                              uint64_t segment_bytes, int max, adapt_sizes *sizes, adapt_error *error) {
-    adapt_sizes floor, s;
+                                              uint64_t segment_bytes, int max, unsigned adaptive, adapt_sizes *sizes, adapt_error *error) {
+    adapt_sizes floor = {0}, s = {0};
     uint64_t least, share;
     adapt_status status;
     if (sizes == NULL) {
@@ -313,13 +327,14 @@ static adapt_status sizes_for_threads_profile(uint64_t length, uint64_t max_memo
     floor.max = (uint8_t)max;
     floor.x86 = 0;
     floor.archive = 0;
+    floor.adaptive = (uint8_t)adaptive;
     least = adapt_threads_encode_memory_bound(floor, threads, segment_bytes);
     status = check_memory(least, max_memory, error);
     if (status != ADAPT_OK) {
         return status;
     }
     share = (max_memory - HEADROOM) / threads - adapt_segment_out_bound(segment_bytes);
-    status = sizes_for_input_profile(1, length < segment_bytes ? length : segment_bytes, share + HEADROOM, max, &s, error);
+    status = sizes_for_input_profile(1, length < segment_bytes ? length : segment_bytes, share + HEADROOM, max, adaptive, &s, error);
     if (status != ADAPT_OK) {
         return status;
     }
@@ -334,12 +349,18 @@ static adapt_status sizes_for_threads_profile(uint64_t length, uint64_t max_memo
 
 adapt_status adapt_sizes_for_threads(uint64_t length, uint64_t max_memory, uint64_t threads, uint64_t segment_bytes,
                                      adapt_sizes *sizes, adapt_error *error) {
-    return sizes_for_threads_profile(length, max_memory, threads, segment_bytes, 0, sizes, error);
+    return sizes_for_threads_profile(length, max_memory, threads, segment_bytes, 0, 0, sizes, error);
+}
+
+adapt_status adapt_sizes_for_threads_adaptive(uint64_t length, uint64_t max_memory, uint64_t threads,
+                                             uint64_t segment_bytes, unsigned mode, adapt_sizes *sizes, adapt_error *error) {
+    if (mode > 3) return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, mode, 3);
+    return sizes_for_threads_profile(length, max_memory, threads, segment_bytes, 0, mode, sizes, error);
 }
 
 adapt_status adapt_sizes_for_threads_max(uint64_t length, uint64_t max_memory, uint64_t threads, uint64_t segment_bytes,
                                          adapt_sizes *sizes, adapt_error *error) {
-    return sizes_for_threads_profile(length, max_memory, threads, segment_bytes, 1, sizes, error);
+    return sizes_for_threads_profile(length, max_memory, threads, segment_bytes, 1, 0, sizes, error);
 }
 
 /* ------------------------------------------------------------------------
@@ -983,6 +1004,7 @@ static adapt_status verifier_block(verifier *v, const uint8_t *source, size_t n,
     if (v->sizes.x86) {
         x86_inverse(v->scratch, raw);
     }
+    if (v->sizes.bmp) bmp_transform(v->scratch, raw, v->seen, v->sizes, 1);
     if (raw != n || memcmp(v->scratch, source, n) != 0) {
         return fail_verification(error, NULL);
     }
@@ -1060,7 +1082,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     uint64_t input_bytes = 0;
     uint64_t output_bytes = ADAPT_HEADER_BYTES;
     size_t n, framed_cap = ADAPT_BLOCK_HEADER_BYTES + ADAPT_BLOCK_BYTES + CODED_SLACK;
-    uint8_t header[ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES];
+    uint8_t header[ADAPT_HEADER_MAX_BYTES];
     size_t header_len;
     uint8_t trailer[ADAPT_TRAILER_BYTES];
     int first = 1;
@@ -1103,8 +1125,12 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     }
     /* Machine code goes through the branch transform, when the budget
      * holds the extra block the proof needs; otherwise it is declined. */
-    sizes.x86 = x86_detect(block, n);
-    if (sizes.x86) {
+    if (sizes.bmp && !bmp_probe(block, n, &sizes)) {
+        status = fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
+        goto done;
+    }
+    sizes.x86 = !sizes.bmp && x86_detect(block, n);
+    if (sizes.x86 || sizes.bmp) {
         if (adapt_encode_memory_bound(sizes) > max_memory) {
             sizes.x86 = 0;
         } else {
@@ -1126,7 +1152,9 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     header[1] = 'D';
     header[2] = 'P';
     header[3] = 'T';
-    header[4] = sizes.fast ? ADAPT_FAST_VERSION : (sizes.max ? ADAPT_MAX_VERSION : ADAPT_FORMAT_VERSION);
+    header[4] = sizes.adaptive ? (uint8_t)(ADAPT_ADAPTIVE_VERSION + sizes.adaptive - 1) :
+                (sizes.fast ? ADAPT_FAST_VERSION : (sizes.max ? ADAPT_MAX_VERSION : ADAPT_FORMAT_VERSION));
+    if (sizes.bmp) header[4] = (uint8_t)(ADAPT_BMP_VERSION + sizes.adaptive);
     header[5] = (uint8_t)(sizes.table_log | sizes.class_code << 5 | (sizes.archive ? ADAPT_ARCHIVE_FLAG : 0));
     header[6] = (uint8_t)(sizes.match_log | sizes.set_code << 5);
     header[7] = (uint8_t)(sizes.window_log | (sizes.period != 0 ? ADAPT_PERIOD_FLAG : 0) |
@@ -1136,6 +1164,12 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         header[8] = (uint8_t)sizes.period;
         header[9] = (uint8_t)(sizes.period >> 8);
         header_len += ADAPT_PERIOD_BYTES;
+    }
+    if (sizes.bmp) {
+        bmp_store32(header + header_len, sizes.bmp_offset);
+        bmp_store32(header + header_len + 4, sizes.bmp_width);
+        bmp_store32(header + header_len + 8, sizes.bmp_rows);
+        header_len += ADAPT_BMP_BYTES;
     }
     output_bytes = header_len;
     {
@@ -1184,9 +1218,10 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         }
         input_bytes += n;
         crc = crc32_update(&crc_table, crc, block, n);
-        if (sizes.x86) {
+        if (sizes.x86 || sizes.bmp) {
             memcpy(orig, block, n);
-            x86_forward(block, n);
+            if (sizes.bmp) bmp_transform(block, n, input_bytes - n, sizes, 0);
+            else x86_forward(block, n);
         }
         if (m == NULL) {
             m = model_new(sizes);
@@ -1228,7 +1263,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         segments.raw += n;
         segments.coded += ADAPT_BLOCK_HEADER_BYTES + payload_len;
         if (v != NULL) {
-            status = verifier_submit(v, sizes.x86 ? orig : block, n, framed, ADAPT_BLOCK_HEADER_BYTES + payload_len,
+            status = verifier_submit(v, (sizes.x86 || sizes.bmp) ? orig : block, n, framed, ADAPT_BLOCK_HEADER_BYTES + payload_len,
                                      error);
             if (status != ADAPT_OK) {
                 goto done;
@@ -1480,7 +1515,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
