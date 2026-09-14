@@ -46,9 +46,11 @@ extern "C" {
 #endif
 
 /* The container version this reader implements: the normal profile.
- * Versions 10 to 12, the crate's, are refused like every version no file
- * was published in. */
-#define ADAPT_FORMAT_VERSION 13u
+ * Versions 10 to 12, the crate's, and 13 to 18, this port's before the
+ * model gained its third and fourth arbiters, its second estimation stage
+ * and a lower arbiter learning-rate floor, are refused like every version
+ * no file was published in. */
+#define ADAPT_FORMAT_VERSION 19u
 /* The header's window byte carries this bit when a record period follows
  * the fixed header as ADAPT_PERIOD_BYTES more bytes; the period is the
  * distance the record and field contexts read across (a raw image's
@@ -87,20 +89,21 @@ extern "C" {
  * profile of 0.7.0 with one fixed pair, and version 8, the fast profile
  * before segments, are refused like every version no file was published
  * in. */
-#define ADAPT_FAST_VERSION 14u
-/* The version a max-profile file carries: the normal model with four
- * more hashed contexts (the previous word with the current, the first and
+#define ADAPT_FAST_VERSION 20u
+/* The version a max-profile file carries: the normal model with ten more
+ * hashed contexts (the previous word with the current, the first and
  * third bytes back, the bytes that followed the order-2 context, the high
- * nibbles of the last four bytes), run memories on orders 1, 3, 4 and 6,
- * and three arbiter inputs per context instead of one; the same memory,
- * about twice the time, fewer bytes. `cadapt encode --max`. */
-#define ADAPT_MAX_VERSION 15u
-/* Versions 16--18 use the same predictors as 13--15 and append a
- * checksummed filesystem-metadata record to the header. Old streams keep
- * their original versions and remain readable. */
-#define ADAPT_METADATA_VERSION 16u
-#define ADAPT_METADATA_FAST_VERSION 17u
-#define ADAPT_METADATA_MAX_VERSION 18u
+ * nibbles of the last four bytes, the markup nesting, orders 5 and 8, the
+ * case-folded word, the last three words, the word with the classes
+ * before it), run memories on orders 1, 3, 4 and 6, and three arbiter
+ * inputs per context instead of one; the same memory, about three times
+ * the time, fewer bytes. `cadapt encode --max`. */
+#define ADAPT_MAX_VERSION 21u
+/* Versions 22--24 use the same predictors as 19--21 and append a
+ * checksummed filesystem-metadata record to the header. */
+#define ADAPT_METADATA_VERSION 22u
+#define ADAPT_METADATA_FAST_VERSION 23u
+#define ADAPT_METADATA_MAX_VERSION 24u
 #define ADAPT_METADATA_BYTES 28u
 #define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)
 #define ADAPT_HEADER_MAX_BYTES (ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES + ADAPT_METADATA_HEADER_BYTES)
@@ -331,13 +334,13 @@ int adapt_sizes_valid(adapt_sizes sizes);
 
 /* The largest context table, as a log2 of blocks, an input of `length`
  * bytes grows into when the budget holds it and the window has its cap:
- * the sweet spot the length chooses below 8 MiB, then a block per eight
- * input bytes to 2^24 from 64 MiB — four times the crate's
+ * the sweet spot the length chooses below 4 MiB, then a block per four
+ * input bytes to 2^26 from 256 MiB — eight times the crate's
  * `table_log_for`. Measured on text and tables, the table the crate chose
  * was the model's bottleneck: every context added to it was evicted
- * rather than learned; twice the table coded an 8 MiB text 1.6 % smaller
- * and four times the table, on 100 MB of it, 1.9 % smaller again. The
- * budget still bounds it: the default budget holds the sizes it did. */
+ * rather than learned; twice the table coded an 8 MiB text 1.6 % smaller,
+ * four times the table, on 100 MB of it, 1.9 % smaller again, and eight
+ * times 0.3 % more. The budget still bounds it. */
 uint8_t adapt_table_log_for(uint64_t length);
 
 /* The sizes for an input of `length` bytes (`length_known` 0 when the

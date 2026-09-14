@@ -574,7 +574,9 @@ static void test_framing(void) {
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_OK);
     file[5] = (uint8_t)(20 | 3 << 5 | ADAPT_ARCHIVE_FLAG); /* an unknown class code, flagged */
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
-    file[5] = 25;
+    file[5] = 26; /* the largest table */
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    file[5] = 27;
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
     file[5] = 20 | 3 << 5; /* an unknown class code */
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);

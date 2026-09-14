@@ -176,7 +176,7 @@ class TelemetryTest(unittest.TestCase):
                 self.assertNotIn("compression_percent", record["metrics"])
             else:
                 self.assertEqual(record["codec"]["declared_bytes"], self.source.stat().st_size)
-                self.assertEqual(record["codec"]["format_version"], 17)
+                self.assertEqual(record["codec"]["format_version"], 23)
         session_path = next(output.glob("*/session.json"))
         session = json.loads(session_path.read_text())
         self.assertTrue(session["complete"])
@@ -212,7 +212,7 @@ class TelemetryTest(unittest.TestCase):
             )
         self.assertEqual(rc, 0)
         records = telemetry.load_runs([output])
-        self.assertEqual([record["codec"]["format_version"] for record in records], [16, 17, 18])
+        self.assertEqual([record["codec"]["format_version"] for record in records], [22, 23, 24])
         for record in records:
             self.assertTrue(record["config"]["verify"])
             self.assertEqual(record["codec"]["segments"], 2)
@@ -225,7 +225,7 @@ class TelemetryTest(unittest.TestCase):
         self.assertIn("no run.json records", error.getvalue())
 
     def test_profiles_and_segment_framing(self) -> None:
-        for profile, version in (([], 16), (["--fast"], 17), (["--max"], 18)):
+        for profile, version in (([], 22), (["--fast"], 23), (["--max"], 24)):
             with self.subTest(version=version):
                 output = self.root / f"{version}.adpt"
                 subprocess.run(

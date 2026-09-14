@@ -134,8 +134,10 @@ static void test_sizes(void) {
     CHECK(error.detail == floor_bound && error.limit == floor_bound - 1);
     CHECK_STATUS(adapt_sizes_for_input(0, 0, floor_bound - 1, &s, &error), ADAPT_ERROR_MEMORY_LIMIT);
     CHECK_STATUS(adapt_sizes_for_input(1, 5, floor_bound, NULL, &error), ADAPT_ERROR_INVALID_ARGUMENT);
-    CHECK_STATUS(adapt_sizes_for_input(1, 1u << 20, 20u << 20, &s, &error), ADAPT_OK);
-    CHECK(adapt_encode_memory_bound(s) <= 20u << 20);
+    /* a budget four MiB over the floor holds neither table at its sweet
+     * spot for a MiB of input */
+    CHECK_STATUS(adapt_sizes_for_input(1, 1u << 20, floor_bound + (4u << 20), &s, &error), ADAPT_OK);
+    CHECK(adapt_encode_memory_bound(s) <= floor_bound + (4u << 20));
     CHECK(s.table_log < 20 || s.match_log < 20);
     /* every field of the sizes has a range, and each is checked on its own */
     {
@@ -146,9 +148,9 @@ static void test_sizes(void) {
         bad.table_log = 9;
         CHECK(!adapt_sizes_valid(bad));
         bad = good;
-        bad.table_log = 24;
+        bad.table_log = 26;
         CHECK(adapt_sizes_valid(bad));
-        bad.table_log = 25;
+        bad.table_log = 27;
         CHECK(!adapt_sizes_valid(bad));
         bad = good;
         bad.match_log = 9;
@@ -198,19 +200,20 @@ static void test_sizes(void) {
         bad.max = 1;
         CHECK(adapt_sizes_valid(bad));
     }
-    /* the table past its sweet spot: a block per eight input bytes from
-     * 8 MiB, the largest from 16 MiB, a window at the input's length, a
+    /* the table past its sweet spot: a block per four input bytes from
+     * 4 MiB, the largest from 128 MiB, a window at the input's length, a
      * budget that holds it */
     CHECK(adapt_table_log_for(0) == 18 && adapt_table_log_for(1u << 14) == 20);
-    CHECK(adapt_table_log_for(4u << 20) == 20 && adapt_table_log_for(8u << 20) == 21);
-    CHECK(adapt_table_log_for((16u << 20) - 1) == 21 && adapt_table_log_for(16u << 20) == 22);
-    CHECK(adapt_table_log_for((32u << 20) - 1) == 22 && adapt_table_log_for(32u << 20) == 23);
-    CHECK(adapt_table_log_for(64u << 20) == 24 && adapt_table_log_for(100000000) == 24);
-    CHECK(adapt_table_log_for((uint64_t)1 << 40) == 24);
-    /* the default budget, xz -9's, holds the largest table and a window
-     * over the whole input; 64 MiB, the old default, holds neither */
+    CHECK(adapt_table_log_for(4u << 20) == 21 && adapt_table_log_for(8u << 20) == 22);
+    CHECK(adapt_table_log_for((16u << 20) - 1) == 22 && adapt_table_log_for(16u << 20) == 23);
+    CHECK(adapt_table_log_for((32u << 20) - 1) == 23 && adapt_table_log_for(32u << 20) == 24);
+    CHECK(adapt_table_log_for(64u << 20) == 25 && adapt_table_log_for(100000000) == 25);
+    CHECK(adapt_table_log_for((128u << 20) - 1) == 25 && adapt_table_log_for(128u << 20) == 26);
+    CHECK(adapt_table_log_for((uint64_t)1 << 40) == 26);
+    /* the default budget, xz -9's, holds 100 MB's table, 512 MiB, and a
+     * window over the whole input; 64 MiB, the old default, holds neither */
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
-    CHECK(s.table_log == 24 && s.match_log == 20 && s.window_log == 27);
+    CHECK(s.table_log == 25 && s.match_log == 20 && s.window_log == 27);
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, (uint64_t)64 << 20, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20 && s.match_log == 20 && s.window_log == 24);
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, (uint64_t)256 << 20, &s, &error), ADAPT_OK);
@@ -223,13 +226,13 @@ static void test_sizes(void) {
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, two - 1, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20);
     CHECK_STATUS(adapt_sizes_for_input(1, 40u << 20, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
-    CHECK(s.table_log == 23 && s.window_log == 26);
+    CHECK(s.table_log == 24 && s.window_log == 26);
     CHECK_STATUS(adapt_sizes_for_input(1, 16u << 20, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
-    CHECK(s.table_log == 22);
+    CHECK(s.table_log == 23);
     CHECK_STATUS(adapt_sizes_for_input(1, 8u << 20, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
-    CHECK(s.table_log == 21);
+    CHECK(s.table_log == 22);
     CHECK_STATUS(adapt_sizes_for_input(1, 4u << 20, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
-    CHECK(s.table_log == 20);
+    CHECK(s.table_log == 21);
     CHECK_STATUS(adapt_sizes_for_input(0, 0, (uint64_t)1 << 30, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20);
     CHECK(adapt_sizes_fast(adapt_sizes_for_input(1, 100000000, (uint64_t)256 << 20, &s, &error) == ADAPT_OK ? s : s).table_log ==
@@ -824,7 +827,7 @@ static void test_segments(void) {
      * share of the budget, and a refusal below the floor */
     CHECK_STATUS(adapt_sizes_for_threads((uint64_t)1 << 30, (uint64_t)1 << 30, 4, ADAPT_SEGMENT_BYTES, &threads, &error),
                  ADAPT_OK);
-    CHECK(threads.segmented == 1 && threads.window_log == 24 && threads.table_log == 22);
+    CHECK(threads.segmented == 1 && threads.window_log == 24 && threads.table_log == 23);
     CHECK(adapt_threads_encode_memory_bound(threads, 4, ADAPT_SEGMENT_BYTES) <= ((uint64_t)1 << 30));
     CHECK_STATUS(adapt_sizes_for_threads((uint64_t)1 << 30, (uint64_t)32 << 20, 4, ADAPT_SEGMENT_BYTES, &threads, &error),
                  ADAPT_ERROR_MEMORY_LIMIT);
@@ -881,10 +884,11 @@ static void test_max_profile(void) {
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
     CHECK(out_len == n && memcmp(out, data, n) == 0);
     adapt_free(out);
-    /* the max model is larger — its arbiters' lanes and its four more run
-     * memories, under 4 MiB — and a budget fitted for it counts that */
+    /* the max model is larger — its arbiters' lanes, its four more run
+     * memories and its second estimation stage's rows, under 48 MiB — and
+     * a budget fitted for it counts that */
     CHECK(adapt_model_bytes(sizes) > adapt_model_bytes(plain));
-    CHECK(adapt_model_bytes(sizes) < adapt_model_bytes(plain) + ((uint64_t)4 << 20));
+    CHECK(adapt_model_bytes(sizes) < adapt_model_bytes(plain) + ((uint64_t)48 << 20));
     {
         adapt_sizes big;
         CHECK_STATUS(adapt_sizes_for_input(1, (uint64_t)1 << 30, (uint64_t)1 << 30, &big, &error), ADAPT_OK);

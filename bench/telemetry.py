@@ -325,7 +325,7 @@ def inspect_container(path: Path) -> dict[str, Any]:
             return data
 
         header = read(8)
-        if header[:4] != b"ADPT" or header[4] not in (13, 14, 15, 16, 17, 18):
+        if header[:4] != b"ADPT" or header[4] not in (19, 20, 21, 22, 23, 24):
             raise ValueError("unsupported container header")
         period = int.from_bytes(read(2), "little") if header[7] & 0x80 else 0
         filesystem_metadata = None
