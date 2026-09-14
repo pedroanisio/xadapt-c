@@ -1,8 +1,8 @@
 {
   "schema": "cadapt.build-manifest.v1",
   "version": "0.12.0",
-  "commit": "912f21c95fd194530d80885f34f8872c846234f8",
-  "generated_at": "2026-09-14T19:45:18+00:00",
+  "commit": "ce3acddf2509ce278042e0c15d6cd33bfcaa0bc7",
+  "generated_at": "2026-09-14T19:58:23+00:00",
   "sources": {
     "adpat/c/adapt.h": "5ff7a8794ce679bf5d889cf35861d25f7ac7e62f7a17a8ef7245a005ef32e7a0",
     "adpat/c/adapt_adaptive.h": "d21a75f99b8d19400819a538becd7b459673de4fef8e2b889e5423fdb17fb5c7",
