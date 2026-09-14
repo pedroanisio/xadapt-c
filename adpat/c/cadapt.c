@@ -446,7 +446,7 @@ static void print_usage(FILE *stream) {
             "usage:\n"
             "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -9]\n"
             "                [--max-memory <bytes>] [--threads <n>] [--segment-bytes <bytes>]\n"
-            "                [--adaptive rates|sparse|retained|auto] [--transform bmp]\n"
+            "                [--adaptive rates|sparse|retained|auto] [--transform bmp] [--allocation window|context]\n"
             "  cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]\n"
             "  cadapt info   <file>\n"
             "  cadapt --version\n"
@@ -467,10 +467,12 @@ static void print_usage(FILE *stream) {
             "--transform bmp explicitly selects that reversible transform. Search\n"
             "uses up to eight encodes, temporary disk of input plus two containers, and\n"
             "verifies only with --verify (one model, also for pipes).\n"
+            "--allocation context grows the context table before the recall window;\n"
+            "window is the default. Either policy can win depending on the input.\n"
             "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
             "preset: 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset below the\n"
             "smallest model of the profile raised to it; -9 is the default, since memory buys ratio\n"
-            "and costs no time here, and decode takes the model's memory as the header\n"
+            "and decode takes the model's memory as the header\n"
             "names it. For encode, --max-memory <bytes> (default %llu) bounds codec\n"
             "model/window/workspace allocations. Folder path and metadata bookkeeping\n"
             "is additional.\n"
@@ -2427,7 +2429,7 @@ static const char *adaptive_name(unsigned mode) {
 static adapt_status encode_search(adapt_read_fn read, void *context, stream *out,
                                   const adapt_metadata *metadata, adapt_sizes *sizes,
                                   int known_length, uint64_t length, uint64_t memory,
-                                  uint64_t threads, uint64_t segment_bytes, int verify,
+                                  uint64_t threads, uint64_t segment_bytes, int verify, int context_first,
                                   adapt_stats *stats, adapt_error *error) {
     stream source = {NULL, 0}, candidate = {NULL, 0}, best = {NULL, 0};
     uint8_t buffer[16384];
@@ -2459,6 +2461,8 @@ static adapt_status encode_search(adapt_read_fn read, void *context, stream *out
             status = threads >= 2 && known_length ?
                 (sizes->max ? adapt_sizes_for_threads_max_adaptive : adapt_sizes_for_threads_adaptive)(length, budget, threads, segment_bytes, mode, &trial, error) :
                 (sizes->max ? adapt_sizes_for_input_max_adaptive : adapt_sizes_for_input_adaptive)(known_length, length, budget, mode, &trial, error);
+            if (status == ADAPT_OK && context_first)
+                status = adapt_sizes_prioritize_context(known_length, length, budget, threads, segment_bytes, &trial, error);
             if (status == ADAPT_ERROR_MEMORY_LIMIT) {
                 fprintf(stderr, "adaptive trial %s%s%s skipped: memory\n", sizes->max ? "max-" : "", adaptive_name(mode), transform ? "-bmp" : "");
                 status = ADAPT_OK;
@@ -2524,7 +2528,7 @@ done:
 }
 
 static int encode_command(int argc, char **argv) {
-    static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", NULL};
+    static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", "--allocation", NULL};
     static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", "-0", "-1", "-2", "-3",
                                         "-4",      "-5",       "-6",          "-7",     "-8",    "-9", NULL};
     args a;
@@ -2532,7 +2536,7 @@ static int encode_command(int argc, char **argv) {
     char *output = NULL;
     int force, verify, alongside, rc, known_length;
     unsigned adaptive = 0;
-    int bmp_transform_requested = 0;
+    int bmp_transform_requested = 0, context_first = 0;
     uint64_t profile_memory;
     uint64_t max_memory = ADAPT_DEFAULT_MAX_MEMORY, length = 0, hundredths, threads, segment_bytes = ADAPT_SEGMENT_BYTES;
     char segments[96];
@@ -2581,6 +2585,12 @@ static int encode_command(int argc, char **argv) {
         memcpy(folder_name, input, n);
         folder_name[n] = '\0';
         is_folder = 1;
+    }
+    text = value_of(&a, "--allocation");
+    if (text != NULL) {
+        if (strcmp(text, "context") == 0) context_first = 1;
+        else if (strcmp(text, "window") != 0)
+            return usage_error("--allocation: expected window or context: %s", text);
     }
     text = value_of(&a, "--adaptive");
     if (text != NULL) {
@@ -2715,6 +2725,10 @@ static int encode_command(int argc, char **argv) {
         status = has_flag(&a, "--max") ? adapt_sizes_for_input_max(known_length, length, profile_memory, &sizes, &error)
                                        : adapt_sizes_for_input(known_length, length, profile_memory, &sizes, &error);
     }
+    if (status == ADAPT_OK && context_first) {
+        if (has_flag(&a, "--fast")) sizes = adapt_sizes_fast(sizes);
+        status = adapt_sizes_prioritize_context(known_length, length, profile_memory, threads, segment_bytes, &sizes, &error);
+    }
     if (status != ADAPT_OK) {
         /* the crate's command line names this one without the input */
         adapt_error_message(&error, message, sizeof(message));
@@ -2777,7 +2791,7 @@ static int encode_command(int argc, char **argv) {
         metadata_output.header_written = 0;
         if (adaptive == 4) {
             status = encode_search(source, source_context, &out, metadata_output.metadata, &sizes,
-                                   known_length, length, max_memory, threads, segment_bytes, verify, &stats, &error);
+                                   known_length, length, max_memory, threads, segment_bytes, verify, context_first, &stats, &error);
         } else if (alongside) {
             status = adapt_encode_stream_verified_segments(source, source_context, write_metadata_stream, &metadata_output, sizes, max_memory,
                                                            segment_bytes, &stats, &error);

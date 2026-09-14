@@ -80,8 +80,8 @@ directions stream: codec working memory is the model, window, block workspace
 and reserved headroom. `-0` … `-9` set the budget to what xz takes to compress
 at the same preset — 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset
 below the smallest model raised to it — and `-9` (674 MiB) is the default:
-memory buys the context table, the table buys ratio, and neither costs time
-(see the [current baseline protocol](research/current-baseline.md)).
+the budget controls table and window capacity
+(see the [current measurements](research/current-baseline.md)).
 `--max-memory <bytes>` overrides any preset and bounds that allocation, which
 chooses the model. Models shrink only to their supported minimum: **1 MiB is
 insufficient**. `--help` prints the minimum normal single-model budget; an
@@ -96,15 +96,20 @@ name at about 1.2 GiB (the largest tables and window). `--max-output`
 retains an entry/path inventory, and restoration retains pending directory
 metadata; this CLI bookkeeping is outside the codec's working-memory bound.
 
-- `--fast` writes the fast profile (version 14 or 17): two hashed contexts, one
+- `--fast` writes the fast profile (version 20 or 23): two hashed contexts, one
   arbiter, about three times the decoding speed for about a twelfth more
-  bytes. `--max` writes the max profile (version 15 or 18): more contexts and run
+  bytes. `--max` writes the max profile (version 21 or 24): more contexts and run
   memories, fewer bytes for about twice the time in the same memory.
 - `--verify` proves the output as it is written, with a second model
   decoding every block, when the budget holds two models; for a file
   written to a file it falls back to a second pass with one. Encoding skips
   the proof by default and says so on stderr; `--no-verify` skips it
   explicitly.
+- `--allocation context` spends the budget on the context table before growing
+  the recall window. `--allocation window` is the unchanged default. Both use
+  existing header fields and compose with the profiles and candidate search.
+  Either allocation can produce a larger file; choose from measured complete
+  containers. More of the allowed memory can be used by the context policy.
 - `--adaptive rates|sparse|retained` selects experimental causal predictors:
   fast/slow calibration, then sparse byte contexts, then retained calibration
   states. These compose with `--max`. Each adds 2,837,272 bytes of model state on the tested platform,

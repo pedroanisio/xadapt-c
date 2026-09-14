@@ -99,6 +99,46 @@ static void test_vector(const char *name, const char *source) {
 
 /* ---- sizes ------------------------------------------------------------- */
 
+/* FMT-2/FMT-6: allocation changes existing header sizes, not the model. */
+static void test_context_allocation(void) {
+    adapt_sizes s, saved;
+    adapt_error error;
+    unsigned mode, profile;
+    uint64_t budget;
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK(s.table_log == 24 && s.window_log == 27);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.table_log == 25 && s.window_log == 26 && s.match_log == 20 && s.max);
+    CHECK(adapt_encode_memory_bound(s) <= ADAPT_DEFAULT_MAX_MEMORY);
+    saved = s;
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, 1, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_ERROR_MEMORY_LIMIT);
+    CHECK(memcmp(&s, &saved, sizeof(s)) == 0);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 1, ADAPT_DEFAULT_MAX_MEMORY, 0, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_ERROR_INVALID_ARGUMENT);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 1, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, NULL, &error), ADAPT_ERROR_INVALID_ARGUMENT);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 1, ADAPT_DEFAULT_MAX_MEMORY, 2, 1, &s, &error), ADAPT_ERROR_INVALID_ARGUMENT);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 1, ADAPT_DEFAULT_MAX_MEMORY, UINT64_MAX, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_ERROR_MEMORY_LIMIT);
+    s.table_log = 0;
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 1, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_ERROR_INVALID_ARGUMENT);
+    for (profile = 0; profile < 2; profile++) {
+        for (mode = 0; mode <= 3; mode++) {
+            for (budget = (uint64_t)128 << 20; budget <= ((uint64_t)1 << 30); budget *= 2) {
+                CHECK_STATUS((profile ? adapt_sizes_for_input_max_adaptive : adapt_sizes_for_input_adaptive)(1, 40000000, budget, mode, &s, &error), ADAPT_OK);
+                CHECK_STATUS(adapt_sizes_prioritize_context(1, 40000000, budget, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+                CHECK(adapt_sizes_valid(s) && adapt_encode_memory_bound(s) <= budget && s.adaptive == mode && s.max == profile);
+            }
+        }
+    }
+    CHECK_STATUS(adapt_sizes_for_input(0, 0, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(0, 0, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(adapt_verified_memory_bound(s) <= ADAPT_DEFAULT_MAX_MEMORY);
+    CHECK_STATUS(adapt_sizes_for_threads_max(100000000, ADAPT_DEFAULT_MAX_MEMORY, 2, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, 2, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.segmented && s.max && adapt_threads_encode_memory_bound(s, 2, ADAPT_SEGMENT_BYTES) <= ADAPT_DEFAULT_MAX_MEMORY);
+    s = adapt_sizes_fast(s);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, 2, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(adapt_sizes_valid(s) && s.fast && s.table_log <= ADAPT_FAST_TABLE_LOG_MAX);
+}
+
 static void test_sizes(void) {
     adapt_sizes s;
     adapt_error error;
@@ -1358,6 +1398,7 @@ int main(int argc, char **argv) {
     test_vector_profile("cyrillic.adpt", "cyrillic.bin", 0);
     test_vector_profile("cjk.adpt", "cjk.bin", 0);
     test_sizes();
+    test_context_allocation();
     test_fast_fits_where_normal_fits();
     test_roundtrips();
     test_streams();

@@ -1,5 +1,5 @@
 /*
- * adapt.h — the adapt codec, format versions 13 through 32, in C99 with
+ * adapt.h — the adapt codec, format versions 19 through 52, in C99 with
  * nothing beyond the C standard library (and POSIX threads for the
  * encoder's proof, when built with ADAPT_THREADS).
  *
@@ -427,6 +427,18 @@ adapt_status adapt_sizes_for_threads(uint64_t length, uint64_t max_memory, uint6
 /* adapt_sizes_for_threads for the max profile. */
 adapt_status adapt_sizes_for_threads_max(uint64_t length, uint64_t max_memory, uint64_t threads, uint64_t segment_bytes,
                                          adapt_sizes *sizes, adapt_error *error);
+
+/* Rebalance valid, already fitted sizes toward context capacity, then grow
+ * the recall window with the remaining budget. All other fields are preserved.
+ * Known input targets adapt_table_log_for(length); unknown input targets the
+ * format maximum. Segmented known inputs target one segment and account for
+ * every requested worker. Unknown input preserves the two-model reservation
+ * used by adapt_sizes_for_input. Failure leaves *sizes unchanged. This changes
+ * only existing header fields: no decoder policy or external state is needed.
+ * Call before attaching transform flags whose workspace was reserved separately. */
+adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, uint64_t max_memory,
+                                            uint64_t threads, uint64_t segment_bytes,
+                                            adapt_sizes *sizes, adapt_error *error);
 
 /* What a coding pass did: original bytes, container bytes, the checksum
  * of the original, and the segments the file has. */

@@ -311,6 +311,59 @@ uint64_t adapt_threads_encode_memory_bound(adapt_sizes sizes, uint64_t threads, 
     return (adapt_model_bytes(sizes) + block_workspace() + adapt_segment_out_bound(segment_bytes)) * threads + HEADROOM;
 }
 
+/* A policy affects resource allocation only; the selected sizes travel in
+ * the ordinary header (FMT-2/FMT-6). Bounds include every live worker. */
+static uint64_t context_allocation_bound(adapt_sizes s, uint64_t workers,
+                                          uint64_t segment_bytes, int verified) {
+    if (workers >= 2) {
+        uint64_t per_worker = adapt_model_bytes(s) + block_workspace() + adapt_segment_out_bound(segment_bytes);
+        if (workers > (UINT64_MAX - HEADROOM) / per_worker) return UINT64_MAX;
+        return per_worker * workers + HEADROOM;
+    }
+    return verified ? adapt_verified_memory_bound(s) : adapt_encode_memory_bound(s);
+}
+
+adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, uint64_t max_memory,
+                                            uint64_t threads, uint64_t segment_bytes,
+                                            adapt_sizes *sizes, adapt_error *error) {
+    adapt_sizes s, floor, next;
+    uint64_t workers = length_known ? threads : 1;
+    uint8_t target, cap;
+    int verified = 0;
+    if (sizes == NULL || !sizes_valid(*sizes) || threads == 0 ||
+        (threads >= 2 && !adapt_segment_bytes_valid(segment_bytes)))
+        return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
+    s = *sizes;
+    floor = s;
+    floor.table_log = TABLE_LOG_MIN;
+    floor.match_log = MATCH_LOG_MIN;
+    floor.window_log = WINDOW_LOG_MIN;
+    if (!length_known && adapt_verified_memory_bound(floor) <= max_memory) verified = 1;
+    /* The supplied sizes must already fit: this policy never silently shrinks
+     * a caller's table or recall index to repair an invalid budget. */
+    if (check_memory(context_allocation_bound(s, workers, segment_bytes, verified), max_memory, error) != ADAPT_OK)
+        return ADAPT_ERROR_MEMORY_LIMIT;
+    if (workers >= 2 && length > segment_bytes) length = segment_bytes;
+    target = length_known ? adapt_table_log_for(length) : TABLE_LOG_MAX;
+    if (s.fast && target > ADAPT_FAST_TABLE_LOG_MAX) target = ADAPT_FAST_TABLE_LOG_MAX;
+    cap = length_known ? clamp_u8(bits(length > 0 ? length - 1 : 0), WINDOW_LOG_MIN, WINDOW_LOG_MAX) : WINDOW_LOG_MAX;
+    s.window_log = WINDOW_LOG_MIN;
+    while (s.table_log < target) {
+        next = s;
+        next.table_log++;
+        if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
+        s = next;
+    }
+    while (s.window_log < cap) {
+        next = s;
+        next.window_log++;
+        if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
+        s = next;
+    }
+    *sizes = s;
+    return fail(error, ADAPT_OK, 0, 0);
+}
+
 static adapt_status sizes_for_threads_profile(uint64_t length, uint64_t max_memory, uint64_t threads,
                                               uint64_t segment_bytes, int max, unsigned adaptive, adapt_sizes *sizes, adapt_error *error) {
     adapt_sizes floor = {0}, s = {0};
