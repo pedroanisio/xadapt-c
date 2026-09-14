@@ -268,6 +268,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--baseline-revision", default="unspecified")
     parser.add_argument(
+        "--corpora",
+        nargs="+",
+        type=Path,
+        help="copy these complete files instead of generating the fixture matrix",
+    )
+    parser.add_argument(
         "--binary", type=Path, default=telemetry.ROOT / "adpat/c/build/cadapt"
     )
     parser.add_argument(
@@ -293,7 +299,20 @@ def main(argv: list[str] | None = None) -> int:
     binary, baseline = output / "candidate-cadapt", output / "baseline-cadapt"
     shutil.copy2(args.binary, binary)
     shutil.copy2(args.baseline, baseline)
-    fixtures = prepare_fixtures(output / "fixtures", args.quick)
+    if args.corpora:
+        if args.quick:
+            parser.error("--quick applies only to the generated enwik8 fixture")
+        prepared = output / "fixtures"
+        prepared.mkdir()
+        fixtures = []
+        for source in args.corpora:
+            destination = prepared / source.name
+            if not source.is_file() or destination.exists():
+                parser.error("--corpora requires regular files with distinct names")
+            shutil.copy2(source, destination)
+            fixtures.append(destination)
+    else:
+        fixtures = prepare_fixtures(output / "fixtures", args.quick)
     if args.fixtures:
         fixtures = [path for path in fixtures if path.name in args.fixtures]
         if {p.name for p in fixtures} != set(args.fixtures):

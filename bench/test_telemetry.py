@@ -44,6 +44,34 @@ class TelemetryTest(unittest.TestCase):
         self.assertEqual([r["codec"]["adaptive_profile"] for r in records[:3]], ["rates", "sparse", "retained"])
         self.assertTrue(all(r["status"] == "ok" for r in records))
 
+    def test_external_corpus_experiment_preserves_complete_accounting(self) -> None:
+        import adaptive_experiment
+
+        output = self.root / "external-experiment"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = adaptive_experiment.main([
+                "--baseline", str(CADAPT), "--binary", str(CADAPT),
+                "--output", str(output), "--corpora", str(self.source),
+            ])
+        result = json.loads((output / "results.json").read_text())
+        self.assertEqual(rc, 0)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["expected_runs"], 5)
+        self.assertEqual(set(result["fixtures"]), {self.source.name})
+        self.assertTrue(result["comparisons"][0]["auto_equals_smallest"])
+        self.assertTrue(all(r["restoration"]["byte_exact"] for r in result["runs"]))
+        other = self.root / "other"
+        other.mkdir()
+        duplicate = other / self.source.name
+        duplicate.write_bytes(b"different")
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as failed:
+            adaptive_experiment.main([
+                "--baseline", str(CADAPT), "--binary", str(CADAPT),
+                "--output", str(self.root / "duplicate-experiment"),
+                "--corpora", str(self.source), str(duplicate),
+            ])
+        self.assertEqual(failed.exception.code, 2)
+
     def test_byte_units_and_nonfinite_arguments(self) -> None:
         self.assertEqual(telemetry.byte_count("64MiB"), 64 << 20)
         self.assertEqual(telemetry.byte_count("262144"), 262144)
