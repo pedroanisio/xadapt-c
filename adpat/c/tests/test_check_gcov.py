@@ -55,12 +55,15 @@ def units(
     encode: tuple[int, int],
     cli: tuple[int, int],
     header: tuple[int, int] = (9, 10),
+    archive: tuple[int, int] = (10, 10),
 ):
-    """The three unit reports the gate reads: the header appears in both
-    library units, as gcov reports an inlined header."""
+    """The four unit reports the gate reads: the header appears in both
+    library units that inline it, as gcov reports an inlined header; the
+    archive unit stands alone. The command line's report comes last."""
     return [
         report({"adapt_decode.c": decode, "adapt_model.h": header}),
         report({"adapt_encode.c": encode, "adapt_model.h": header}),
+        report({"adapt_archive.c": archive}),
         report({"cadapt.c": cli}),
     ]
 
@@ -88,18 +91,23 @@ class GateTest(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def test_floors_pass_at_the_boundary_and_fail_below_it(self) -> None:
-        # library: 40 + 40 + 9 + 9 of 50 + 50 + 10 + 10 = 98/120 = 81.7 %
+        # library: 40 + 40 + 9 + 9 + 10 of 50 + 50 + 10 + 10 + 10 = 108/130 = 83.1 %
         code, out, _ = self.run_gate(*self.write_units(units((40, 50), (40, 50), (60, 100))))
         self.assertEqual(code, 0, out)
-        self.assertIn("ok  library  branches 98/120 = 81.7% (floor 80%)", out)
+        self.assertIn("ok  library  branches 108/130 = 83.1% (floor 80%)", out)
         self.assertIn("ok  cli      branches 60/100 = 60.0% (floor 60%)", out)
         self.assertIn("u0.json:adapt_model.h", out)
         self.assertIn("u1.json:adapt_model.h", out)
+        self.assertIn("adapt_archive.c", out)
         # exactly the floor passes; one branch fewer fails
-        code, out, _ = self.run_gate(*self.write_units(units((40, 50), (40, 50), (60, 100), header=(8, 10)), "b"))
+        code, out, _ = self.run_gate(
+            *self.write_units(units((40, 50), (40, 50), (60, 100), header=(8, 10), archive=(8, 10)), "b")
+        )
         self.assertEqual(code, 0, out)
-        self.assertIn("96/120 = 80.0%", out)
-        code, out, _ = self.run_gate(*self.write_units(units((39, 50), (40, 50), (60, 100), header=(8, 10)), "c"))
+        self.assertIn("104/130 = 80.0%", out)
+        code, out, _ = self.run_gate(
+            *self.write_units(units((39, 50), (40, 50), (60, 100), header=(8, 10), archive=(8, 10)), "c")
+        )
         self.assertEqual(code, 1)
         self.assertIn("LOW library", out)
         code, out, _ = self.run_gate(*self.write_units(units((50, 50), (50, 50), (59, 100)), "d"))
@@ -108,21 +116,24 @@ class GateTest(unittest.TestCase):
 
     def test_a_missing_or_duplicated_source_fails(self) -> None:
         paths = self.write_units(units((50, 50), (50, 50), (90, 100)))
-        code, _, err = self.run_gate(*paths[:2])
+        code, _, err = self.run_gate(*paths[:3])
         self.assertEqual(code, 1)
         self.assertIn("lacks ['cadapt.c']", err)
+        code, _, err = self.run_gate(*paths[:2], paths[3])
+        self.assertEqual(code, 1)
+        self.assertIn("lacks ['adapt_archive.c']", err)
         code, _, err = self.run_gate(*paths, paths[0])
         self.assertEqual(code, 1)
         self.assertIn("duplicate source evidence", err)
         twice = self.write("twice.json", report({"adapt_decode.c": (5, 5), "adapt_encode.c": (5, 5)}))
-        code, _, err = self.run_gate(twice, paths[1], paths[2])
+        code, _, err = self.run_gate(twice, paths[1], paths[2], paths[3])
         self.assertEqual(code, 1)
         self.assertIn("duplicate source evidence", err)
 
     def test_other_sources_are_ignored_and_paths_are_matched_by_name(self) -> None:
         reports = units((50, 50), (50, 50), (90, 100))
         reports[0]["files"][0]["file"] = "/build/../c/adapt_decode.c"
-        reports[2]["files"].append(report({"tests/test_adapt_decode.c": (0, 100)})["files"][0])
+        reports[3]["files"].append(report({"tests/test_adapt_decode.c": (0, 100)})["files"][0])
         code, out, _ = self.run_gate(*self.write_units(reports))
         self.assertEqual(code, 0, out)
         self.assertNotIn("test_adapt_decode", out)
@@ -158,15 +169,15 @@ class GateTest(unittest.TestCase):
                 },
             ),
         ]:
-            code, _, err = self.run_gate(self.write(name, content), paths[1], paths[2])
+            code, _, err = self.run_gate(self.write(name, content), paths[1], paths[2], paths[3])
             self.assertEqual(code, 1, name)
             self.assertIn("invalid coverage report", err, name)
-        code, _, err = self.run_gate(str(Path(self.dir.name) / "absent.json"), paths[1], paths[2])
+        code, _, err = self.run_gate(str(Path(self.dir.name) / "absent.json"), paths[1], paths[2], paths[3])
         self.assertEqual(code, 1)
         self.assertIn("invalid coverage report", err)
 
     def test_zero_branches_is_zero_percent(self) -> None:
-        code, out, _ = self.run_gate(*self.write_units(units((0, 0), (0, 0), (90, 100), header=(0, 0))))
+        code, out, _ = self.run_gate(*self.write_units(units((0, 0), (0, 0), (90, 100), header=(0, 0), archive=(0, 0))))
         self.assertEqual(code, 1)
         self.assertIn("0/0 = 0.0%", out)
 

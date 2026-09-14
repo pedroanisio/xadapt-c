@@ -566,6 +566,12 @@ static void test_framing(void) {
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_BAD_HEADER);
     file[5] = 24; /* the largest table */
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    file[5] = (uint8_t)(20 | 2 << 5 | ADAPT_ARCHIVE_FLAG); /* an archive, class history 21 */
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.archive == 1 && sizes.class_code == 2 && sizes.table_log == 20);
+    CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_OK);
+    file[5] = (uint8_t)(20 | 3 << 5 | ADAPT_ARCHIVE_FLAG); /* an unknown class code, flagged */
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
     file[5] = 25;
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
     file[5] = 20 | 3 << 5; /* an unknown class code */
@@ -814,6 +820,7 @@ static void test_arguments_and_messages(void) {
         {ADAPT_ERROR_CHECKSUM, 0, 0, "checksum mismatch: the recovered bytes are damaged"},
         {ADAPT_ERROR_IO, 5, 0, "i/o error: callback status 5"},
         {ADAPT_ERROR_INVALID_ARGUMENT, 0, 0, "invalid argument"},
+        {ADAPT_ERROR_BAD_ARCHIVE, 42, 0, "invalid archive at byte 42"},
     };
     size_t i;
     for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

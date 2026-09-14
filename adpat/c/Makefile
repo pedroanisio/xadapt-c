@@ -4,7 +4,10 @@
 #
 #   make            build libadapt.a and cadapt
 #   make test       build and run the C unit tests on the committed vectors
+#   make coverage   an instrumented build, every suite on it, and the gcov
+#                   branch gate: 80 % for the library, 60 % for the CLI
 #   make check      build the library and CLI, then run C and Python tests
+#                   and the coverage gate
 #   make clean
 #
 # Outputs go to build/ here (git-ignored, as the crate's target/ is), where
@@ -25,7 +28,7 @@ BUILD   ?= build
 
 LIB   = $(BUILD)/libadapt.a
 BIN   = $(BUILD)/cadapt
-TESTS = $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode
+TESTS = $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive
 
 all: $(LIB) $(BIN)
 
@@ -38,6 +41,9 @@ $(BUILD)/adapt_decode.o: adapt_decode.c adapt.h adapt_model.h | $(BUILD)
 $(BUILD)/adapt_encode.o: adapt_encode.c adapt.h adapt_model.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ adapt_encode.c
 
+$(BUILD)/adapt_archive.o: adapt_archive.c adapt.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ adapt_archive.c
+
 $(BUILD)/cadapt.o: cadapt.c adapt.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ cadapt.c
 
@@ -47,8 +53,11 @@ $(BUILD)/test_adapt_decode.o: tests/test_adapt_decode.c adapt.h | $(BUILD)
 $(BUILD)/test_adapt_encode.o: tests/test_adapt_encode.c adapt.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ tests/test_adapt_encode.c
 
-$(LIB): $(BUILD)/adapt_decode.o $(BUILD)/adapt_encode.o
-	$(AR) rcs $@ $(BUILD)/adapt_decode.o $(BUILD)/adapt_encode.o
+$(BUILD)/test_adapt_archive.o: tests/test_adapt_archive.c adapt.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ tests/test_adapt_archive.c
+
+$(LIB): $(BUILD)/adapt_decode.o $(BUILD)/adapt_encode.o $(BUILD)/adapt_archive.o
+	$(AR) rcs $@ $(BUILD)/adapt_decode.o $(BUILD)/adapt_encode.o $(BUILD)/adapt_archive.o
 
 $(BIN): $(BUILD)/cadapt.o $(LIB)
 	$(CC) $(CFLAGS) -o $@ $(BUILD)/cadapt.o $(LIB) $(LDFLAGS)
@@ -59,16 +68,40 @@ $(BUILD)/test_adapt_decode: $(BUILD)/test_adapt_decode.o $(LIB)
 $(BUILD)/test_adapt_encode: $(BUILD)/test_adapt_encode.o $(LIB)
 	$(CC) $(CFLAGS) -o $@ $(BUILD)/test_adapt_encode.o $(LIB) $(LDFLAGS)
 
+$(BUILD)/test_adapt_archive: $(BUILD)/test_adapt_archive.o $(LIB)
+	$(CC) $(CFLAGS) -o $@ $(BUILD)/test_adapt_archive.o $(LIB) $(LDFLAGS)
+
 test: $(TESTS)
 	$(BUILD)/test_adapt_decode tests/vectors
 	$(BUILD)/test_adapt_encode tests/vectors
+	$(BUILD)/test_adapt_archive
 
 check: all test
 	$(PYTHON) -B tests/test_check_gcov.py
 	$(PYTHON) -B tests/test_cadapt.py "$(BIN)"
 	$(PYTHON) -B ../../bench/test_telemetry.py "$(BIN)"
+	$(MAKE) coverage
+
+# The instrumented build lives beside the ordinary one and starts afresh
+# each time, so counts never accumulate across runs. One instantiation of
+# the per-bit path (ADAPT_NO_MULTIVERSION): the instruction-set clones the
+# machine does not run would count as branches never taken.
+COV = $(BUILD)-cov
+COVFLAGS = -std=c99 -O0 --coverage -DADAPT_NO_MULTIVERSION -Wall -Wextra -Wpedantic -Werror $(THREADS)
+COVUNITS = adapt_decode adapt_encode adapt_archive cadapt
+
+coverage:
+	rm -rf $(COV)
+	$(MAKE) BUILD=$(COV) CFLAGS="$(COVFLAGS)" LDFLAGS="--coverage" all $(COV)/test_adapt_decode \
+	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive
+	$(COV)/test_adapt_decode tests/vectors
+	$(COV)/test_adapt_encode tests/vectors
+	$(COV)/test_adapt_archive
+	$(PYTHON) -B tests/test_cadapt.py "$(abspath $(COV))/cadapt"
+	cd $(COV) && for u in $(COVUNITS); do gcov -b -c --json-format -o . $$u.o > /dev/null && gunzip -f $$u.gcov.json.gz; done
+	$(PYTHON) -B check-gcov.py $(foreach u,$(COVUNITS),$(COV)/$(u).gcov.json)
 
 clean:
-	rm -rf $(BUILD)
+	rm -rf $(BUILD) $(COV)
 
-.PHONY: all test check clean
+.PHONY: all test coverage check clean

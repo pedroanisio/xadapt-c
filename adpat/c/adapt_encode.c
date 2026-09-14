@@ -202,6 +202,7 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
     floor.segmented = 0;
     floor.max = (uint8_t)max;
     floor.x86 = 0;
+    floor.archive = 0;
     bound = (!length_known && adapt_verified_memory_bound(floor) <= max_memory) ? adapt_verified_memory_bound
                                                                                 : adapt_encode_memory_bound;
     if (length_known) {
@@ -219,6 +220,7 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
     s.segmented = 0;
     s.max = (uint8_t)max;
     s.x86 = 0;
+    s.archive = 0;
     while (bound(s) > max_memory) {
         uint64_t table_bytes = (uint64_t)16 << s.table_log;
         uint64_t match_bytes = (uint64_t)4 << s.match_log;
@@ -305,6 +307,7 @@ static adapt_status sizes_for_threads_profile(uint64_t length, uint64_t max_memo
     floor.segmented = 1;
     floor.max = (uint8_t)max;
     floor.x86 = 0;
+    floor.archive = 0;
     least = adapt_threads_encode_memory_bound(floor, threads, segment_bytes);
     status = check_memory(least, max_memory, error);
     if (status != ADAPT_OK) {
@@ -1116,7 +1119,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     header[2] = 'P';
     header[3] = 'T';
     header[4] = sizes.fast ? ADAPT_FAST_VERSION : (sizes.max ? ADAPT_MAX_VERSION : ADAPT_FORMAT_VERSION);
-    header[5] = (uint8_t)(sizes.table_log | sizes.class_code << 5);
+    header[5] = (uint8_t)(sizes.table_log | sizes.class_code << 5 | (sizes.archive ? ADAPT_ARCHIVE_FLAG : 0));
     header[6] = (uint8_t)(sizes.match_log | sizes.set_code << 5);
     header[7] = (uint8_t)(sizes.window_log | (sizes.period != 0 ? ADAPT_PERIOD_FLAG : 0) |
                           (sizes.segmented ? ADAPT_SEGMENT_FLAG : 0) | (sizes.x86 ? ADAPT_X86_FLAG : 0));
@@ -1465,7 +1468,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);

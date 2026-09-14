@@ -235,6 +235,7 @@ class TelemetryTest(unittest.TestCase):
                 metadata = telemetry.inspect_container(output)
                 self.assertEqual(metadata["format_version"], version)
                 self.assertFalse(metadata["x86_transform"])
+                self.assertFalse(metadata["archive"])
                 self.assertEqual(metadata["crc32"], telemetry.fingerprint(self.source)["crc32"])
         self.source.write_bytes(b"segment example\n" * 18000)
         output = self.root / "segmented.adpt"

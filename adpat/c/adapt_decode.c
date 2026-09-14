@@ -78,7 +78,8 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     s.table_log = header[5] & 31;
     s.match_log = header[6] & 31;
     s.window_log = (uint8_t)(header[7] & ~(ADAPT_PERIOD_FLAG | ADAPT_SEGMENT_FLAG | ADAPT_X86_FLAG));
-    s.class_code = header[5] >> 5;
+    s.class_code = (header[5] >> 5) & 3;
+    s.archive = (header[5] & ADAPT_ARCHIVE_FLAG) != 0;
     s.set_code = header[6] >> 5;
     s.segmented = (header[7] & ADAPT_SEGMENT_FLAG) != 0;
     s.x86 = (header[7] & ADAPT_X86_FLAG) != 0;
@@ -595,6 +596,8 @@ int adapt_error_message(const adapt_error *error, char *buf, size_t len) {
             return snprintf(buf, len, "i/o error: callback status %llu", (unsigned long long)error->detail);
         case ADAPT_ERROR_INVALID_ARGUMENT:
             return snprintf(buf, len, "invalid argument");
+        case ADAPT_ERROR_BAD_ARCHIVE:
+            return snprintf(buf, len, "invalid archive at byte %llu", (unsigned long long)error->detail);
     }
     return snprintf(buf, len, "unknown error %d", (int)error->status);
 }

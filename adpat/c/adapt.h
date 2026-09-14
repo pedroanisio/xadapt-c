@@ -100,9 +100,14 @@ extern "C" {
 #define ADAPT_FAST_SETS 3u
 /* The fast profile's table, at most, as a log2 of blocks: 2 MiB. */
 #define ADAPT_FAST_TABLE_LOG_MAX 17u
-/* Fixed header: signature, version, table-size byte (class code in its top
- * three bits), recall-table size (context-set code in its top three bits),
- * window size. */
+/* The header's table byte carries this bit when the container holds a
+ * folder: its decoded bytes are an adapt archive (see below), one stream
+ * that names every file and directory and holds every file's bytes, so a
+ * folder is coded as one file and restored from it alone. */
+#define ADAPT_ARCHIVE_FLAG 0x80u
+/* Fixed header: signature, version, table-size byte (class code in bits 5
+ * and 6, the archive flag in bit 7), recall-table size (context-set code
+ * in its top three bits), window size. */
 #define ADAPT_HEADER_BYTES 8u
 /* Per-block header: method, raw length, payload length. */
 #define ADAPT_BLOCK_HEADER_BYTES 9u
@@ -148,7 +153,10 @@ typedef enum adapt_status {
     /* The reader or writer callback failed. */
     ADAPT_ERROR_IO,
     /* A required pointer was NULL. */
-    ADAPT_ERROR_INVALID_ARGUMENT
+    ADAPT_ERROR_INVALID_ARGUMENT,
+    /* The decoded bytes of a folder are not a well-formed adapt archive:
+     * `detail` is the offset of the byte that was refused. */
+    ADAPT_ERROR_BAD_ARCHIVE
 } adapt_status;
 
 /* A status with the numbers its message needs: `required` and `limit` for
@@ -212,6 +220,10 @@ typedef struct adapt_sizes {
      * Chosen by the encoder from the first block; adapt_sizes_for_input
      * leaves it 0. Any profile may carry it. */
     uint8_t x86;
+    /* 1 when the decoded bytes are an adapt archive, a folder
+     * (ADAPT_ARCHIVE_FLAG). Set by the caller who codes one;
+     * adapt_sizes_for_input leaves it 0. Any profile may carry it. */
+    uint8_t archive;
 } adapt_sizes;
 
 /* Context sets a file may choose, by header code. */
@@ -420,6 +432,85 @@ adapt_status adapt_encode_verified(const uint8_t *data, size_t data_len, adapt_l
 
 /* CRC-32 (IEEE 802.3) of `data`, as the trailer stores it. */
 uint32_t adapt_crc32(const uint8_t *data, size_t len);
+
+/* ------------------------------------------------------------------------
+ * Archives: a folder as one stream
+ *
+ * A folder is coded as a container flagged ADAPT_ARCHIVE_FLAG whose
+ * decoded bytes are an adapt archive: ADAPT_ARCHIVE_MAGIC, then entries,
+ * then one ADAPT_ARCHIVE_END byte. An entry is a kind byte, a path (its
+ * length as a little-endian u16, then its bytes: components joined by '/',
+ * relative to the folder, none empty, none '.' or '..', no NUL) and, for
+ * a file, its length as a little-endian u64 and then its bytes; for a
+ * symbolic link, its target (u16 length, bytes). Entries come depth first,
+ * siblings in byte order of their names, a directory before what it
+ * holds, so the same folder gives the same bytes wherever it is packed.
+ * An empty directory is an entry like any other; the folder itself is
+ * not one. The unpacker checks every rule and hands the entries to a sink
+ * of callbacks as their bytes arrive, so a folder of any size is restored
+ * in the memory of one block.
+ * --------------------------------------------------------------------- */
+
+#define ADAPT_ARCHIVE_MAGIC "ADPTARC1"
+#define ADAPT_ARCHIVE_MAGIC_BYTES 8u
+#define ADAPT_ARCHIVE_END 0u
+#define ADAPT_ARCHIVE_DIRECTORY 1u
+#define ADAPT_ARCHIVE_FILE 2u
+#define ADAPT_ARCHIVE_SYMLINK 3u
+/* The most bytes a path or a link target may take. */
+#define ADAPT_ARCHIVE_PATH_MAX 65535u
+
+/* Whether a path may name an archive entry: 1 to ADAPT_ARCHIVE_PATH_MAX
+ * bytes, components joined by '/', none empty, '.' or '..', no NUL. */
+int adapt_archive_path_valid(const char *path);
+
+/* Write an entry's header — everything before a file's bytes — into
+ * `out` when `cap` holds it, and return its length; 0 when the kind is
+ * not an entry's, or the path or the link target is not valid. `size` is
+ * a file's length, `target` a link's target, ignored for the other kinds.
+ * The archive's start is ADAPT_ARCHIVE_MAGIC, its end one
+ * ADAPT_ARCHIVE_END byte; a caller emits those itself. */
+size_t adapt_archive_entry(uint8_t kind, const char *path, uint64_t size, const char *target, uint8_t *out, size_t cap);
+
+/* What an unpacker does with each entry: `directory` for a directory,
+ * `file_open` then `file_data` for each of the file's bytes as they come
+ * and `file_close` once its length is reached (a file of length 0 is
+ * opened and closed with no data), `symlink` for a link. Each returns 0,
+ * or a nonzero status the unpacker returns as its own. */
+typedef struct adapt_archive_sink {
+    void *context;
+    int (*directory)(void *context, const char *path);
+    int (*file_open)(void *context, const char *path, uint64_t size);
+    int (*file_data)(void *context, const uint8_t *data, size_t len);
+    int (*file_close)(void *context);
+    int (*symlink)(void *context, const char *path, const char *target);
+} adapt_archive_sink;
+
+typedef struct adapt_archive_unpacker adapt_archive_unpacker;
+
+/* An unpacker for one archive, or NULL when memory is short. */
+adapt_archive_unpacker *adapt_archive_unpacker_new(adapt_archive_sink sink);
+void adapt_archive_unpacker_free(adapt_archive_unpacker *u);
+
+/* Feed the next bytes of the archive, in order, in any pieces: an
+ * adapt_write_fn, so a decoder writes straight into it. Returns 0; the
+ * sink's status when a callback failed; or ADAPT_ARCHIVE_MALFORMED when
+ * the bytes broke a rule, after which every further call returns the
+ * same and adapt_archive_problem() says where. */
+int adapt_archive_unpack(void *unpacker, const uint8_t *buf, size_t len);
+#define ADAPT_ARCHIVE_MALFORMED (-1)
+
+/* After the last byte: ADAPT_OK when the archive ended where the bytes
+ * did — the end byte seen, no file cut short, nothing after —
+ * ADAPT_ERROR_BAD_ARCHIVE otherwise, with the offset in `error`. */
+adapt_status adapt_archive_finish(const adapt_archive_unpacker *u, adapt_error *error);
+
+/* The rule the bytes broke, or NULL when none did; and the offset of the
+ * byte refused. */
+const char *adapt_archive_problem(const adapt_archive_unpacker *u, uint64_t *offset);
+
+/* Entries handed to the sink so far: directories, files and links. */
+uint64_t adapt_archive_entries(const adapt_archive_unpacker *u);
 
 #ifdef __cplusplus
 }

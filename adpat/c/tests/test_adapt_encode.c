@@ -1096,6 +1096,49 @@ static void test_x86_transform(void) {
     free(data);
 }
 
+/* The archive flag: carried in the table byte beside the class code,
+ * read back with it, and nothing to the model — the same bytes follow. */
+static void test_archive_flag(void) {
+    size_t n = 5000, i, out_len;
+    uint8_t *data = malloc(n);
+    uint8_t *plain = malloc(n + 256);
+    uint8_t *flagged = malloc(n + 256);
+    uint8_t *out = NULL;
+    reader r;
+    writer w;
+    adapt_sizes sizes, read;
+    adapt_error error;
+    size_t plain_len;
+    for (i = 0; i < n; i++) {
+        data[i] = "an archive is bytes like any other to the model. "[i % 49];
+    }
+    CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error), ADAPT_OK);
+    CHECK(sizes.archive == 0);
+    reset(&r, data, n, 700, &w, plain, n + 256);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
+                 ADAPT_OK);
+    plain_len = w.len;
+    sizes.archive = 1;
+    CHECK(adapt_sizes_valid(sizes));
+    reset(&r, data, n, 700, &w, flagged, n + 256);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
+                 ADAPT_OK);
+    CHECK(w.len == plain_len && (flagged[5] & ADAPT_ARCHIVE_FLAG) != 0 && (plain[5] & ADAPT_ARCHIVE_FLAG) == 0);
+    CHECK((flagged[5] & 0x7F) == plain[5] && memcmp(flagged + 6, plain + 6, plain_len - 6) == 0);
+    CHECK_STATUS(adapt_read_header(flagged, w.len, &read, &error), ADAPT_OK);
+    CHECK(read.archive == 1 && read.class_code == sizes.class_code && read.table_log == sizes.table_log);
+    CHECK_STATUS(adapt_read_header(plain, plain_len, &read, &error), ADAPT_OK);
+    CHECK(read.archive == 0);
+    CHECK_STATUS(adapt_decode(flagged, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == n && memcmp(out, data, n) == 0);
+    adapt_free(out);
+    sizes.archive = 2;
+    CHECK(!adapt_sizes_valid(sizes));
+    free(data);
+    free(plain);
+    free(flagged);
+}
+
 static void test_in_memory(void) {
     uint8_t *out = (uint8_t *)1;
     size_t out_len = 1, n = 30000, i;
@@ -1170,6 +1213,7 @@ int main(int argc, char **argv) {
     test_edges();
     test_record_period();
     test_x86_transform();
+    test_archive_flag();
     test_in_memory();
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);

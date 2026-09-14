@@ -1599,7 +1599,8 @@ static inline int sizes_valid(adapt_sizes s) {
            s.match_log <= MATCH_LOG_MAX && s.window_log >= WINDOW_LOG_MIN && s.window_log <= WINDOW_LOG_MAX &&
            s.class_code < 3 && s.set_code < ADAPT_CONTEXT_SETS && s.fast <= 1 &&
            (!s.fast || s.set_code < ADAPT_FAST_SETS) && s.period != 1 && s.period <= ADAPT_PERIOD_MAX &&
-           (!s.fast || s.period == 0) && s.segmented <= 1 && s.max <= 1 && !(s.fast && s.max) && s.x86 <= 1;
+           (!s.fast || s.period == 0) && s.segmented <= 1 && s.max <= 1 && !(s.fast && s.max) && s.x86 <= 1 &&
+           s.archive <= 1;
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {
