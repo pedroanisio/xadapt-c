@@ -325,17 +325,17 @@ def inspect_container(path: Path) -> dict[str, Any]:
             return data
 
         header = read(8)
-        if header[:4] != b"ADPT" or header[4] not in range(19, 39):
+        if header[:4] != b"ADPT" or header[4] not in range(19, 53):
             raise ValueError("unsupported container header")
         period = int.from_bytes(read(2), "little") if header[7] & 0x80 else 0
-        bmp_descriptor = read(12) if header[4] >= 31 else b""
+        bmp_descriptor = read(12) if (31 <= header[4] <= 38 or 45 <= header[4] <= 52) else b""
         bmp = None
         if bmp_descriptor:
             bmp = dict(zip(("offset", "width", "rows"), (int.from_bytes(bmp_descriptor[i:i + 4], "little") for i in (0, 4, 8))))
             if bmp["offset"] < 54 or not (0 < bmp["width"] <= 0x7fffffff and 0 < bmp["rows"] <= 0x7fffffff):
                 raise ValueError("invalid BMP descriptor")
         filesystem_metadata = None
-        if header[4] in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38):
+        if header[4] in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52):
             metadata = read(32)
             checksum_input = header + (period.to_bytes(2, "little") if header[7] & 0x80 else b"") + bmp_descriptor + metadata[:28]
             if zlib.crc32(checksum_input) != int.from_bytes(metadata[28:], "little"):
@@ -351,10 +351,19 @@ def inspect_container(path: Path) -> dict[str, Any]:
                     filesystem_metadata["atime_nanoseconds"] >= 1_000_000_000 or
                     filesystem_metadata["mtime_nanoseconds"] >= 1_000_000_000):
                 raise ValueError("invalid filesystem metadata")
+        version = header[4]
+        max_profile = version in (21, 24) or version >= 39
+        normalized = version - 14 if version >= 39 else version
+        if bmp:
+            adaptive = ("normal", "rates", "sparse", "retained")[(normalized - 31) % 4]
+        elif 25 <= normalized <= 30:
+            adaptive = ("rates", "sparse", "retained")[(normalized - 25) % 3]
+        else:
+            adaptive = None
         result: dict[str, Any] = dict(
-            format_version=header[4],
-            adaptive_profile=("normal", "rates", "sparse", "retained")[(header[4] - (35 if header[4] >= 35 else 31))] if bmp else
-                             (("rates", "sparse", "retained")[(header[4] - 25) % 3] if 25 <= header[4] <= 30 else None),
+            format_version=version,
+            base_profile="max" if max_profile else "fast" if version in (20, 23) else "normal",
+            adaptive_profile=adaptive,
             bmp_transform=bmp,
             transform_metadata_bytes=len(bmp_descriptor),
             filesystem_metadata=filesystem_metadata,

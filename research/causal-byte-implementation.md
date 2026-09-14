@@ -12,19 +12,19 @@ This worktree implements the causal calibration, sparse-context, retained-state
 and complete-container selection hypotheses in
 [the mathematical model](byte-only-mathematical-model.md), plus a concrete
 reversible BMP24 transform. It keeps the existing normal/fast/max encoders as
-defaults and preserves decoding of formats 13–18. It adds no runtime dependency,
+defaults and preserves decoding of formats 19–24. It adds no runtime dependency,
 learned corpus table, dictionary, tokenizer or sidecar. See the
 [repository README](../README.md) and governing
 [constraints](../docs/CONSTRAINTS.md).
 
-The experiment is isolated on `research/causal-byte-adaptation`, based on
-`1e45b9d750fc3d3e410e0063d358c98f0214bf0d`. The unchanged binary was built and
-preserved before editing. All comparisons use complete container bytes, with
-an explicit 64 MiB memory budget instead of the repository's larger default.
+The experiment is isolated on `research/causal-current`, based on the current source snapshot
+`6eb6e41`. The [baseline protocol](current-baseline.md) records capture and
+comparison settings. The original 64 MiB normal-profile results remain in
+`research/causal-byte-adaptation`; they are historical, not the comparator here.
 
 ## Implemented algorithms
 
-The existing normal model always predicts and learns from the same prefix as
+The chosen normal or max model always predicts and learns from the same prefix as
 the new experts. The new layer combines its final bit probability with:
 
 1. **Rates:** two probability calibration tables with update rates 1/32 and
@@ -64,7 +64,7 @@ w'_i = \left\lfloor\frac{65535v_i +
 \]
 
 After each rounding step its deficit is assigned to expert zero, the existing
-normal model. This preserves exact normalization and positive weights. Products
+base model. This preserves exact normalization and positive weights. Products
 fit within unsigned 64-bit arithmetic. There are K=3, 5 or 6 experts.
 
 This is a finite-precision implementation of the no-self-switch mixture with
@@ -120,19 +120,20 @@ or rewrite PDF/EPUB structures.
 
 `--adaptive auto` reads the source once into a temporary file and runs eligible
 candidates sequentially. For ordinary byte streams and folders, the menu is
-normal, rates, sparse and retained. For BMP24 input it also includes those four
-profiles with the BMP transform. Fast and max remain separately selectable
-legacy profiles; they are outside this experimental search menu.
+the base profile, rates, sparse and retained. `--max --adaptive auto` applies
+all three expert configurations to the max predictor. For BMP24 input it also
+includes those four profiles with the BMP transform. Fast remains a separate
+profile outside this experimental menu.
 
 Every candidate includes its header, optional period, transform descriptor,
 filesystem metadata and CRC, block framing, segment table and trailer. The
-smallest total wins, with the earlier candidate winning ties. The normal
+smallest total wins, with the earlier candidate winning ties. The base
 candidate uses the existing known/unknown-length sizing rule. For every
 successful search:
 
 \[
 |C_{\mathrm{selected}}| = \min_{c\in\mathcal C_{\mathrm{eligible}}}|C_c|
-\le |C_{\mathrm{normal}}|.
+\le |C_{\mathrm{base}}|.
 \]
 
 This guarantee concerns the enumerated menu and the current codec. It does not
@@ -155,9 +156,11 @@ folder-entry bookkeeping remains additional to the codec memory budget.
 
 | Predictor | Raw stream | With filesystem metadata |
 |---|---:|---:|
-| Normal / fast / max, unchanged | 13 / 14 / 15 | 16 / 17 / 18 |
-| Rates / sparse / retained | 19 / 20 / 21 | 22 / 23 / 24 |
-| BMP + normal / rates / sparse / retained | 25 / 26 / 27 / 28 | 29 / 30 / 31 / 32 |
+| Normal / fast / max, unchanged | 19 / 20 / 21 | 22 / 23 / 24 |
+| Rates / sparse / retained over normal | 25 / 26 / 27 | 28 / 29 / 30 |
+| BMP + normal / rates / sparse / retained | 31 / 32 / 33 / 34 | 35 / 36 / 37 / 38 |
+| Rates / sparse / retained over max | 39 / 40 / 41 | 42 / 43 / 44 |
+| BMP + max / rates / sparse / retained | 45 / 46 / 47 / 48 | 49 / 50 / 51 / 52 |
 
 BMP descriptors follow the optional two-byte record period and precede
 filesystem metadata. Metadata versions include the extended-header checksum.
@@ -171,7 +174,7 @@ or initialize all fields to zero before assigning supported values.
 
 ```sh
 make -C adpat/c
-adpat/c/build/cadapt encode input --adaptive auto --max-memory 67108864 --verify -o output.adpt
+adpat/c/build/cadapt encode input --max --adaptive auto --max-memory 706740224 --verify -o output.adpt
 adpat/c/build/cadapt decode output.adpt -o restored
 adpat/c/build/cadapt encode image.bmp --transform bmp --adaptive retained -o image.adpt
 ```
@@ -184,8 +187,8 @@ in a separate checkout, preserve its binary, then run:
 ```sh
 python3 -B bench/adaptive_experiment.py \
   --baseline /path/to/baseline-cadapt \
-  --baseline-revision 1e45b9d750fc3d3e410e0063d358c98f0214bf0d \
-  --output bench/results/causal-full --memory 67108864
+  --baseline-revision 6eb6e41 \
+  --output bench/results/causal-full --memory 706740224 --base-profile max
 ```
 
 The runner freezes both binaries, hashes inputs and tools, and records GNU time
@@ -196,7 +199,7 @@ candidate receives the same source metadata. The output directory must be new.
 `--quick` explicitly substitutes a 65,536-byte enwik8 prefix; it is not a full
 corpus result.
 
-The planned full matrix contains 108 encode/decode pairs: full enwik8; generated
+The default full matrix contains 108 encode/decode pairs: full enwik8; generated
 Latin/diacritic, Cyrillic, CJK UTF-8 and CJK UTF-16LE inputs; CSV, XML, HTML, CSS,
 source and binary bytes; random bytes; empty input; gradient/noise BMP; PNG,
 PDF, EPUB; recurring regimes; and a mixed folder. The generated rows are
@@ -213,9 +216,9 @@ folder restoration. The coverage gate explicitly requires and counts the two
 new headers; its floors remain 80% for the library and 60% for the CLI.
 
 FMT-1 through FMT-6 and the byte-only modeling rule in FMT-8 govern the new
-paths. This work does not claim complete FMT-7 delivery: existing ACL, extended
-attribute, hard-link and sparse-allocation limitations still apply. It also
-does not establish measured generalization to every script or encoding from
+paths. The frozen baseline includes the FMT-7 archive implementation for ACLs,
+extended attributes, hard links and sparse extents; its documented platform
+rules still apply. This experiment does not establish measured generalization to every script or encoding from
 the finite multilingual probes. Greater than 30% enterprise cost savings must
 be assessed on a representative workload, including encoding cost, decoding
 latency, temporary disk and memory. A gain on a synthetic image is not that

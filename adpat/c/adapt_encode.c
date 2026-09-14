@@ -293,6 +293,12 @@ adapt_status adapt_sizes_for_input_adaptive(int length_known, uint64_t length, u
     return sizes_for_input_profile(length_known, length, max_memory, 0, mode, sizes, error);
 }
 
+adapt_status adapt_sizes_for_input_max_adaptive(int length_known, uint64_t length, uint64_t max_memory,
+                                           unsigned mode, adapt_sizes *sizes, adapt_error *error) {
+    if (mode > 3) return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, mode, 3);
+    return sizes_for_input_profile(length_known, length, max_memory, 1, mode, sizes, error);
+}
+
 /* segments.rs — the crate's threads: the most bytes one segment can take
  * in the file, the memory a run of threads needs, and the sizes for one
  * thread's share of a budget. This port codes segments in order, but a
@@ -356,6 +362,12 @@ adapt_status adapt_sizes_for_threads_adaptive(uint64_t length, uint64_t max_memo
                                              uint64_t segment_bytes, unsigned mode, adapt_sizes *sizes, adapt_error *error) {
     if (mode > 3) return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, mode, 3);
     return sizes_for_threads_profile(length, max_memory, threads, segment_bytes, 0, mode, sizes, error);
+}
+
+adapt_status adapt_sizes_for_threads_max_adaptive(uint64_t length, uint64_t max_memory, uint64_t threads,
+                                             uint64_t segment_bytes, unsigned mode, adapt_sizes *sizes, adapt_error *error) {
+    if (mode > 3) return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, mode, 3);
+    return sizes_for_threads_profile(length, max_memory, threads, segment_bytes, 1, mode, sizes, error);
 }
 
 adapt_status adapt_sizes_for_threads_max(uint64_t length, uint64_t max_memory, uint64_t threads, uint64_t segment_bytes,
@@ -1152,9 +1164,9 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     header[1] = 'D';
     header[2] = 'P';
     header[3] = 'T';
-    header[4] = sizes.adaptive ? (uint8_t)(ADAPT_ADAPTIVE_VERSION + sizes.adaptive - 1) :
+    header[4] = sizes.adaptive ? (uint8_t)((sizes.max ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + sizes.adaptive - 1) :
                 (sizes.fast ? ADAPT_FAST_VERSION : (sizes.max ? ADAPT_MAX_VERSION : ADAPT_FORMAT_VERSION));
-    if (sizes.bmp) header[4] = (uint8_t)(ADAPT_BMP_VERSION + sizes.adaptive);
+    if (sizes.bmp) header[4] = (uint8_t)((sizes.max ? ADAPT_MAX_BMP_VERSION : ADAPT_BMP_VERSION) + sizes.adaptive);
     header[5] = (uint8_t)(sizes.table_log | sizes.class_code << 5 | (sizes.archive ? ADAPT_ARCHIVE_FLAG : 0));
     header[6] = (uint8_t)(sizes.match_log | sizes.set_code << 5);
     header[7] = (uint8_t)(sizes.window_log | (sizes.period != 0 ? ADAPT_PERIOD_FLAG : 0) |

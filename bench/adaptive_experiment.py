@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import random
+import re
 import shutil
 import stat
 import struct
@@ -233,10 +234,15 @@ def compare_restoration(
     source: Path, restored: Path, entries: dict[str, Any]
 ) -> dict[str, bool]:
     """Compare metadata before reading files, then compare every byte."""
-    metadata = True
+    metadata, file_types = True, True
     for name, expected in entries.items():
         target = restored / name if name != "." else restored
-        actual = target.stat()
+        actual = target.lstat()
+        file_types &= (
+            stat.S_ISDIR(actual.st_mode)
+            if expected["directory"]
+            else stat.S_ISREG(actual.st_mode)
+        )
         metadata &= (
             stat.S_IMODE(actual.st_mode),
             actual.st_atime_ns,
@@ -259,7 +265,11 @@ def compare_restoration(
                 byte_exact &= a == b
                 if not a and not b:
                     break
-    return {"byte_exact": byte_exact, "mode_and_ns_timestamps_exact": metadata}
+    return {
+        "byte_exact": byte_exact,
+        "mode_and_ns_timestamps_exact": metadata,
+        "file_types_exact": file_types,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -283,6 +293,9 @@ def main(argv: list[str] | None = None) -> int:
         help="new directory; never reuses old measurements",
     )
     parser.add_argument("--memory", type=int, default=64 << 20)
+    parser.add_argument("--base-profile", choices=("normal", "max"), default="normal")
+    parser.add_argument("--search-only", action="store_true",
+                        help="measure baseline and full search; trial sizes are logged, only the winner is decoded")
     parser.add_argument(
         "--quick",
         action="store_true",
@@ -323,6 +336,8 @@ def main(argv: list[str] | None = None) -> int:
         "started_at": telemetry.utc_now(),
         "complete": False,
         "quick": args.quick,
+        "base_profile": args.base_profile,
+        "search_only": args.search_only,
         "memory_budget_bytes": args.memory,
         "host": platform.platform(),
         "baseline_sha256": sha256(baseline),
@@ -334,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
             ["git", "rev-parse", "HEAD"], cwd=telemetry.ROOT, text=True
         ).strip(),
         "expected_runs": sum(
-            9 if source.suffix == ".bmp" else 5 for source in fixtures
+            2 if args.search_only else (9 if source.suffix == ".bmp" else 5) for source in fixtures
         ),
         "fixtures": {},
         "runs": [],
@@ -347,6 +362,8 @@ def main(argv: list[str] | None = None) -> int:
             if source.suffix == ".bmp"
             else ()
         )
+        if args.search_only:
+            profiles = ("baseline", "auto")
         for profile in profiles:
             directory = output / f"{source.name}-{profile}"
             directory.mkdir()
@@ -362,6 +379,8 @@ def main(argv: list[str] | None = None) -> int:
                 "--max-memory",
                 str(args.memory),
             ]
+            if args.base_profile == "max":
+                command.append("--max")
             mode = profile.removesuffix("-bmp")
             if mode not in ("baseline", "normal"):
                 command += ["--adaptive", mode]
@@ -389,6 +408,13 @@ def main(argv: list[str] | None = None) -> int:
                     record["container_sha256"] = sha256(encoded)
                     record["codec"] = telemetry.inspect_container(encoded)
                     record["selection_log"] = (directory / "stderr.txt").read_text()
+                    if profile == "auto":
+                        record["candidate_trials"] = [
+                            {"profile": match[1], "container_bytes": int(match[2])}
+                            for match in re.finditer(r"^adaptive trial ([^:\n]+): (\d+) bytes$", record["selection_log"], re.MULTILINE)
+                        ]
+                        if not record["candidate_trials"]:
+                            raise ValueError("search produced no candidate size evidence")
                     decode_dir = directory / "decode"
                     decode_dir.mkdir()
                     command = [str(binary), "decode", str(encoded), "-o", str(restored)]
@@ -439,7 +465,9 @@ def main(argv: list[str] | None = None) -> int:
                     "auto_bytes": chosen,
                     "saved_percent": 100 * (base - chosen) / base,
                     "auto_equals_smallest": chosen
-                    == min(r["container_bytes"] for r in rows),
+                    == min([r["container_bytes"] for r in rows] + [
+                        trial["container_bytes"] for r in rows for trial in r.get("candidate_trials", [])
+                    ]),
                 }
             )
     report["comparisons"] = comparisons

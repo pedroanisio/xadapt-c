@@ -23,7 +23,7 @@ int main(void) {
     adaptive_model *a = calloc(1, sizeof(*a)), *b = calloc(1, sizeof(*b));
     int16_t squash_table[4095];
     uint64_t history = 0;
-    unsigned mode, t, i, bit, c0 = 1;
+    unsigned mode, t, i, bit, max_profile, c0 = 1;
     adapt_sizes sizes, normal, parsed;
     adapt_error error;
     uint8_t input[8192], *coded, *decoded;
@@ -33,8 +33,10 @@ int main(void) {
     assert(a != NULL && b != NULL);
     assert(adapt_sizes_for_input(1, sizeof(input), 64u << 20, &normal, &error) == ADAPT_OK);
     for (i = 0; i < sizeof(input); i++) input[i] = (uint8_t)((i / 7 + i * 13) % 251);
+    for (max_profile = 0; max_profile <= 1; max_profile++) {
+    assert((max_profile ? adapt_sizes_for_input_max : adapt_sizes_for_input)(1, sizeof(input), 128u << 20, &normal, &error) == ADAPT_OK);
     for (mode = 1; mode <= 3; mode++) {
-        assert(adapt_sizes_for_input_adaptive(1, sizeof(input), 64u << 20, mode, &sizes, &error) == ADAPT_OK);
+        assert((max_profile ? adapt_sizes_for_input_max_adaptive : adapt_sizes_for_input_adaptive)(1, sizeof(input), 128u << 20, mode, &sizes, &error) == ADAPT_OK);
         assert(sizes.adaptive == mode);
         parsed = normal;
         parsed.adaptive = (uint8_t)mode;
@@ -42,17 +44,22 @@ int main(void) {
         coded = malloc(10000); assert(coded != NULL);
         source = (buffer){input, 0, sizeof(input), sizeof(input)};
         destination = (buffer){coded, 0, 0, 10000};
-        assert(adapt_encode_stream(read_buffer, &source, write_buffer, &destination, sizes, 64u << 20, NULL, &error) == ADAPT_OK);
+        assert(adapt_encode_stream(read_buffer, &source, write_buffer, &destination, sizes, 128u << 20, NULL, &error) == ADAPT_OK);
         coded_len = destination.len;
-        assert(coded[4] == ADAPT_ADAPTIVE_VERSION + mode - 1);
+        assert(coded[4] == (max_profile ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + mode - 1);
         assert(adapt_read_header(coded, coded_len, &parsed, &error) == ADAPT_OK);
-        assert(parsed.adaptive == mode);
+        assert(parsed.adaptive == mode && parsed.max == max_profile);
         assert(adapt_decode(coded, coded_len, limits, &decoded, &decoded_len, &error) == ADAPT_OK);
         assert(decoded_len == sizeof(input) && memcmp(decoded, input, sizeof(input)) == 0);
         free(decoded); free(coded);
     }
+    }
+    normal.max = 0;
     assert(adapt_sizes_for_input_adaptive(1, 0, 1u << 20, 1, &sizes, &error) == ADAPT_ERROR_MEMORY_LIMIT);
     assert(adapt_sizes_for_input_adaptive(1, 0, 64u << 20, 4, &sizes, &error) == ADAPT_ERROR_INVALID_ARGUMENT);
+    assert(adapt_sizes_for_input_max_adaptive(1, 0, 1u << 20, 1, &sizes, &error) == ADAPT_ERROR_MEMORY_LIMIT);
+    assert(adapt_sizes_for_input_max_adaptive(1, 0, 128u << 20, 4, &sizes, &error) == ADAPT_ERROR_INVALID_ARGUMENT);
+    assert(adapt_sizes_for_threads_max_adaptive(0, 128u << 20, 1, ADAPT_SEGMENT_BYTES, 4, &sizes, &error) == ADAPT_ERROR_INVALID_ARGUMENT);
     /* Every short block boundary, arbitrary color bytes and row padding. */
     sizes = normal;
     sizes.bmp = 1; sizes.bmp_offset = 54; sizes.bmp_width = 17; sizes.bmp_rows = 13;

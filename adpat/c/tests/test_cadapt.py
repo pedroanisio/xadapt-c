@@ -24,11 +24,11 @@ SOURCE = b"optional verification\n" * 128
 
 def payload_stream(container: bytes) -> bytes:
     """Remove only validated filesystem metadata for legacy stream comparisons."""
-    if container[4] not in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38):
+    if container[4] not in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52):
         return container
-    base = 8 + (2 if container[7] & 0x80 else 0) + (12 if container[4] >= 35 else 0)
+    base = 8 + (2 if container[7] & 0x80 else 0) + (12 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 0)
     assert zlib.crc32(container[:base + 28]) == int.from_bytes(container[base + 28:base + 32], "little")
-    return container[:4] + bytes([container[4] - (4 if container[4] >= 35 else 3)]) + container[5:base] + container[base + 32:]
+    return container[:4] + bytes([container[4] - (4 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 3)]) + container[5:base] + container[base + 32:]
 
 
 class CodecTest(unittest.TestCase):
@@ -98,6 +98,40 @@ class AdaptiveTest(CodecTest):
         self.assert_failure(self.run_codec("encode", self.source, "--transform", "bmp"), b"invalid header")
         self.assert_usage_error(self.run_codec("encode", self.source, "--transform", "png"), b"--transform")
 
+    def test_max_adaptive_and_bmp_search(self):
+        width, height = 17, 13
+        stride = (width * 3 + 3) & ~3
+        pixels = bytes((i // 3 + i // stride) & 255 for i in range(stride * height))
+        data = (b"BM" + struct.pack("<IHHI", 54 + len(pixels), 7, 11, 54) +
+                struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(pixels), 0, 0, 0, 0) + pixels)
+        self.source.write_bytes(data)
+        sizes = []
+        for mode in (None, "rates", "sparse", "retained"):
+            args = () if mode is None else ("--adaptive", mode)
+            for transform in ((), ("--transform", "bmp")):
+                run = self.run_codec("encode", self.source, "-o", "-", "--max", "--verify", *args, *transform)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                sizes.append(len(run.stdout))
+                if transform:
+                    self.assertIn(run.stdout[4], range(49, 53))
+                elif mode:
+                    self.assertIn(run.stdout[4], range(42, 45))
+                decoded = self.run_codec("decode", "-", data=run.stdout)
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                self.assertEqual(decoded.stdout, data)
+                raw = self.run_codec("decode", "-", data=payload_stream(run.stdout))
+                self.assertEqual(raw.returncode, 0, raw.stderr)
+                self.assertEqual(raw.stdout, data)
+        auto = self.run_codec("encode", self.source, "-o", "-", "--max", "--adaptive", "auto", "--verify")
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(len(auto.stdout), min(sizes))
+        self.assertIn(b"max", auto.stderr)
+        segmented = self.run_codec("encode", "-", "--max", "--adaptive", "retained", "--threads", "2", data=SOURCE)
+        self.assertEqual(segmented.returncode, 0, segmented.stderr)
+        decoded = self.run_codec("decode", "-", data=segmented.stdout)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        self.assertEqual(decoded.stdout, SOURCE)
+
     def test_profiles_metadata_and_determinism(self):
         for mode, version in (("rates", 28), ("sparse", 29), ("retained", 30)):
             output = self.root / "coded.adpt"
@@ -133,7 +167,7 @@ class AdaptiveTest(CodecTest):
         self.assertEqual(decoded.stdout, SOURCE)
 
     def test_invalid_profiles_and_memory(self):
-        for extra in (("--adaptive", "bad"), ("--adaptive", "rates", "--fast"), ("--adaptive", "sparse", "--max")):
+        for extra in (("--adaptive", "bad"), ("--adaptive", "rates", "--fast")):
             self.assert_usage_error(self.run_codec("encode", self.source, *extra), b"--adaptive")
         self.assert_failure(self.run_codec("encode", self.source, "--adaptive", "retained", "--max-memory", str(1 << 20)), b"memory")
 
@@ -938,7 +972,7 @@ class CommandTest(CodecTest):
             "text.adpt": (b"format          adapt container version 19", b"declared bytes  49152", b"class history   8 bytes", b"contexts        all but field, record", b"profile         normal"),
             "text-fast.adpt": (b"format          adapt container version 20", b"contexts        o2, o4", b"profile         fast"),
             "text-max.adpt": (b"format          adapt container version 21", b"profile         max"),
-            "records.adpt": (b"record period   192 bytes", b"class history   none", b"contexts        all"),
+            "records.adpt": (b"record period   192 bytes", b"class history   21 bytes", b"contexts        all"),
             "segmented.adpt": (b"segments        2", b"declared bytes  300000"),
             "empty.adpt": (b"declared bytes  0", b"file bytes      21"),
         }

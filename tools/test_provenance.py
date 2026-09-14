@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TOOL = ROOT / "tools" / "provenance.py"
 CODEC = ROOT / "adpat" / "c"
-SOURCES = ["adapt.h", "adapt_model.h", "adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "cadapt.c"]
+SOURCES = ["adapt_adaptive.h", "adapt_bmp.h", "adapt.h", "adapt_model.h", "adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "cadapt.c"]
 
 
 def run(*args, **kwargs):

@@ -31,13 +31,16 @@ int adapt_bmp_probe(const uint8_t *prefix, size_t length, adapt_sizes *sizes) {
     return bmp_probe(prefix, length, sizes);
 }
 static int header_has_bmp(const uint8_t *header) {
-    return header[4] >= ADAPT_BMP_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION;
+    return (header[4] >= ADAPT_BMP_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
+           (header[4] >= ADAPT_MAX_BMP_VERSION && header[4] <= ADAPT_MAX_BMP_METADATA_LAST_VERSION);
 }
 
 int adapt_header_has_metadata(const uint8_t *header) {
     return header != NULL && ((header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION) ||
                               (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
-                              (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION));
+                              (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
+                              (header[4] >= ADAPT_MAX_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION) ||
+                              (header[4] >= ADAPT_MAX_BMP_METADATA_VERSION && header[4] <= ADAPT_MAX_BMP_METADATA_LAST_VERSION));
 }
 
 size_t adapt_header_len(const uint8_t *fixed) {
@@ -111,6 +114,13 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         version = (uint8_t)(version - (header_has_bmp(header) ? 4 : 3));
     }
     s.max = 0;
+    if (version >= ADAPT_MAX_ADAPTIVE_VERSION && version <= ADAPT_MAX_ADAPTIVE_LAST_VERSION) {
+        s.max = 1;
+        version = (uint8_t)(version - ADAPT_MAX_ADAPTIVE_VERSION + ADAPT_ADAPTIVE_VERSION);
+    } else if (version >= ADAPT_MAX_BMP_VERSION && version <= ADAPT_MAX_BMP_LAST_VERSION) {
+        s.max = 1;
+        version = (uint8_t)(version - ADAPT_MAX_BMP_VERSION + ADAPT_BMP_VERSION);
+    }
     s.adaptive = 0;
     if (version == ADAPT_FORMAT_VERSION) {
         s.fast = 0;

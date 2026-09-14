@@ -460,10 +460,10 @@ static void print_usage(FILE *stream) {
             "the normal profile. Normal/fast/max streams use versions %u/%u/%u;\n"
             "named files and folders include metadata in versions %u/%u/%u.\n"
             "--adaptive rates/sparse/retained select experimental causal predictors\n"
-            "(stream formats 19/20/21, metadata formats 22/23/24). auto spools the\n"
+            "over normal or --max. auto spools the\n"
             "source once to temporary disk and selects the smallest complete container\n"
-            "from normal and these three profiles that fit the memory budget. Search\n"
-            "also tries BMP24 color/row residuals on eligible files (formats 25--32).\n"
+            "from the base and these three profiles that fit the memory budget. Search\n"
+            "also tries BMP24 color/row residuals on eligible files. Experiment formats occupy versions 25--52.\n"
             "--transform bmp explicitly selects that reversible transform. Search\n"
             "uses up to eight encodes, temporary disk of input plus two containers, and\n"
             "verifies only with --verify (one model, also for pipes).\n"
@@ -2457,10 +2457,10 @@ static adapt_status encode_search(adapt_read_fn read, void *context, stream *out
         metadata_writer writer;
         if (mode != 0 || transform) {
             status = threads >= 2 && known_length ?
-                adapt_sizes_for_threads_adaptive(length, budget, threads, segment_bytes, mode, &trial, error) :
-                adapt_sizes_for_input_adaptive(known_length, length, budget, mode, &trial, error);
+                (sizes->max ? adapt_sizes_for_threads_max_adaptive : adapt_sizes_for_threads_adaptive)(length, budget, threads, segment_bytes, mode, &trial, error) :
+                (sizes->max ? adapt_sizes_for_input_max_adaptive : adapt_sizes_for_input_adaptive)(known_length, length, budget, mode, &trial, error);
             if (status == ADAPT_ERROR_MEMORY_LIMIT) {
-                fprintf(stderr, "adaptive trial %s%s skipped: memory\n", adaptive_name(mode), transform ? "-bmp" : "");
+                fprintf(stderr, "adaptive trial %s%s%s skipped: memory\n", sizes->max ? "max-" : "", adaptive_name(mode), transform ? "-bmp" : "");
                 status = ADAPT_OK;
                 continue;
             }
@@ -2481,7 +2481,7 @@ static adapt_status encode_search(adapt_read_fn read, void *context, stream *out
         if (status != ADAPT_OK) goto done;
         if (fflush(candidate.file) != 0) goto io_failure;
         if (metadata != NULL) measured.output_bytes += ADAPT_METADATA_HEADER_BYTES;
-        fprintf(stderr, "adaptive trial %s%s: %llu bytes\n", adaptive_name(mode), transform ? "-bmp" : "", (unsigned long long)measured.output_bytes);
+        fprintf(stderr, "adaptive trial %s%s%s: %llu bytes\n", sizes->max ? "max-" : "", adaptive_name(mode), transform ? "-bmp" : "", (unsigned long long)measured.output_bytes);
         if (measured.output_bytes < best_bytes) {
             if (best.file != NULL && fclose(best.file) != 0) { best.file = NULL; goto io_failure; }
             best = candidate;
@@ -2508,7 +2508,7 @@ static adapt_status encode_search(adapt_read_fn read, void *context, stream *out
         if (write_stream(out, buffer, got) != 0) goto io_failure;
     }
     *sizes = chosen;
-    fprintf(stderr, "adaptive selected %s%s: %llu bytes\n", adaptive_name(chosen.adaptive), chosen.bmp ? "-bmp" : "", (unsigned long long)best_bytes);
+    fprintf(stderr, "adaptive selected %s%s%s: %llu bytes\n", chosen.max ? "max-" : "", adaptive_name(chosen.adaptive), chosen.bmp ? "-bmp" : "", (unsigned long long)best_bytes);
     goto done;
 
 io_failure:
@@ -2589,14 +2589,14 @@ static int encode_command(int argc, char **argv) {
         else if (strcmp(text, "retained") == 0) adaptive = 3;
         else if (strcmp(text, "auto") == 0) adaptive = 4;
         else return usage_error("--adaptive: expected rates, sparse, retained or auto: %s", text);
-        if (has_flag(&a, "--fast") || has_flag(&a, "--max"))
-            return usage_error("--adaptive cannot be combined with --fast or --max%s", "");
+        if (has_flag(&a, "--fast"))
+            return usage_error("--adaptive cannot be combined with --fast%s", "");
     }
     text = value_of(&a, "--transform");
     if (text != NULL) {
         if (strcmp(text, "bmp") != 0) return usage_error("--transform: expected bmp: %s", text);
-        if (has_flag(&a, "--fast") || has_flag(&a, "--max") || adaptive == 4 || is_folder)
-            return usage_error("--transform bmp requires a file/pipe and normal or an explicit adaptive profile%s", "");
+        if (has_flag(&a, "--fast") || adaptive == 4 || is_folder)
+            return usage_error("--transform bmp requires a file/pipe and normal, max or an explicit adaptive profile%s", "");
         bmp_transform_requested = 1;
     }
     if (has_flag(&a, "--fast") && has_flag(&a, "--max")) {
@@ -2704,8 +2704,8 @@ static int encode_command(int argc, char **argv) {
     profile_memory = bmp_transform_requested ? (max_memory > ADAPT_BLOCK_BYTES ? max_memory - ADAPT_BLOCK_BYTES : 0) : max_memory;
     if (adaptive > 0 && adaptive < 4) {
         status = threads >= 2 && known_length ?
-            adapt_sizes_for_threads_adaptive(length, profile_memory, threads, segment_bytes, adaptive, &sizes, &error) :
-            adapt_sizes_for_input_adaptive(known_length, length, profile_memory, adaptive, &sizes, &error);
+            (has_flag(&a, "--max") ? adapt_sizes_for_threads_max_adaptive : adapt_sizes_for_threads_adaptive)(length, profile_memory, threads, segment_bytes, adaptive, &sizes, &error) :
+            (has_flag(&a, "--max") ? adapt_sizes_for_input_max_adaptive : adapt_sizes_for_input_adaptive)(known_length, length, profile_memory, adaptive, &sizes, &error);
     } else if (threads >= 2 && known_length) {
         /* A file's sizes are the crate's for its threads: each model fitted
          * to a segment and to one thread's share of the budget. */
@@ -2729,7 +2729,7 @@ static int encode_command(int argc, char **argv) {
     if (has_flag(&a, "--fast")) {
         sizes = adapt_sizes_fast(sizes);
     }
-    if (has_flag(&a, "--max")) {
+    if (has_flag(&a, "--max") && adaptive == 0) {
         sizes = adapt_sizes_max(sizes);
     }
     sizes.archive = (uint8_t)is_folder;
@@ -3069,7 +3069,7 @@ static int info_command(int argc, char **argv) {
             printf("contexts        all but %s\n", dropped);
         }
     }
-    printf("profile         %s\n", sizes.adaptive ? adaptive_name(sizes.adaptive) : (sizes.fast ? "fast" : (sizes.max ? "max" : "normal")));
+    printf("profile         %s%s\n", sizes.max && sizes.adaptive ? "max-" : "", sizes.adaptive ? adaptive_name(sizes.adaptive) : (sizes.fast ? "fast" : (sizes.max ? "max" : "normal")));
     printf("x86 transform   %s\n", sizes.x86 ? "yes" : "no");
     if (sizes.bmp) printf("bmp transform   %lu x %lu, pixel offset %lu\n", (unsigned long)sizes.bmp_width,
                           (unsigned long)sizes.bmp_rows, (unsigned long)sizes.bmp_offset);

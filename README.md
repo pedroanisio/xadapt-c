@@ -8,9 +8,9 @@ frames the input in 256 KiB blocks, each modelled, stored-and-observed, or
 stored-and-skipped, and ends with the original length and its CRC-32. The
 implementation is C99 with nothing beyond the C standard library (POSIX
 threads for the encoder's optional proof). Byte streams use format versions
-13 (normal), 14 (fast) and 15 (max); named files and folders use versions
-16, 17 and 18 respectively to carry filesystem metadata. The decoder reads
-all six versions. This experimental worktree also reads versions 19–32 for
+19 (normal), 20 (fast) and 21 (max); named files and folders use versions
+22, 23 and 24 respectively to carry filesystem metadata. The decoder reads
+all six versions. This experimental worktree also reads versions 25–52 for
 causal adaptive predictors and a reversible BMP24 transform. The CLI uses
 native filesystem APIs to restore metadata.
 
@@ -19,7 +19,7 @@ specifies the new algorithms, format versions, limits and measurement protocol.
 
 The code began as an integer-for-integer port of a Rust crate and keeps that
 crate's layout and names; since format 13 it defines its own format and
-refuses the crate's versions 10–12. The header of
+refuses versions 10–18. The header of
 [adapt.h](adpat/c/adapt.h) records what changed.
 
 ## Layout
@@ -81,7 +81,7 @@ and reserved headroom. `-0` … `-9` set the budget to what xz takes to compress
 at the same preset — 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset
 below the smallest model raised to it — and `-9` (674 MiB) is the default:
 memory buys the context table, the table buys ratio, and neither costs time
-(on 100 MB of enwik8: 64 MiB → 21,221,772 bytes, 674 MiB → 19,943,347).
+(see the [current baseline protocol](research/current-baseline.md)).
 `--max-memory <bytes>` overrides any preset and bounds that allocation, which
 chooses the model. Models shrink only to their supported minimum: **1 MiB is
 insufficient**. `--help` prints the minimum normal single-model budget; an
@@ -107,9 +107,9 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   explicitly.
 - `--adaptive rates|sparse|retained` selects experimental causal predictors:
   fast/slow calibration, then sparse byte contexts, then retained calibration
-  states. Each adds 2,837,272 bytes of model state on the tested platform,
+  states. These compose with `--max`. Each adds 2,837,272 bytes of model state on the tested platform,
   charged to the memory budget. These profiles can increase size or runtime.
-- `--adaptive auto` spools the input once and tries normal plus all three
+- `--adaptive auto` spools the input once and tries the chosen base profile plus all three
   adaptive profiles that fit the budget. For eligible BMP24 files it also
   tries their transformed variants, retaining the smallest complete container
   including metadata. It uses up to eight sequential encodes and temporary
@@ -118,7 +118,7 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   for pipes. This is a finite candidate search, not a global optimality claim.
 - `--transform bmp` explicitly selects reversible color differences and
   horizontal residuals for uncompressed 24-bit BMP files. It combines with
-  normal or an explicit adaptive profile and preserves headers, row padding,
+  normal, max or an explicit adaptive profile and preserves headers, row padding,
   tails and boundary pixels. It adds a 12-byte descriptor and a 256 KiB encoder
   workspace reservation. Automatic selection tries this transform on whole
   BMP inputs; embedded images inside folders/PDF/EPUB are not transformed.
@@ -268,8 +268,8 @@ class code, recall size and context-set code, window size and flags), an
 optional 2-byte record period, an optional metadata extension, blocks, an
 optional segment table, and a 13-byte trailer. The constants that pin it are the `ADAPT_*` macros at the
 top of [adapt.h](adpat/c/adapt.h); a change to any of them is a new version.
-Versions 13, 14 and 15 are the normal, fast and max byte-stream profiles.
-Versions 16, 17 and 18 use the same predictors and append a 32-byte extension
+Versions 19, 20 and 21 are the normal, fast and max byte-stream profiles.
+Versions 22, 23 and 24 use the same predictors and append a 32-byte extension
 after the record period (or fixed header when absent):
 
 | Bytes | Field (little-endian) |
@@ -280,12 +280,11 @@ after the record period (or fixed header when absent):
 | 4 | CRC-32 of the entire header through the preceding metadata fields |
 
 For folders, the extension holds the root metadata. The decoded archive
-stream starts with `ADPTARC2`, and each entry's existing kind/path/length or
-link-target header is followed by the same 28-byte metadata record, before
-file content. Entry metadata is covered by the outer payload CRC-32.
-`ADPTARC1` archives remain readable. Older codec releases do not read
-versions 16–18. The byte-oriented library encoders still emit versions
-13–15; `adapt_header_add_metadata()` adds the extension and
+stream starts with `ADPTARC3`, carrying metadata and extended attributes,
+hard links and sparse extents. Earlier `ADPTARC1` and `ADPTARC2` archive streams
+remain readable. Entry metadata is covered by the outer payload CRC-32. Older codec releases do not read
+versions 22–24. The byte-oriented library encoders still emit versions
+19–21; `adapt_header_add_metadata()` adds the extension and
 `adapt_read_metadata()` reads it. Use `adapt_header_len()` for the actual
 container header size; `adapt_sizes_header_bytes()` gives the base encoder
 header size without metadata.

@@ -117,6 +117,15 @@ extern "C" {
 #define ADAPT_BMP_LAST_VERSION 34u
 #define ADAPT_BMP_METADATA_VERSION 35u
 #define ADAPT_BMP_METADATA_LAST_VERSION 38u
+/* The same experiments over the max predictor, with distinct wire IDs. */
+#define ADAPT_MAX_ADAPTIVE_VERSION 39u
+#define ADAPT_MAX_ADAPTIVE_LAST_VERSION 41u
+#define ADAPT_MAX_ADAPTIVE_METADATA_VERSION 42u
+#define ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION 44u
+#define ADAPT_MAX_BMP_VERSION 45u
+#define ADAPT_MAX_BMP_LAST_VERSION 48u
+#define ADAPT_MAX_BMP_METADATA_VERSION 49u
+#define ADAPT_MAX_BMP_METADATA_LAST_VERSION 52u
 #define ADAPT_BMP_BYTES 12u
 #define ADAPT_METADATA_BYTES 28u
 #define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)
@@ -283,10 +292,10 @@ typedef struct adapt_sizes {
      * adapt_sizes_for_input leaves it 0. Any profile may carry it. */
     uint8_t archive;
     /* 0 legacy; 1 fast/slow calibration; 2 adds sparse contexts; 3 adds
-     * retained calibration. Mutually exclusive with fast and max. */
+     * retained calibration. Composes with max; mutually exclusive with fast. */
     uint8_t adaptive;
     /* Request BMP24 transform on encode (parameters are detected); parsed
-     * descriptor on decode. Exclusive with fast, max, archive and x86. */
+     * descriptor on decode. Exclusive with fast, archive and x86. */
     uint8_t bmp;
     uint32_t bmp_offset, bmp_width, bmp_rows;
 } adapt_sizes;
@@ -301,6 +310,13 @@ adapt_status adapt_sizes_for_input_adaptive(int length_known, uint64_t length, u
 adapt_status adapt_sizes_for_threads_adaptive(uint64_t length, uint64_t max_memory, uint64_t threads,
                                              uint64_t segment_bytes, unsigned mode,
                                              adapt_sizes *sizes, adapt_error *error);
+
+/* Adaptive sizing over the max predictor; mode 0 preserves plain max. */
+adapt_status adapt_sizes_for_input_max_adaptive(int length_known, uint64_t length, uint64_t max_memory,
+                                               unsigned mode, adapt_sizes *sizes, adapt_error *error);
+adapt_status adapt_sizes_for_threads_max_adaptive(uint64_t length, uint64_t max_memory, uint64_t threads,
+                                                 uint64_t segment_bytes, unsigned mode,
+                                                 adapt_sizes *sizes, adapt_error *error);
 
 /* Context sets a file may choose, by header code. */
 #define ADAPT_CONTEXT_SETS 8u

@@ -44,6 +44,25 @@ class TelemetryTest(unittest.TestCase):
         self.assertEqual([r["codec"]["adaptive_profile"] for r in records[:3]], ["rates", "sparse", "retained"])
         self.assertTrue(all(r["status"] == "ok" for r in records))
 
+    def test_max_search_experiment_accounts_for_all_trials(self) -> None:
+        import adaptive_experiment
+
+        output = self.root / "max-search"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = adaptive_experiment.main([
+                "--baseline", str(CADAPT), "--binary", str(CADAPT),
+                "--output", str(output), "--corpora", str(self.source),
+                "--base-profile", "max", "--search-only", "--memory", str(128 << 20),
+            ])
+        result = json.loads((output / "results.json").read_text())
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["expected_runs"], 2)
+        self.assertEqual(result["base_profile"], "max")
+        self.assertTrue(result["complete"])
+        self.assertEqual(len(result["runs"][1]["candidate_trials"]), 4)
+        self.assertTrue(result["comparisons"][0]["auto_equals_smallest"])
+        self.assertTrue(all(r["codec"]["base_profile"] == "max" for r in result["runs"]))
+
     def test_external_corpus_experiment_preserves_complete_accounting(self) -> None:
         import adaptive_experiment
 
@@ -71,6 +90,18 @@ class TelemetryTest(unittest.TestCase):
                 "--corpora", str(self.source), str(duplicate),
             ])
         self.assertEqual(failed.exception.code, 2)
+
+    def test_experiment_rejects_a_file_restored_in_place_of_an_empty_directory(self) -> None:
+        import adaptive_experiment
+
+        source, restored = self.root / "folder", self.root / "restored"
+        (source / "empty").mkdir(parents=True)
+        restored.mkdir()
+        (restored / "empty").write_bytes(b"")
+        expected = adaptive_experiment.manifest(source)
+        adaptive_experiment.reset_metadata(restored, expected)
+        result = adaptive_experiment.compare_restoration(source, restored, expected)
+        self.assertFalse(all(result.values()))
 
     def test_byte_units_and_nonfinite_arguments(self) -> None:
         self.assertEqual(telemetry.byte_count("64MiB"), 64 << 20)
