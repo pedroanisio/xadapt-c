@@ -1,15 +1,15 @@
 {
   "schema": "cadapt.build-manifest.v1",
   "version": "0.12.0",
-  "commit": "e2ce8ec788e4a52c1d178a618a95c4ea2de53d62",
-  "generated_at": "2026-09-14T18:01:08+00:00",
+  "commit": "2c6549d1a6ef8fd3f5536bd5daac80b16d457d1e",
+  "generated_at": "2026-09-14T19:16:27+00:00",
   "sources": {
-    "adpat/c/adapt.h": "3dd270fff3ed877224135013f1541a64f59babb7062c77468f57f65494bebab2",
-    "adpat/c/adapt_model.h": "37c762c383dac146cf3cb3a358d99a820d46a8ebf1e1f25bcb3406b2c22adab8",
-    "adpat/c/adapt_decode.c": "2ab95e3e61c2c340bc483057e34082b84936c58e3d455afe2ec3183bb19e653f",
-    "adpat/c/adapt_encode.c": "efcd311a5df552d5b81500f2ec9ec4d901892d67e7b2ca798de3d90cf15a4259",
+    "adpat/c/adapt.h": "09f37a95de41ab507adc89e0a6d1477a82551c3cd4993d2d5557f1710182cd01",
+    "adpat/c/adapt_model.h": "20a325ceea6f2b6f33e854488d87002fd5bb5dc40c23a2fd60c0fc7b3b4731aa",
+    "adpat/c/adapt_decode.c": "7f7c26572d6607cb836222e1bb294ab1ba873d7c36417eb41a5771def590a375",
+    "adpat/c/adapt_encode.c": "62f0d07f2047452045ca6b0e49ec9749f05ae5c040f93b7dc9759e0a9b6d6322",
     "adpat/c/adapt_archive.c": "089f77084f6fde6d824e2946cb494912daf52909ea3fe8ef389061778d04339f",
-    "adpat/c/cadapt.c": "9d879424f5cfd8e3cdd466dbdec3fcc3d43d775e993a0a908a16690849882ba6"
+    "adpat/c/cadapt.c": "8253b601a263d544dab31448673db601dfb57a93f1250e86ed329dd4efcce68f"
   },
   "makefile_sha256": "fb495c9c8691a2d4c1d2f66695087493f9eadd6dd1c68d686a9699697dbf5956",
   "toolchain": {
@@ -25,12 +25,12 @@
   },
   "outputs": {
     "adpat/c/build/cadapt": {
-      "sha256": "2e0236a7344ba1966e08aa37ebdd0a913d95b1d0b1d9bcd3e7e137898acfbaf4",
-      "bytes": 231664
+      "sha256": "bc77916e6fb66535e385d312b1a85cf908fef8fc536ab4dc087d133930ca51b1",
+      "bytes": 227568
     },
     "adpat/c/build/libadapt.a": {
-      "sha256": "8db7b18159c98bcd5756bce223672cd2aa8d7fb5065794a37b4013c82e505fde",
-      "bytes": 191956
+      "sha256": "e0b9b8d0228e8402f7bdfeca20a3171685d65fa20fbe0139845e7be8f98fb1a9",
+      "bytes": 188628
     }
   }
 }
