@@ -6,3 +6,7 @@ __pycache__/
 .repo/
 adpat/c/build-cov/
 static/corpus/text8
+research/self-contained-experiment-spec.md
+research/self-contained-source-audit.json
+adpat/cadatp-hash
+adpat/cadatp-fc8d2
