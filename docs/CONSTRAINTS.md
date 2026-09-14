@@ -25,3 +25,5 @@ whatever it measures. The rest are required capabilities.
 | `FMT-7` | Format   | **Filesystem fidelity**             | Preserve timestamps, permissions, ACLs, extended attributes, symbolic/hard links, and sparse files with documented portability rules. |
 | `FMT-8` | Format   | **Script and encoding agnostic**    | The model sees bytes, never characters: no text encoding is decoded, no tokenizer, no dictionary, no language model. Every script and encoding is accepted and measured — the corpus holds Cyrillic, CJK and diacritic-heavy rows beside Latin. |
 | `DLV-2` | Delivery | **Operational readiness**           | Expose metrics and diagnostic errors; provide reproducible builds, SBOMs, predictable licensing, security updates, and enterprise support. |
+| `SAF-1` | Safety   | **Fault containment**               | Detect corruption and truncation; use independently verifiable chunks, restart points, and explicit partial-recovery behavior. |
+| `SAF-2` | Safety   | **Security**                        | Harden against malicious containers, decompression bombs, path traversal, and compression side channels; provide fuzzing evidence and independent audits. |
