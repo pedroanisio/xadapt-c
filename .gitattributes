@@ -1,0 +1,3 @@
+# The committed vectors are byte-exact fixtures: no end-of-line conversion
+# on any checkout, and no whitespace warnings on their text-like sources.
+adpat/c/tests/vectors/* binary

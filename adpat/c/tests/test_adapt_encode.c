@@ -2,8 +2,10 @@
  * test_adapt_encode.c — the C encoder's own tests, needing no Rust
  * toolchain: the committed vectors written byte for byte, the sizes a
  * length and a budget choose, round trips through the C decoder over every
- * block kind, and the proof's every failure. The battery that proves it
- * against the Rust encoder is `../../tests/c_codec.rs`.
+ * block kind, and the proof's every failure. The larger vectors pin the
+ * encoder's class, context-set, period and segment choices to files it
+ * wrote; the battery against the Rust encoder belonged to the crate, and
+ * no longer applies since format 13.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
@@ -433,6 +435,80 @@ static void reset(reader *r, const uint8_t *src, size_t len, size_t chunk, write
     w->len = 0;
     w->fail_after = -1;
     w->writes = 0;
+}
+
+/* ---- the larger vectors --------------------------------------------- */
+
+/* A committed file the stream encoder must write again byte for byte
+ * under the sizes `cadapt encode` chooses for its source at the default
+ * budget: the normal profile, `--fast` (1) or `--max` (2); with and
+ * without the proof alongside. These sources are long enough for the
+ * class width, the context set, the record period and the fast set to be
+ * chosen rather than defaulted, which no short vector reaches. */
+static void test_vector_profile(const char *name, const char *source, int profile) {
+    size_t want_len, src_len;
+    uint8_t *want = read_file(name, &want_len);
+    uint8_t *src = read_file(source, &src_len);
+    uint8_t *coded = malloc(src_len + 4096);
+    reader r;
+    writer w;
+    adapt_sizes sizes;
+    adapt_error error;
+    adapt_stats stats;
+    CHECK_STATUS(profile == 2 ? adapt_sizes_for_input_max(1, src_len, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error)
+                              : adapt_sizes_for_input(1, src_len, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error),
+                 ADAPT_OK);
+    if (profile == 1) {
+        sizes = adapt_sizes_fast(sizes);
+    } else if (profile == 2) {
+        sizes = adapt_sizes_max(sizes);
+    }
+    reset(&r, src, src_len, 4096, &w, coded, src_len + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error),
+                 ADAPT_OK);
+    CHECK(w.len == want_len);
+    CHECK(w.len == want_len && memcmp(coded, want, want_len) == 0);
+    CHECK(stats.input_bytes == src_len && stats.output_bytes == want_len && stats.crc32 == adapt_crc32(src, src_len));
+    reset(&r, src, src_len, 4096, &w, coded, src_len + 4096);
+    CHECK_STATUS(adapt_encode_stream_verified(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL,
+                                              &error),
+                 ADAPT_OK);
+    CHECK(w.len == want_len && memcmp(coded, want, want_len) == 0);
+    free(coded);
+    free(want);
+    free(src);
+}
+
+/* A committed segmented file, as `cadapt encode --threads <threads>
+ * --segment-bytes <segment_bytes>` writes it: the sizes for those threads
+ * and that segment length, the segments cut in order. */
+static void test_vector_segments(const char *name, const char *source, uint64_t threads, uint64_t segment_bytes) {
+    size_t want_len, src_len;
+    uint8_t *want = read_file(name, &want_len);
+    uint8_t *src = read_file(source, &src_len);
+    uint8_t *coded = malloc(src_len + 4096);
+    reader r;
+    writer w;
+    adapt_sizes sizes;
+    adapt_error error;
+    adapt_stats stats;
+    CHECK_STATUS(adapt_sizes_for_threads(src_len, ADAPT_DEFAULT_MAX_MEMORY, threads, segment_bytes, &sizes, &error), ADAPT_OK);
+    CHECK(sizes.segmented == 1);
+    reset(&r, src, src_len, 4096, &w, coded, src_len + 4096);
+    CHECK_STATUS(adapt_encode_stream_segments(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY,
+                                              segment_bytes, &stats, &error),
+                 ADAPT_OK);
+    CHECK(w.len == want_len);
+    CHECK(w.len == want_len && memcmp(coded, want, want_len) == 0);
+    CHECK(stats.segments == (src_len + segment_bytes - 1) / segment_bytes);
+    reset(&r, src, src_len, 4096, &w, coded, src_len + 4096);
+    CHECK_STATUS(adapt_encode_stream_verified_segments(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY,
+                                                       segment_bytes, NULL, &error),
+                 ADAPT_OK);
+    CHECK(w.len == want_len && memcmp(coded, want, want_len) == 0);
+    free(coded);
+    free(want);
+    free(src);
 }
 
 static void test_streams(void) {
@@ -1259,6 +1335,13 @@ int main(int argc, char **argv) {
     test_vector("empty.adpt", "empty.bin");
     test_vector("hello.adpt", "hello.bin");
     test_vector("abc.adpt", "abc.bin");
+    test_vector("text.adpt", "text.bin");
+    test_vector("records.adpt", "records.bin");
+    test_vector_profile("text.adpt", "text.bin", 0);
+    test_vector_profile("text-fast.adpt", "text.bin", 1);
+    test_vector_profile("text-max.adpt", "text.bin", 2);
+    test_vector_profile("records.adpt", "records.bin", 0);
+    test_vector_segments("segmented.adpt", "segmented.bin", 2, ADAPT_BLOCK_BYTES);
     test_sizes();
     test_fast_fits_where_normal_fits();
     test_roundtrips();

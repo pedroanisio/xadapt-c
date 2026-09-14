@@ -2,8 +2,10 @@
  * test_adapt_decode.c — the C decoder's own tests, needing no Rust
  * toolchain: the library's contract on the committed vectors, every
  * framing error on hand-built bytes, the limits, the stream callbacks, and
- * the messages. The battery that proves it against the Rust encoder is
- * `../../tests/c_codec.rs`.
+ * the messages. The larger vectors pin the decoder to files this
+ * implementation wrote across the paths a short input never takes; the
+ * battery against the Rust encoder belonged to the crate, and no longer
+ * applies since format 13.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
@@ -936,6 +938,11 @@ int main(int argc, char **argv) {
     test_vector("abc.adpt", "abc.bin");
     test_vector("abc-fast.adpt", "abc.bin");
     test_vector("abc-max.adpt", "abc.bin");
+    test_vector("text.adpt", "text.bin");
+    test_vector("text-fast.adpt", "text.bin");
+    test_vector("text-max.adpt", "text.bin");
+    test_vector("records.adpt", "records.bin");
+    test_vector("segmented.adpt", "segmented.bin");
     test_stream_failures();
     test_framing();
     test_segmented_framing();
