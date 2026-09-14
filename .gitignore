@@ -1,2 +1,6 @@
 .agent-tasks/
 static/corpus/enwik8
+/bench/results/
+/bench/plots/
+__pycache__/
+.repo/
