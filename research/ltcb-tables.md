@@ -99,8 +99,8 @@ options were tuned for enwik9.
 
 ## Dashboard
 
-[ltcb-dashboard.svg](ltcb-dashboard.svg) (and the same figure as
-[ltcb-dashboard.png](ltcb-dashboard.png)) is rendered from the main-table CSV
+`ltcb-dashboard.svg` (`make ltcb` writes it; git ignores it) (and the same figure as
+`ltcb-dashboard.png`) is rendered from the main-table CSV
 by [plot_ltcb_tables.py](../tools/ltcb/plot_ltcb_tables.py); its tests are in
 [test_plot_ltcb_tables.py](../tools/ltcb/test_plot_ltcb_tables.py). Matplotlib is the only
 dependency beyond the standard library (`bench/requirements.txt`). To
@@ -124,10 +124,10 @@ publish one and say how many that is.
 
 ## Phase map of the speed/ratio frontier
 
-[ltcb-phases.svg](ltcb-phases.svg) (PNG twin [ltcb-phases.png](ltcb-phases.png))
+`ltcb-phases.svg` (PNG twin `ltcb-phases.png`)
 is rendered by [plot_ltcb_phases.py](../tools/ltcb/plot_ltcb_phases.py), tested in
 [test_plot_ltcb_phases.py](../tools/ltcb/test_plot_ltcb_phases.py), and the numbers behind
-it are written to [ltcb-phases.csv](ltcb-phases.csv). The frontier is the set
+it are written to `ltcb-phases.csv`. The frontier is the set
 of timed entries no other entry beats on both speed and enwik9 ratio. A phase
 is a maximal run of frontier points held by one algorithm family; it holds
 from its first point until the next family's first point. A transition is that
@@ -168,9 +168,9 @@ python3 -B tools/ltcb/plot_ltcb_phases.py --local research/ltcb-local-entries.cs
 
 ## Statistical analysis
 
-[ltcb-analysis.md](ltcb-analysis.md) is the report written by
+`ltcb-analysis.md` is the report written by
 [analyze_ltcb.py](../tools/ltcb/analyze_ltcb.py) (tests in
-[test_analyze_ltcb.py](../tools/ltcb/test_analyze_ltcb.py)); [ltcb-analysis.json](ltcb-analysis.json)
+[test_analyze_ltcb.py](../tools/ltcb/test_analyze_ltcb.py)); `ltcb-analysis.json`
 holds the same numbers for programs. Standard library only: average-rank
 Spearman and Pearson correlations, ordinary least squares by normal equations,
 inclusive-method quartiles, and the frontier from `plot_ltcb_phases.py`. It
@@ -194,7 +194,7 @@ python3 -B tools/ltcb/analyze_ltcb.py --local research/ltcb-local-entries.csv \
 
 ## Interactive explorer
 
-[ltcb-interactive.html](ltcb-interactive.html) is a single-page explorer
+`ltcb-interactive.html` is a single-page explorer
 assembled by [build_ltcb_interactive.py](../tools/ltcb/build_ltcb_interactive.py) from
 [ltcb-interactive.template.html](../tools/ltcb/ltcb-interactive.template.html) with the
 main table, the local entries, the phase table and the analysis JSON embedded
