@@ -276,6 +276,25 @@ class AdaptiveTest(CodecTest):
         self.assertEqual(info.returncode, 0, info.stderr)
         self.assertIn(b"format          adapt container version 67", info.stdout)
         self.assertIn(b"text transform  yes", info.stdout)
+        self.assertIn(b"arbiter start   1/4", info.stdout)
+        # under --max the transform is the sized version 58 (61 with
+        # metadata), its sizing byte naming the transform and the arbiters'
+        # 1/32 starting weight; the transform's own max versions 64 to 66
+        # are no longer written
+        asked = self.run_codec("encode", self.source, "-o", "-", "--max", "--transform", "text", "--verify")
+        self.assertEqual(asked.returncode, 0, asked.stderr)
+        self.assertEqual(asked.stdout[4], 61)
+        self.assertEqual(asked.stdout[8], 0x60)
+        back = self.run_codec("decode", "-", data=asked.stdout)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertEqual(back.stdout, SOURCE)
+        named.write_bytes(asked.stdout)
+        info = self.run_codec("info", named)
+        self.assertEqual(info.returncode, 0, info.stderr)
+        self.assertIn(b"format          adapt container version 61", info.stdout)
+        self.assertIn(b"profile         max\n", info.stdout)
+        self.assertIn(b"text transform  yes", info.stdout)
+        self.assertIn(b"arbiter start   1/32", info.stdout)
         self.assert_usage_error(self.run_codec("encode", self.source, "--transform", "text", "--adaptive", "rates"),
                                 b"--transform text")
         self.assert_usage_error(self.run_codec("encode", self.source, "--transform", "words"), b"--transform")
@@ -1320,7 +1339,7 @@ class CommandTest(CodecTest):
         expectations = {
             "text.adpt": (b"format          adapt container version 19", b"declared bytes  49152", b"class history   8 bytes", b"contexts        all but field, record", b"profile         normal"),
             "text-fast.adpt": (b"format          adapt container version 20", b"contexts        o2, o4", b"profile         fast"),
-            "text-max.adpt": (b"format          adapt container version 21", b"contexts        all but word, field\n", b"profile         max\n"),
+            "text-max.adpt": (b"format          adapt container version 21", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter start   1/4\n"),
             "text-compact.adpt": (b"format          adapt container version 53", b"contexts        all but word, field\n", b"profile         max (compact side tables)\n"),
             "text-lean.adpt": (b"format          adapt container version 54", b"contexts        all but word, field, o8, word3, wordc\n", b"profile         max (compact side tables, lean contexts)\n"),
             "text-words.adpt": (b"format          adapt container version 62", b"profile         normal\n", b"text transform  yes\n"),

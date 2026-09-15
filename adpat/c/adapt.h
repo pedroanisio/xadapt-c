@@ -168,7 +168,13 @@ extern "C" {
  * keeps versions 21, 53 and 54, so every file they wrote decodes as
  * written. Bit 5 is the text transform (adapt_text.h, the transform of
  * versions 64 to 66) ahead of the sized model, so a fraction and the
- * transform are taken together; bits 6 and 7 are reserved and zero. */
+ * transform are taken together. Bit 6 starts every arbiter's trust in a
+ * context's stretched probability at 1/32 instead of 1/4
+ * (adapt_sizes.low_start), which the encoder sets under the text
+ * transform, so the max profile under the transform is always this
+ * version; measured on the first 16 MiB of enwik8 under it, 3,336,047 ->
+ * 3,330,628 bytes at 128 MiB and 3,320,062 -> 3,296,290 at the default
+ * tier. Bit 7 is reserved and zero. */
 #define ADAPT_MAX_SIZED_VERSION 58u
 #define ADAPT_MAX_SIZED_METADATA_VERSION 61u
 #define ADAPT_SIZING_BYTES 1u
@@ -177,6 +183,7 @@ extern "C" {
 #define ADAPT_SIZING_FRAC_SHIFT 2u
 #define ADAPT_SIZING_FRAC_MAX 7u
 #define ADAPT_SIZING_TEXT 32u
+#define ADAPT_SIZING_LOW_START 64u
 /* The text transform (adapt_text.h) ahead of the normal, fast, max,
  * compact and lean models: versions 62 to 66 in that order, 67 to 71 with
  * metadata (ADAPT_TEXT_METADATA_OFFSET more; 58 to 61 are left to the
@@ -420,6 +427,12 @@ typedef struct adapt_sizes {
      * the version and 0 from any other. Never with `adaptive`, `bmp` or
      * `x86`. */
     uint8_t text;
+    /* 1 when every arbiter starts a context's stretched probability at
+     * the weight 1/32 rather than 1/4, so the weights are learned from
+     * the input sooner than trusted (ADAPT_SIZING_LOW_START, the sized
+     * max profile only); the encoder sets it under the text transform,
+     * and a decoder sets it from the sizing byte. */
+    uint8_t low_start;
 } adapt_sizes;
 
 /* Blocks of the context table `sizes` describes: 2^table_log, or with a
