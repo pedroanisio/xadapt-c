@@ -54,6 +54,9 @@
 #define VERIFY_QUEUE 2
 /* Bytes of the repeat scans' window. */
 #define SCAN 8
+/* The recall index's cap when the budget has room left after the table
+ * and the window: 2^22 entries, 16 MiB; its usual cap is 2^20. */
+#define RECALL_LOG_SPARE 22
 /* The most bytes a block's coded form can take: at most four settled bytes
  * per bit, eight bits for the byte that crosses the line, four final. */
 #define CODED_SLACK 36
@@ -260,9 +263,15 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
         }
         s.window_log = wider.window_log;
     }
-    /* The table past its sweet spot, once the window has all it can use. */
+    /* The table past its sweet spot, once the window has all it can use;
+     * then the recall index past its usual cap, to RECALL_LOG_SPARE, from
+     * what is left: a budget with room to spare keeps more of a long
+     * input's positions (enwik8 at the default budget: 2^22 entries,
+     * 18,544,485 -> 18,509,977 bytes with --allocation context), and one
+     * without gives the index nothing the table or the window wanted. */
     if (length_known) {
         uint8_t target = adapt_table_log_for(length);
+        uint8_t recall = clamp_u8(bits(length > 0 ? length - 1 : 0), MATCH_LOG_MIN, RECALL_LOG_SPARE);
         while (s.window_log == cap && s.table_log < target) {
             adapt_sizes larger = s;
             larger.table_log = s.table_log + 1;
@@ -270,6 +279,14 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
                 break;
             }
             s.table_log = larger.table_log;
+        }
+        while (s.window_log == cap && s.match_log < recall) {
+            adapt_sizes larger = s;
+            larger.match_log = s.match_log + 1;
+            if (bound(larger) > max_memory) {
+                break;
+            }
+            s.match_log = larger.match_log;
         }
     }
     if (check_memory(adapt_encode_memory_bound(s), max_memory, error) != ADAPT_OK) {
@@ -350,6 +367,13 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
     if (s.fast && target > ADAPT_FAST_TABLE_LOG_MAX) target = ADAPT_FAST_TABLE_LOG_MAX;
     cap = length_known ? clamp_u8(bits(length > 0 ? length - 1 : 0), WINDOW_LOG_MIN, WINDOW_LOG_MAX) : WINDOW_LOG_MAX;
     s.window_log = WINDOW_LOG_MIN;
+    /* the recall index back at its usual cap, as the window is at its
+     * floor: what the plain sizing grew from spare budget is re-spent
+     * here, on the table and the window first */
+    if (length_known) {
+        uint8_t usual = clamp_u8(bits(length), MATCH_LOG_MIN, 20);
+        if (s.match_log > usual) s.match_log = usual;
+    }
     while (s.table_log < target) {
         next = s;
         next.table_log++;
@@ -396,6 +420,16 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
         while (s.table_frac < ADAPT_SIZING_FRAC_MAX) {
             next = s;
             next.table_frac++;
+            if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
+            s = next;
+        }
+    }
+    /* the recall index last, from what the table and the window left */
+    if (length_known) {
+        uint8_t recall = clamp_u8(bits(length > 0 ? length - 1 : 0), MATCH_LOG_MIN, RECALL_LOG_SPARE);
+        while (s.match_log < recall) {
+            next = s;
+            next.match_log++;
             if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
             s = next;
         }

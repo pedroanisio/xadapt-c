@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "adapt-0.12.0",
-  "documentNamespace": "urn:uuid:e201e88e-8e55-56a1-b284-664c65c318dd",
+  "documentNamespace": "urn:uuid:b9d2baf6-3078-53ef-a1d6-c80cf9fd914f",
   "creationInfo": {
-    "created": "2026-09-15T06:34:41Z",
+    "created": "2026-09-15T07:27:55Z",
     "creators": [
       "Tool: tools/provenance.py",
       "Person: Pedro Anisio de Luna e Silva (pedroanisio@faz.ai)"
@@ -22,7 +22,7 @@
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": true,
       "packageVerificationCode": {
-        "packageVerificationCodeValue": "299c1a14cf530b35fdaa06a31e22b91ae13f73e2"
+        "packageVerificationCodeValue": "639252f3b5f2c9c059cb485e40ddba6884165843"
       },
       "hasFiles": [
         "SPDXRef-File-adapt-h",
@@ -221,11 +221,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "0f96850484ba95dfe73be21e8d37b989ff15f2df"
+          "checksumValue": "6ed14c95cf2d5b563a28f630c4d4bbe697289110"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "f92f35c81f50f4fd98efc92574e44c9a7cd7dd08a4e31ac745da66e341be56fa"
+          "checksumValue": "c3a99b173fd1002a30cac8a23b39dae4fa30618f16e7c3a236d6eb681aac2636"
         }
       ],
       "licenseConcluded": "MIT",
