@@ -158,6 +158,37 @@ class FloorCheckTest(unittest.TestCase):
                         "--fixture", f"other={self.fixture}"])
         self.assertIn("other", out.getvalue())
 
+    def test_corpus_dir_resolves_every_floor_by_name(self):
+        import contextlib
+        import io
+
+        corpus = self.root / "mixed"
+        (corpus / "silesia").mkdir(parents=True)
+        for name in ("a", "b"):
+            (corpus / "silesia" / name).write_bytes(self.fixture.read_bytes())
+        entry = {"input_bytes": self.fixture.stat().st_size, "input_md5": self.md5, "max_container_bytes": 1000,
+                 "wall_seconds": 100.0, "min_bytes_per_second": self.fixture.stat().st_size / 100.0,
+                 "measured_with": "fake"}
+        data = {"schema": floor.SCHEMA, "locked_on": "2026-09-14", "host": "test host", "throughput_tolerance": 0.10,
+                "arguments": ["encode"], "floors": [dict(entry, fixture="silesia/a"), dict(entry, fixture="silesia/b")]}
+        self.floor.write_text(json.dumps(data))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = floor.main(["--binary", str(self.binary), "--floor", str(self.floor), "--corpus", str(corpus),
+                               "--timeout", "5", "--output-dir", str(self.root / "out")])
+        text = out.getvalue()
+        self.assertEqual(code, 0, text)
+        self.assertIn("PASS silesia/a size", text)
+        self.assertIn("PASS silesia/b size", text)
+        # a missing file is a setup error, not a pass
+        (corpus / "silesia" / "b").unlink()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = floor.main(["--binary", str(self.binary), "--floor", str(self.floor), "--corpus", str(corpus),
+                               "--timeout", "5", "--output-dir", str(self.root / "out")])
+        self.assertEqual(code, 2, out.getvalue())
+        self.assertIn("silesia/b", out.getvalue())
+
     def test_malformed_floor_files_are_typed_errors(self):
         cases = [
             dict(schema="cadapt.ratio-floor.v0"),

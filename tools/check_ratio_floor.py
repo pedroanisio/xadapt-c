@@ -171,8 +171,8 @@ def check(locked: Locked, floor: Floor, binary: Path, fixture: Path, out_dir: Pa
     if size != floor.input_bytes or digest != floor.input_md5:
         raise SetupError(f"{floor.fixture}: {fixture} ({size:,} B, md5 {digest}) does not match the "
                          f"locked input ({floor.input_bytes:,} B, md5 {floor.input_md5})")
-    out_dir.mkdir(parents=True, exist_ok=True)
     container = out_dir / f"{floor.fixture}.adpt"
+    container.parent.mkdir(parents=True, exist_ok=True)  # a corpus fixture is named corpus/file
     seconds = _run([str(binary), *locked.arguments, str(fixture), "-o", str(container)], timeout)
     produced = container.stat().st_size
     rate = floor.input_bytes / seconds if seconds > 0 else float("inf")
@@ -221,6 +221,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--floor", type=Path, default=ROOT / "tools/ratio_floor.json")
     parser.add_argument("--fixture", action="append", default=[], metavar="NAME=PATH",
                         help="fixture to check; default enwik8=static/corpus/enwik8 when present")
+    parser.add_argument("--corpus", type=Path, metavar="DIR",
+                        help="check every floor in the file, each fixture at DIR/<fixture name> "
+                             "(the mixed corpus of tools/fetch_corpus.py)")
     parser.add_argument("--verify", action="store_true", help="also decode and compare byte for byte")
     parser.add_argument("--baseline-binary", type=Path,
                         help="a build of the locked commit; gates throughput relative to it on any host")
@@ -233,14 +236,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(error))
     by_name = {f.fixture: f for f in locked.floors}
     requested = []
+    if args.corpus is not None:
+        requested.extend((f, args.corpus / f.fixture) for f in locked.floors)
     for spec in args.fixture or ([f"enwik8={ROOT / 'static/corpus/enwik8'}"]
-                                 if (ROOT / "static/corpus/enwik8").exists() else []):
+                                 if not requested and (ROOT / "static/corpus/enwik8").exists() else []):
         name, _, path = spec.partition("=")
         if name not in by_name or not path:
             parser.error(f"unknown fixture {name!r}; the floor file locks {sorted(by_name)}")
         requested.append((by_name[name], Path(path)))
     if not requested:
-        parser.error("no fixture to check: pass --fixture NAME=PATH")
+        parser.error("no fixture to check: pass --fixture NAME=PATH or --corpus DIR")
     print(f"locked {locked.locked_on}: {' '.join(locked.arguments)} with {args.binary}")
     all_hold = True
     with tempfile.TemporaryDirectory() as temporary:

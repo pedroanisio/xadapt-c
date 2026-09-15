@@ -5,7 +5,7 @@
   "name": "adapt-0.12.0",
   "documentNamespace": "urn:uuid:a7242cf9-4c5e-55d4-98d0-3ad31c465e7b",
   "creationInfo": {
-    "created": "2026-09-15T09:30:32Z",
+    "created": "2026-09-15T11:26:17Z",
     "creators": [
       "Tool: tools/provenance.py",
       "Person: Pedro Anisio de Luna e Silva (pedroanisio@faz.ai)"

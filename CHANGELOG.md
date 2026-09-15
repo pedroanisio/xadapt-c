@@ -97,6 +97,16 @@ The binary reports `0.12.0`; the tag is pending.
   `adapt_table_blocks()` gives the block count; `cadapt info` prints it
   for a sized table.
 
+### Added
+- The mixed acceptance corpus of `DLV-3`: `tools/fetch_corpus.py` (`make
+  corpus`) fetches the Silesia and Canterbury corpora into
+  `static/corpus/mixed/` (git-ignored; the manifest pins every archive and
+  file by SHA-256, and a fetch that differs fails), and `make corpus-floor`
+  checks every file against its locked floor under the default command and
+  under `--max --allocation context -6` (`tools/corpus_floor_default.json`,
+  `tools/corpus_floor_max6.json`; `check_ratio_floor.py --corpus DIR`).
+  Locked at 15d0cbe: 214,749,364 → 40,478,327 B under the default command.
+
 ### Changed
 - The memory tier is encode's only memory setting. `-10` and `-11` are new,
   1 and 2 GiB, the tiers above xz's ladder that the max profile's largest

@@ -12,3 +12,5 @@ adpat/cadatp-hash
 adpat/cadatp-fc8d2
 research/
 _tmp/
+static/corpus/mixed/*
+!static/corpus/mixed/manifest.json

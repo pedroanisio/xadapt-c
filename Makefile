@@ -8,7 +8,7 @@ BUILD ?= build
 CODEC_BUILD = $(if $(filter /%,$(BUILD)),$(BUILD),adpat/c/$(BUILD))
 GATE_ARGS ?=
 FLOOR_ARGS ?=
-.PHONY: all test check clean bench plot sbom manifest reproduce gate ratio-floor
+.PHONY: all test check clean bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor
 
 all test clean:
 	$(MAKE) -C adpat/c $@
@@ -17,6 +17,7 @@ check:
 	$(MAKE) -C adpat/c check
 	$(PYTHON) -B tools/test_provenance.py
 	$(PYTHON) -B -m unittest discover -s tools -p 'test_check_ratio_floor.py'
+	$(PYTHON) -B -m unittest discover -s tools -p 'test_fetch_corpus.py'
 
 # Locked floors (LOCKS.md, 2026-09-14). gate: the CI proxy, the first 8 MiB of
 # enwik8 cut from the tracked zip, encode + decode, well under 120 s.
@@ -29,6 +30,21 @@ gate: all
 
 ratio-floor: all
 	$(PYTHON) -B tools/check_ratio_floor.py --binary "$(abspath $(CODEC_BUILD))/cadapt" --verify $(FLOOR_ARGS)
+
+# The mixed acceptance corpus (DLV-3, LOCKS.md 2026-09-15): corpus fetches
+# Silesia and Canterbury into static/corpus/mixed (git-ignored, pinned by
+# the manifest); corpus-floor checks every file against its locked floor
+# under the default command and under the -6 tier of --max, the two
+# commands a lever must not worsen. About 10 minutes for both.
+corpus:
+	$(PYTHON) -B tools/fetch_corpus.py
+
+corpus-floor: all
+	$(PYTHON) -B tools/fetch_corpus.py --check > /dev/null
+	$(PYTHON) -B tools/check_ratio_floor.py --binary "$(abspath $(CODEC_BUILD))/cadapt" --verify \
+	    --floor tools/corpus_floor_default.json --corpus static/corpus/mixed $(FLOOR_ARGS)
+	$(PYTHON) -B tools/check_ratio_floor.py --binary "$(abspath $(CODEC_BUILD))/cadapt" --verify \
+	    --floor tools/corpus_floor_max6.json --corpus static/corpus/mixed $(FLOOR_ARGS)
 
 sbom:
 	$(PYTHON) -B tools/provenance.py sbom

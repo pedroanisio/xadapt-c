@@ -294,6 +294,21 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   library encoder and their explicit sizes/profile/segment settings after a
   deliberate format change, never to make a test pass. Named CLI inputs
   now include metadata and are unsuitable as metadata-free golden vectors.
+- **The mixed acceptance corpus** (`DLV-3`): the Silesia corpus (twelve
+  files, 212 MB — prose, an executable, a medical image, a database,
+  office documents, source, XML, an X-ray, a star catalogue, a chemical
+  database) and the Canterbury corpus (eleven small files, 4 KB to 1 MB)
+  are fetched by [tools/fetch_corpus.py](tools/fetch_corpus.py) (`make
+  corpus`) into `static/corpus/mixed/`, which is git-ignored — they are
+  not this project's to redistribute (`DLV-4`); the committed
+  [manifest](static/corpus/mixed/manifest.json) pins every archive and
+  file by SHA-256. `make corpus-floor` encodes every file under the default
+  command and under `--max --allocation context -6` and fails when any
+  container is larger than its locked floor
+  ([tools/corpus_floor_default.json](tools/corpus_floor_default.json),
+  [tools/corpus_floor_max6.json](tools/corpus_floor_max6.json)): a
+  default or a lever is accepted on these files, enwik8 being one benchmark
+  row beside them, never the judge.
 - **Every script, measured** (`FMT-8`): the corpus holds six rows of about
   2 MiB of Wikipedia article text each — Latin (English), Cyrillic
   (Russian), CJK (Chinese, Japanese) and diacritic-heavy Latin (Vietnamese,
@@ -415,8 +430,9 @@ collector. Historical scripts, result bundles, plots and research links remain
 under `bench/`; they have not been deleted.
 
 The codec-specific ratio and throughput regression gates remain here:
-`make gate` and `make ratio-floor` use `tools/check_ratio_floor.py` and the
-canonical `tools/ratio_floor.json`. Their thresholds and verification behavior
+`make gate`, `make ratio-floor` and `make corpus-floor` use
+`tools/check_ratio_floor.py` with the canonical `tools/ratio_floor.json`
+and the two corpus floor files. Their thresholds and verification behavior
 are unchanged. The old copies in `bench/` are historical snapshots; update the
 canonical files in `tools/` for any separately approved floor change. Allocation,
 adaptive-search and filesystem-restoration correctness stay in the codec tests.

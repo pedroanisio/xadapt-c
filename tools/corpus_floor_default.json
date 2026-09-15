@@ -1,0 +1,218 @@
+{
+  "schema": "cadapt.ratio-floor.v1",
+  "locked_on": "2026-09-15",
+  "host": "AMD Ryzen 5 5600X 6-Core Processor",
+  "arguments": [
+    "encode"
+  ],
+  "throughput_tolerance": 0.25,
+  "floors": [
+    {
+      "fixture": "silesia/dickens",
+      "input_bytes": 10192446,
+      "input_md5": "88334708559f6db57d79096bc0aca07e",
+      "max_container_bytes": 2117486,
+      "wall_seconds": 8.32,
+      "min_bytes_per_second": 1224506.1411460175,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/mozilla",
+      "input_bytes": 51220480,
+      "input_md5": "c7789a2097f1ff944b0c737430a339b3",
+      "max_container_bytes": 12392182,
+      "wall_seconds": 59.22,
+      "min_bytes_per_second": 864903.3336853273,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/mr",
+      "input_bytes": 9970564,
+      "input_md5": "38e623e3093b7bf2003ca4b1bbc19927",
+      "max_container_bytes": 2180956,
+      "wall_seconds": 9.88,
+      "min_bytes_per_second": 1009509.8474386397,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/nci",
+      "input_bytes": 33553445,
+      "input_md5": "31f85bc8706f3c921104e7c169e2e2e1",
+      "max_container_bytes": 1368242,
+      "wall_seconds": 28.7,
+      "min_bytes_per_second": 1169115.6715479472,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/ooffice",
+      "input_bytes": 6152192,
+      "input_md5": "573c4ae915e36631d8f2dcffb9b9b66d",
+      "max_container_bytes": 1788935,
+      "wall_seconds": 8.94,
+      "min_bytes_per_second": 688124.1027875985,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/osdb",
+      "input_bytes": 10085684,
+      "input_md5": "e734b0c48e6a982adfb5802da3032ecd",
+      "max_container_bytes": 2183571,
+      "wall_seconds": 14.11,
+      "min_bytes_per_second": 714674.4728470149,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/reymont",
+      "input_bytes": 6627202,
+      "input_md5": "d8f54d78105079775f32d76dc55fc671",
+      "max_container_bytes": 975366,
+      "wall_seconds": 7.64,
+      "min_bytes_per_second": 867116.1884478345,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/samba",
+      "input_bytes": 21606400,
+      "input_md5": "154eaea7ea70e89f6339ff0abf4112ca",
+      "max_container_bytes": 3016070,
+      "wall_seconds": 24.23,
+      "min_bytes_per_second": 891863.5493787066,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/sao",
+      "input_bytes": 7251944,
+      "input_md5": "79e95a22e18cd82b7e42bf91b380d30b",
+      "max_container_bytes": 4381623,
+      "wall_seconds": 12.21,
+      "min_bytes_per_second": 593866.1832549516,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/webster",
+      "input_bytes": 41458703,
+      "input_md5": "474931ad907ac27bf962c75ded46c069",
+      "max_container_bytes": 5787760,
+      "wall_seconds": 38.02,
+      "min_bytes_per_second": 1090459.2349917495,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/x-ray",
+      "input_bytes": 8474240,
+      "input_md5": "9baec32ad14ec3eff487d254382cb91c",
+      "max_container_bytes": 3584027,
+      "wall_seconds": 11.02,
+      "min_bytes_per_second": 768816.2528405709,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "silesia/xml",
+      "input_bytes": 5345280,
+      "input_md5": "9b09c0c80104adb8aae910b7d7db003e",
+      "max_container_bytes": 333669,
+      "wall_seconds": 5.21,
+      "min_bytes_per_second": 1026505.7319435588,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/alice29.txt",
+      "input_bytes": 152089,
+      "input_md5": "74c3b556c76ea0cfae111cdb64d08255",
+      "max_container_bytes": 37158,
+      "wall_seconds": 0.78,
+      "min_bytes_per_second": 195599.14843011473,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/asyoulik.txt",
+      "input_bytes": 125179,
+      "input_md5": "2183e4e23c67c1dcc6cb84e13d8863bf",
+      "max_container_bytes": 34315,
+      "wall_seconds": 0.37,
+      "min_bytes_per_second": 342679.02917641914,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/cp.html",
+      "input_bytes": 24603,
+      "input_md5": "d4b4e81b46ae7a3cbc2b733bbd6d8cc8",
+      "max_container_bytes": 6301,
+      "wall_seconds": 0.21,
+      "min_bytes_per_second": 118864.30426913408,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/fields.c",
+      "input_bytes": 11150,
+      "input_md5": "82640457a3569c49615974b5053a73df",
+      "max_container_bytes": 2417,
+      "wall_seconds": 0.11,
+      "min_bytes_per_second": 104864.37628720788,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/grammar.lsp",
+      "input_bytes": 3721,
+      "input_md5": "ad6ff075a8058262564493050f67f702",
+      "max_container_bytes": 1056,
+      "wall_seconds": 0.04,
+      "min_bytes_per_second": 102470.28528224918,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/kennedy.xls",
+      "input_bytes": 1029744,
+      "input_md5": "b408d2207b18aba5a378548698735d64",
+      "max_container_bytes": 17007,
+      "wall_seconds": 1.05,
+      "min_bytes_per_second": 978207.0454257992,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/lcet10.txt",
+      "input_bytes": 426754,
+      "input_md5": "5d69b132c7929dec190daa69f081d472",
+      "max_container_bytes": 89130,
+      "wall_seconds": 1.31,
+      "min_bytes_per_second": 324958.07850628113,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/plrabn12.txt",
+      "input_bytes": 481861,
+      "input_md5": "4655507b26054b80b98bac2b44d8200f",
+      "max_container_bytes": 126671,
+      "wall_seconds": 0.76,
+      "min_bytes_per_second": 637547.8901256167,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/ptt5",
+      "input_bytes": 513216,
+      "input_md5": "29eca86237730fce52232612036284b9",
+      "max_container_bytes": 43344,
+      "wall_seconds": 0.57,
+      "min_bytes_per_second": 900372.1172354571,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/sum",
+      "input_bytes": 38240,
+      "input_md5": "0d347e6c137c15616ee2becc0123e0a3",
+      "max_container_bytes": 9518,
+      "wall_seconds": 0.26,
+      "min_bytes_per_second": 146687.59229534454,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    },
+    {
+      "fixture": "canterbury/xargs.1",
+      "input_bytes": 4227,
+      "input_md5": "7bcc27abddbcc8dc56d9b1950ce93a69",
+      "max_container_bytes": 1523,
+      "wall_seconds": 0.04,
+      "min_bytes_per_second": 107943.55785416385,
+      "measured_with": "cadapt at main 15d0cbe, identical round trip, 2026-09-15, host shared with other agents' jobs"
+    }
+  ]
+}

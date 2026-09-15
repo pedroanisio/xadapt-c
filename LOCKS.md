@@ -2,6 +2,50 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — Levers are accepted on the mixed corpus; enwik8 is one row (DLV-3)
+
+**Decision.** (Operator's, 2026-09-15: "enwik8 and enwik9 are benchmarks,
+but this is a general-purpose tool".) A default, a policy or a modelling
+lever is accepted only if it does not worsen the mixed corpus — the
+Silesia and Canterbury corpora, fetched by `tools/fetch_corpus.py` into
+`static/corpus/mixed/` and pinned by the manifest's hashes, never
+committed (`DLV-4`) — under both commands `make corpus-floor` runs: the
+default command and `--max --allocation context -6`, the largest tier a
+128 MB machine holds. enwik8 and enwik9 stay as rows with stated goals
+(17 MB; below 130 MB) and as the throughput reference; a gain on them
+that costs the corpus lands, if at all, as an input-detected path, as the
+x86 and BMP transforms and the text transform do.
+
+**Why.** Every measurement before this entry was Wikipedia text (enwik8,
+its prefixes, the six per-script rows); a default tuned on it overfits
+one input class. The corpus spans prose, executables, images, databases,
+office documents, source, XML and small files, where a text lever can
+cost bytes and a small file pays the header. Rejected: vendoring the
+corpus files (their terms are their sources', not this project's);
+gating only on enwik8 (the failure this entry prevents); a corpus of
+this project's own making (no one else can compare against it).
+
+**The floors at 15d0cbe** (`cadapt` built from main, host shared with
+other agents' jobs, every file decoded byte for byte):
+
+| Command | Corpus | Bytes |
+|---|---|---:|
+| `encode` (default) | Silesia + Canterbury, 214,749,364 B | 40,478,327 B (18.85 %) |
+| `encode --max --allocation context -6` | the same | 40,330,336 B (18.78 %) |
+
+**Consequences.**
+- `make corpus-floor` joins `make gate` and `make ratio-floor` as the
+  gates a landing runs; a lever that lowers enwik8 and raises any corpus
+  row is not landed unless it becomes input-detected.
+- The floor files are raised (never lowered) by a new entry with the runs
+  that justify it, as the enwik floors are.
+- The tier decision above means "128 MiB" is measured at `-6` (94 MiB):
+  enwik8 there is 19,306,669 B at 15d0cbe (text transform, compact, lean,
+  table 2^21, no fraction).
+
+**Status.** Landed 2026-09-15 with the fetcher and its tests, the
+`--corpus` option of `check_ratio_floor.py`, the two floor files and the
+Makefile targets.
 ## 2026-09-15 — Size and throughput floors re-locked on the merged text-transform binary
 
 **Decision.** The floors of `tools/ratio_floor.json` move to what the
