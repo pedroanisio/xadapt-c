@@ -137,8 +137,16 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   BMP inputs; embedded images inside folders/PDF/EPUB are not transformed.
 - `--threads <n>` with `n ≥ 2` cuts the input into segments of
   `--segment-bytes` (default 16 MiB, whole 256 KiB blocks) that each start
-  the model afresh. This implementation codes and decodes the segments in
-  order, on one thread; the option exists for files that expect segments.
+  the model afresh, and codes them at once, on as many of the `n` threads
+  as the memory budget holds a model, a segment and a block's workspace
+  for (the report says how many); `decode --threads <n>` of a file reads
+  its segment table and decodes the segments the same way. The bytes are
+  those the segments coded in order produce; a segment's model starts
+  afresh, so segmenting costs ratio (two 4 MiB segments of the 8 MiB
+  enwik8 proxy under `--max`: 1,778,553 bytes against 1,716,715 whole) and
+  is never the default. With `--verify`, each thread proves its own
+  segment before it is written. A pipe is segmented the same way, its
+  segments read ahead into memory.
 - An `<input>` that is a folder is walked into one archive stream and coded
   as one container (the header carries an archive flag; `info` reports
   "holds a folder"). `decode` restores it under the output name — every

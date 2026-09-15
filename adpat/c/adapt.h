@@ -64,9 +64,9 @@ extern "C" {
  * per segment its original and coded length as two u32, then the segment
  * count as a u32) before the trailer. A decoder reading a stream resets
  * its model at each marker and checks the table at the end; one holding a
- * file may read the table first and decode the segments at once. The
- * crate does so on threads; this port codes and decodes segments in order,
- * on one thread, to the same bytes. */
+ * file may read the table first and decode the segments at once, as
+ * adapt_decode_threads() does and adapt_encode_stream_threads() codes
+ * them, on threads, to the bytes the in-order coder writes. */
 #define ADAPT_SEGMENT_FLAG 0x40u
 /* The header's window byte carries this bit when every block's bytes went
  * through the x86 branch transform before modelling: the four-byte
@@ -419,7 +419,8 @@ adapt_status adapt_sizes_for_input_max(int length_known, uint64_t length, uint64
  * fitted to a segment's length and the thread's share of the budget, or
  * ADAPT_ERROR_MEMORY_LIMIT naming the bytes the threads need. `cadapt
  * encode --threads` chooses a file's sizes with this and codes the
- * segments in order, to the bytes the crate's threads write. */
+ * segments through adapt_encode_stream_threads(), to the bytes the
+ * crate's threads write. */
 uint64_t adapt_segment_out_bound(uint64_t segment_bytes);
 uint64_t adapt_threads_encode_memory_bound(adapt_sizes sizes, uint64_t threads, uint64_t segment_bytes);
 adapt_status adapt_sizes_for_threads(uint64_t length, uint64_t max_memory, uint64_t threads, uint64_t segment_bytes,
@@ -448,6 +449,10 @@ typedef struct adapt_stats {
     uint32_t crc32;
     /* Segments the file has: 1 unless it is segmented. */
     uint32_t segments;
+    /* Threads the segments were coded or decoded on: 1 unless
+     * adapt_encode_stream_threads() or adapt_decode_threads() ran them at
+     * once. */
+    uint32_t workers;
 } adapt_stats;
 
 /* Read up to `len` bytes into `buf` and store how many in `*got`: 0 only
@@ -477,6 +482,23 @@ adapt_status adapt_decode(const uint8_t *file, size_t file_len, adapt_limits lim
 
 /* Release a result of adapt_decode(). */
 void adapt_free(uint8_t *bytes);
+
+/* Decode a complete file held in memory, its segments decoded at once on
+ * up to `threads` workers when the file is segmented — the table before
+ * the trailer says where each segment's bytes are — and written in order
+ * through `write`, the checksum over the whole checked against the
+ * trailer at the end. A worker holds a model and the longest segment's
+ * bytes (adapt_parallel_decode_memory_bound, which counts the file too);
+ * the workers are as many of `threads` as `limits.max_memory` holds
+ * (adapt_decode_workers), and with fewer than two, or a file of one
+ * segment, adapt_decode_stream() runs over the memory. Built without
+ * ADAPT_THREADS, one worker always. */
+adapt_status adapt_decode_threads(const uint8_t *file, size_t file_len, adapt_limits limits, uint64_t threads,
+                                  adapt_write_fn write, void *write_context, adapt_stats *stats, adapt_error *error);
+uint64_t adapt_parallel_decode_memory_bound(adapt_sizes sizes, uint64_t workers, uint64_t segment_raw_max,
+                                            uint64_t file_len);
+uint64_t adapt_decode_workers(adapt_sizes sizes, uint64_t max_memory, uint64_t segment_raw_max, uint64_t file_len,
+                              uint64_t threads);
 
 /* Validate the header and trailer of a complete file and return the
  * declared original length, without reading blocks or verifying the
@@ -508,6 +530,26 @@ adapt_status adapt_encode_stream_segments(adapt_read_fn read, void *read_context
 adapt_status adapt_encode_stream_verified(adapt_read_fn read, void *read_context, adapt_write_fn write,
                                           void *write_context, adapt_sizes sizes, uint64_t max_memory,
                                           adapt_stats *stats, adapt_error *error);
+
+/* adapt_encode_stream_segments() with the segments coded at once, on up
+ * to `threads` workers, when `sizes.segmented` is set: each segment goes
+ * under a fresh model on its own thread, and the segments are written in
+ * order, so the bytes are the in-order encoder's. With `verify` each
+ * worker proves its segment — decodes its blocks under another fresh
+ * model and compares — before it is written. A worker holds a model, a
+ * segment's input and coded form and a block's workspace
+ * (adapt_parallel_encode_memory_bound); the workers are as many of
+ * `threads` as `max_memory` holds (adapt_encode_workers), and with fewer
+ * than two the in-order encoder runs, proven alongside when `verify` is
+ * set, which then needs adapt_verified_memory_bound. `stats->workers`
+ * says how many ran. Built without ADAPT_THREADS, one worker always. */
+adapt_status adapt_encode_stream_threads(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
+                                         adapt_sizes sizes, uint64_t max_memory, uint64_t segment_bytes, uint64_t threads,
+                                         int verify, adapt_stats *stats, adapt_error *error);
+uint64_t adapt_parallel_encode_memory_bound(adapt_sizes sizes, uint64_t workers, uint64_t segment_bytes);
+uint64_t adapt_encode_workers(adapt_sizes sizes, uint64_t max_memory, uint64_t segment_bytes, uint64_t threads);
+/* The most workers either side runs segments on. */
+#define ADAPT_WORKERS_MAX 64u
 
 /* adapt_encode_stream_verified() with the segment length spelled out. */
 adapt_status adapt_encode_stream_verified_segments(adapt_read_fn read, void *read_context, adapt_write_fn write,

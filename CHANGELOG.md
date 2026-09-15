@@ -31,6 +31,37 @@ The binary reports `0.12.0`; the tag is pending.
   the CLI tests use to hold the two to the same bytes.
 
 ### Added
+- Segments on threads: `encode --threads <n>` codes a segmented file's
+  segments at once, on as many of the `n` threads as the memory budget
+  holds a model, a segment and a block's workspace for, and writes them in
+  order; `decode --threads <n>` reads a file's segment table and decodes
+  the segments the same way. The bytes are unchanged (each segment's model
+  starts afresh either way). With `--verify` every thread proves its own
+  segment before it is written. The library gains
+  `adapt_encode_stream_threads()`, `adapt_decode_threads()`, the worker
+  counts and memory bounds behind them, and `adapt_stats.workers`. On the
+  8 MiB enwik8 proxy under `--max`, two 4 MiB segments encode in 32.0 s on
+  two threads against 66.1 s in order, and four 2 MiB segments in 24.8 s
+  on four threads against 67.6 s.
+
+### Changed
+- Speed, with the output bytes unchanged: the model prefetches both
+  possible next bytes' table lines, run slots and recall slot at the
+  seventh bit, and the next bit's arbiter and estimation rows after every
+  bit (the 8 MiB enwik8 proxy under `--max`: 63.1 s to 56.7 s on the
+  reference container); the arbiters' update counts moved out of their
+  weight rows so every row is vector-aligned (56.7 s to 54.5 s). The
+  memory a model takes is unchanged.
+- Rejected after measurement, for the record: constant-count
+  instantiations of the per-bit path (no gain, a 47 % larger binary);
+  the chooser's trials on threads (within noise); 16-bit arbiter
+  arithmetic (17 % faster, but the proxy container grew 8.2 %, past the
+  locked floor).
+
+### Fixed
+- Two CLI tests compared whole containers of the same named input across
+  two runs; the metadata header carries the access time, which the first
+  run's read may move. They compare the streams under it.
 - Folders: a directory is coded as one container and restored byte for
   byte — every file, directory and symbolic link in its place — with
   permission bits and access/modification timestamps (nanoseconds on POSIX)

@@ -591,6 +591,48 @@ static size_t code_block(model *m, const uint8_t *block, size_t n, uint8_t *code
     return payload;
 }
 
+/* Code one block of `n` bytes that begins `position` bytes into the
+ * input, under m, into `framed`: the transform the file has, in place;
+ * then stored and skipped when the block is incompressible and repeats
+ * nothing the model knows, modeled when the coder beats the raw bytes,
+ * stored and observed otherwise; and the block header before the payload.
+ * Returns the framed length. */
+static size_t frame_block(model *m, adapt_sizes sizes, uint8_t *block, size_t n, uint64_t position, uint32_t *scan,
+                          uint8_t *framed, size_t framed_cap) {
+    uint8_t method;
+    size_t payload_len;
+    if (sizes.bmp) {
+        bmp_transform(block, n, position, sizes, 0);
+    } else if (sizes.x86) {
+        x86_forward(block, n);
+    }
+    if (entropy_256(block, n) >= SKIP_ENTROPY_256 && !model_has_repeat(m, block, n, scan)) {
+        skip_bytes(m, block, n);
+        memcpy(framed + ADAPT_BLOCK_HEADER_BYTES, block, n);
+        payload_len = n;
+        method = METHOD_STORED_SKIPPED;
+    } else {
+        payload_len = code_block(m, block, n, framed + ADAPT_BLOCK_HEADER_BYTES, framed_cap - ADAPT_BLOCK_HEADER_BYTES);
+        if (payload_len != 0) {
+            method = METHOD_MODELED;
+        } else {
+            memcpy(framed + ADAPT_BLOCK_HEADER_BYTES, block, n);
+            payload_len = n;
+            method = METHOD_STORED_OBSERVED;
+        }
+    }
+    framed[0] = method;
+    framed[1] = (uint8_t)n;
+    framed[2] = (uint8_t)(n >> 8);
+    framed[3] = (uint8_t)(n >> 16);
+    framed[4] = (uint8_t)(n >> 24);
+    framed[5] = (uint8_t)payload_len;
+    framed[6] = (uint8_t)(payload_len >> 8);
+    framed[7] = (uint8_t)(payload_len >> 16);
+    framed[8] = (uint8_t)(payload_len >> 24);
+    return ADAPT_BLOCK_HEADER_BYTES + payload_len;
+}
+
 static unsigned popcount16(uint32_t x) {
     unsigned n = 0;
     while (x != 0) {
@@ -1099,6 +1141,307 @@ static adapt_status verifier_finish(verifier *v, adapt_error *error) {
 }
 
 /* ------------------------------------------------------------------------
+ * Segments on threads
+ * --------------------------------------------------------------------- */
+
+/* Bytes the parallel encoder needs for `workers` segments in flight: each
+ * worker holds a model, its segment's input and coded form, and a block's
+ * workspace (the block it transforms and codes, the one its proof decodes
+ * into, the scan table); the coder itself holds a block's workspace and
+ * the headroom, as the in-order encoder does. */
+uint64_t adapt_parallel_encode_memory_bound(adapt_sizes sizes, uint64_t workers, uint64_t segment_bytes) {
+    uint64_t each = adapt_model_bytes(sizes) + segment_bytes + adapt_segment_out_bound(segment_bytes) + CODED_SLACK +
+                    block_workspace();
+    return each * workers + block_workspace() + HEADROOM;
+}
+
+uint64_t adapt_encode_workers(adapt_sizes sizes, uint64_t max_memory, uint64_t segment_bytes, uint64_t threads) {
+#ifdef ADAPT_THREADS
+    uint64_t w = threads > ADAPT_WORKERS_MAX ? ADAPT_WORKERS_MAX : threads;
+    if (!sizes.segmented || !adapt_segment_bytes_valid(segment_bytes)) {
+        return 1;
+    }
+    while (w >= 2 && adapt_parallel_encode_memory_bound(sizes, w, segment_bytes) > max_memory) {
+        w--;
+    }
+    return w < 1 ? 1 : w;
+#else
+    (void)sizes;
+    (void)max_memory;
+    (void)segment_bytes;
+    (void)threads;
+    return 1;
+#endif
+}
+
+#ifdef ADAPT_THREADS
+/* One segment's coding, on a worker: its input, whole blocks, is coded
+ * under a fresh model into `framed`, block after block as the in-order
+ * encoder frames them; then, when asked, proven — the framed blocks
+ * decoded under another fresh model and compared with the input — before
+ * the coder writes them. One model is live per worker at a time. */
+typedef struct segment_job {
+    adapt_sizes sizes;
+    int verify;
+    /* the segment's index, and its first byte's offset in the input */
+    uint64_t index;
+    uint64_t position;
+    uint8_t *input;
+    size_t n;
+    uint8_t *framed;
+    size_t framed_cap;
+    size_t framed_len;
+    /* the block being coded (a transformed copy), the proof's block, the
+     * repeat scan */
+    uint8_t *work;
+    uint8_t *scratch;
+    uint32_t *scan;
+    adapt_status status;
+    adapt_error error;
+    pthread_t thread;
+    int busy;
+} segment_job;
+
+static void verify_segment(segment_job *j) {
+    block_decoder d;
+    adapt_error cause;
+    size_t pos = 0, seen = 0;
+    d.m = model_new(j->sizes);
+    if (d.m == NULL) {
+        j->status = fail(&j->error, ADAPT_ERROR_ALLOCATION, 0, 0);
+        return;
+    }
+    while (pos < j->framed_len) {
+        uint8_t method;
+        size_t raw, payload_len;
+        const uint8_t *payload;
+        if (read_block(j->framed, j->framed_len, &pos, &method, &raw, &payload, &payload_len, &cause) != ADAPT_OK) {
+            j->status = fail_verification(&j->error, &cause);
+            break;
+        }
+        if (method > METHOD_STORED_SKIPPED || raw > j->n - seen) {
+            fail(&cause, ADAPT_ERROR_BAD_BLOCK, 0, 0);
+            j->status = fail_verification(&j->error, &cause);
+            break;
+        }
+        if (decode_block(&d, method, raw, payload, payload_len, j->scratch, &cause) != ADAPT_OK) {
+            j->status = fail_verification(&j->error, &cause);
+            break;
+        }
+        if (j->sizes.x86) {
+            x86_inverse(j->scratch, raw);
+        }
+        if (j->sizes.bmp) {
+            bmp_transform(j->scratch, raw, j->position + seen, j->sizes, 1);
+        }
+        if (memcmp(j->scratch, j->input + seen, raw) != 0) {
+            j->status = fail_verification(&j->error, NULL);
+            break;
+        }
+        seen += raw;
+    }
+    if (j->status == ADAPT_OK && seen != j->n) {
+        fail(&cause, ADAPT_ERROR_TRUNCATED, 0, 0);
+        j->status = fail_verification(&j->error, &cause);
+    }
+    model_free(d.m);
+}
+
+static void *segment_thread(void *arg) {
+    segment_job *j = arg;
+    model *m = model_new(j->sizes);
+    size_t at = 0;
+    j->framed_len = 0;
+    j->status = ADAPT_OK;
+    if (m == NULL) {
+        j->status = fail(&j->error, ADAPT_ERROR_ALLOCATION, 0, 0);
+        return NULL;
+    }
+    while (at < j->n) {
+        size_t n = j->n - at < ADAPT_BLOCK_BYTES ? j->n - at : ADAPT_BLOCK_BYTES;
+        memcpy(j->work, j->input + at, n);
+        j->framed_len += frame_block(m, j->sizes, j->work, n, j->position + at, j->scan, j->framed + j->framed_len,
+                                     j->framed_cap - j->framed_len);
+        at += n;
+    }
+    model_free(m);
+    if (j->verify) {
+        verify_segment(j);
+    }
+    return NULL;
+}
+
+static void segment_job_free(segment_job *j) {
+    free(j->input);
+    free(j->framed);
+    free(j->work);
+    free(j->scratch);
+    free(j->scan);
+}
+
+static int segment_job_alloc(segment_job *j, adapt_sizes sizes, uint64_t segment_bytes, int verify) {
+    memset(j, 0, sizeof(*j));
+    j->sizes = sizes;
+    j->verify = verify;
+    j->framed_cap = (size_t)adapt_segment_out_bound(segment_bytes) + CODED_SLACK;
+    j->input = malloc((size_t)segment_bytes);
+    j->framed = malloc(j->framed_cap);
+    j->work = malloc(ADAPT_BLOCK_BYTES);
+    j->scratch = verify ? malloc(ADAPT_BLOCK_BYTES) : NULL;
+    j->scan = malloc(SCAN_SLOTS * sizeof(uint32_t));
+    return j->input != NULL && j->framed != NULL && j->work != NULL && (!verify || j->scratch != NULL) && j->scan != NULL;
+}
+
+/* Start job j on a thread, or run it here when no thread can be made. */
+static void segment_job_start(segment_job *j) {
+    j->busy = 1;
+    if (pthread_create(&j->thread, NULL, segment_thread, j) != 0) {
+        segment_thread(j);
+        j->busy = 2;
+    }
+}
+
+static void segment_job_wait(segment_job *j) {
+    if (j->busy == 1) {
+        pthread_join(j->thread, NULL);
+    }
+    j->busy = 0;
+}
+
+/* The finished segment j, in order: the marker before every segment after
+ * the first, then its framed blocks, into the coder's counter and output. */
+static adapt_status segment_job_emit(segment_job *j, adapt_write_fn write, void *write_context, segment_counter *segments,
+                                     uint64_t *output_bytes, adapt_error *error) {
+    int rc;
+    adapt_status status;
+    if (j->status != ADAPT_OK) {
+        *error = j->error;
+        return j->status;
+    }
+    if (j->index > 0) {
+        uint8_t marker = METHOD_SEGMENT;
+        status = counter_close(segments, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        rc = write(write_context, &marker, 1);
+        if (rc != 0) {
+            return fail(error, ADAPT_ERROR_IO, (uint64_t)(rc < 0 ? -(int64_t)rc : rc), 0);
+        }
+        *output_bytes += 1;
+        segments->coded += 1;
+    }
+    rc = write(write_context, j->framed, j->framed_len);
+    if (rc != 0) {
+        return fail(error, ADAPT_ERROR_IO, (uint64_t)(rc < 0 ? -(int64_t)rc : rc), 0);
+    }
+    *output_bytes += j->framed_len;
+    segments->raw += j->n;
+    segments->coded += j->framed_len;
+    return ADAPT_OK;
+}
+
+/* The segments of the input after its first block, `first_n` bytes
+ * already in `first`, coded `workers` at a time and written in order:
+ * segment k on slot k mod workers, each slot's previous segment written
+ * as the slot is reused, the last ones after the input ends. The bytes
+ * are the in-order encoder's, which codes each segment under a fresh
+ * model too. */
+static adapt_status encode_segments_parallel(adapt_read_fn read, void *read_context, adapt_write_fn write,
+                                             void *write_context, adapt_sizes sizes, uint64_t segment_bytes,
+                                             uint64_t workers, int verify, const uint8_t *first, size_t first_n,
+                                             segment_counter *segments, const crc32_table *crc_table, uint32_t *crc,
+                                             uint64_t *input_bytes, uint64_t *output_bytes, adapt_error *error) {
+    segment_job *jobs;
+    size_t slots = (size_t)workers, i;
+    uint64_t index = 0, position = 0;
+    adapt_status status = ADAPT_OK;
+    jobs = calloc(slots, sizeof(*jobs));
+    if (jobs == NULL) {
+        return fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+    }
+    for (i = 0; i < slots; i++) {
+        if (!segment_job_alloc(&jobs[i], sizes, segment_bytes, verify)) {
+            status = fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+        }
+    }
+    while (status == ADAPT_OK) {
+        segment_job *j = &jobs[index % slots];
+        size_t n = 0, got = 0;
+        if (j->busy) {
+            segment_job_wait(j);
+            status = segment_job_emit(j, write, write_context, segments, output_bytes, error);
+            if (status != ADAPT_OK) {
+                break;
+            }
+        }
+        if (index == 0) {
+            memcpy(j->input, first, first_n);
+            n = first_n;
+        }
+        if (index > 0 || first_n == ADAPT_BLOCK_BYTES) {
+            status = fill(read, read_context, j->input + n, (size_t)segment_bytes - n, &got, error);
+            if (status != ADAPT_OK) {
+                break;
+            }
+            n += got;
+        }
+        if (n == 0) {
+            break;
+        }
+        *input_bytes += n;
+        *crc = crc32_update(crc_table, *crc, j->input, n);
+        j->index = index;
+        j->position = position;
+        j->n = n;
+        position += n;
+        index += 1;
+        segment_job_start(j);
+    }
+    /* the segments still in flight, in order; after a failure they are
+     * waited for and dropped */
+    for (i = 0; i < slots; i++) {
+        segment_job *j = &jobs[(index + i) % slots];
+        if (!j->busy) {
+            continue;
+        }
+        segment_job_wait(j);
+        if (status == ADAPT_OK) {
+            status = segment_job_emit(j, write, write_context, segments, output_bytes, error);
+        }
+    }
+    for (i = 0; i < slots; i++) {
+        segment_job_free(&jobs[i]);
+    }
+    free(jobs);
+    return status;
+}
+#else
+static adapt_status encode_segments_parallel(adapt_read_fn read, void *read_context, adapt_write_fn write,
+                                             void *write_context, adapt_sizes sizes, uint64_t segment_bytes,
+                                             uint64_t workers, int verify, const uint8_t *first, size_t first_n,
+                                             segment_counter *segments, const crc32_table *crc_table, uint32_t *crc,
+                                             uint64_t *input_bytes, uint64_t *output_bytes, adapt_error *error) {
+    (void)read;
+    (void)read_context;
+    (void)write;
+    (void)write_context;
+    (void)sizes;
+    (void)segment_bytes;
+    (void)workers;
+    (void)verify;
+    (void)first;
+    (void)first_n;
+    (void)segments;
+    (void)crc_table;
+    (void)crc;
+    (void)input_bytes;
+    (void)output_bytes;
+    return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
+}
+#endif
+
+/* ------------------------------------------------------------------------
  * The encoder
  * --------------------------------------------------------------------- */
 
@@ -1132,7 +1475,7 @@ static adapt_status segment_table_bytes(const segment_counter *c, uint8_t **out,
 
 static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
                                   adapt_sizes sizes, uint64_t max_memory, uint64_t segment_bytes, verifier *v,
-                                  adapt_stats *stats, adapt_error *error) {
+                                  uint64_t workers, int verify, adapt_stats *stats, adapt_error *error) {
     adapt_status status;
     model *m = NULL;
     uint32_t *scan = NULL;
@@ -1244,9 +1587,17 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
             goto done;
         }
     }
+    if (workers >= 2 && sizes.segmented) {
+        status = encode_segments_parallel(read, read_context, write, write_context, sizes, segment_bytes, workers, verify,
+                                          block, n, &segments, &crc_table, &crc, &input_bytes, &output_bytes, error);
+        if (status != ADAPT_OK) {
+            goto done;
+        }
+        n = 0;
+        first = 0;
+    }
     for (;;) {
-        uint8_t method;
-        size_t payload_len;
+        size_t framed_len;
         int rc;
         if (!first) {
             status = fill(read, read_context, block, ADAPT_BLOCK_BYTES, &n, error);
@@ -1285,8 +1636,6 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         crc = crc32_update(&crc_table, crc, block, n);
         if (sizes.x86 || sizes.bmp) {
             memcpy(orig, block, n);
-            if (sizes.bmp) bmp_transform(block, n, input_bytes - n, sizes, 0);
-            else x86_forward(block, n);
         }
         if (m == NULL) {
             m = model_new(sizes);
@@ -1295,41 +1644,17 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
                 goto done;
             }
         }
-        if (entropy_256(block, n) >= SKIP_ENTROPY_256 && !model_has_repeat(m, block, n, scan)) {
-            skip_bytes(m, block, n);
-            memcpy(framed + ADAPT_BLOCK_HEADER_BYTES, block, n);
-            payload_len = n;
-            method = METHOD_STORED_SKIPPED;
-        } else {
-            payload_len = code_block(m, block, n, framed + ADAPT_BLOCK_HEADER_BYTES, framed_cap - ADAPT_BLOCK_HEADER_BYTES);
-            if (payload_len != 0) {
-                method = METHOD_MODELED;
-            } else {
-                memcpy(framed + ADAPT_BLOCK_HEADER_BYTES, block, n);
-                payload_len = n;
-                method = METHOD_STORED_OBSERVED;
-            }
-        }
-        framed[0] = method;
-        framed[1] = (uint8_t)n;
-        framed[2] = (uint8_t)(n >> 8);
-        framed[3] = (uint8_t)(n >> 16);
-        framed[4] = (uint8_t)(n >> 24);
-        framed[5] = (uint8_t)payload_len;
-        framed[6] = (uint8_t)(payload_len >> 8);
-        framed[7] = (uint8_t)(payload_len >> 16);
-        framed[8] = (uint8_t)(payload_len >> 24);
-        rc = write(write_context, framed, ADAPT_BLOCK_HEADER_BYTES + payload_len);
+        framed_len = frame_block(m, sizes, block, n, input_bytes - n, scan, framed, framed_cap);
+        rc = write(write_context, framed, framed_len);
         if (rc != 0) {
             status = fail(error, ADAPT_ERROR_IO, (uint64_t)(rc < 0 ? -(int64_t)rc : rc), 0);
             goto done;
         }
-        output_bytes += ADAPT_BLOCK_HEADER_BYTES + payload_len;
+        output_bytes += framed_len;
         segments.raw += n;
-        segments.coded += ADAPT_BLOCK_HEADER_BYTES + payload_len;
+        segments.coded += framed_len;
         if (v != NULL) {
-            status = verifier_submit(v, (sizes.x86 || sizes.bmp) ? orig : block, n, framed, ADAPT_BLOCK_HEADER_BYTES + payload_len,
-                                     error);
+            status = verifier_submit(v, (sizes.x86 || sizes.bmp) ? orig : block, n, framed, framed_len, error);
             if (status != ADAPT_OK) {
                 goto done;
             }
@@ -1393,6 +1718,8 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         stats->output_bytes = output_bytes;
         stats->crc32 = crc;
         stats->segments = sizes.segmented ? (uint32_t)segments.count : 1;
+        /* the workers that coded: never more than there were segments */
+        stats->workers = workers >= 2 && sizes.segmented ? (uint32_t)(workers < segments.count ? workers : segments.count) : 1;
     }
     status = fail(error, ADAPT_OK, 0, 0);
 done:
@@ -1412,7 +1739,30 @@ adapt_status adapt_encode_stream_segments(adapt_read_fn read, void *read_context
     if (read == NULL || write == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
     }
-    return encode_blocks(read, read_context, write, write_context, sizes, max_memory, segment_bytes, NULL, stats, error);
+    return encode_blocks(read, read_context, write, write_context, sizes, max_memory, segment_bytes, NULL, 1, 0, stats, error);
+}
+
+adapt_status adapt_encode_stream_threads(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
+                                         adapt_sizes sizes, uint64_t max_memory, uint64_t segment_bytes, uint64_t threads,
+                                         int verify, adapt_stats *stats, adapt_error *error) {
+    uint64_t workers;
+    if (read == NULL || write == NULL || threads == 0) {
+        return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
+    }
+    if (!sizes_valid(sizes)) {
+        return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
+    }
+    workers = adapt_encode_workers(sizes, max_memory, segment_bytes, threads);
+    if (workers >= 2) {
+        return encode_blocks(read, read_context, write, write_context, sizes, max_memory, segment_bytes, NULL, workers,
+                             verify, stats, error);
+    }
+    if (verify) {
+        return adapt_encode_stream_verified_segments(read, read_context, write, write_context, sizes, max_memory,
+                                                     segment_bytes, stats, error);
+    }
+    return adapt_encode_stream_segments(read, read_context, write, write_context, sizes, max_memory, segment_bytes, stats,
+                                        error);
 }
 
 adapt_status adapt_encode_stream(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
@@ -1437,7 +1787,7 @@ adapt_status adapt_encode_stream_verified_segments(adapt_read_fn read, void *rea
         return status;
     }
     verifier_clear(&v);
-    status = encode_blocks(read, read_context, write, write_context, sizes, max_memory, segment_bytes, &v, stats, error);
+    status = encode_blocks(read, read_context, write, write_context, sizes, max_memory, segment_bytes, &v, 1, 0, stats, error);
     verifier_free(&v);
     return status;
 }

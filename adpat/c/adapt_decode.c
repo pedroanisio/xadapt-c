@@ -417,6 +417,7 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
                 stats->output_bytes = output_bytes;
                 stats->crc32 = sum;
                 stats->segments = segments.segmented ? (uint32_t)segments.count : 1;
+                stats->workers = 1;
             }
             status = ADAPT_OK;
             goto done;
@@ -626,6 +627,324 @@ adapt_status adapt_decode(const uint8_t *file, size_t file_len, adapt_limits lim
 
 void adapt_free(uint8_t *bytes) {
     free(bytes);
+}
+
+/* ------------------------------------------------------------------------
+ * Segments on threads
+ * --------------------------------------------------------------------- */
+
+/* Bytes the parallel decoder needs: per worker a model, the longest
+ * segment's bytes and a block's workspace; the file it reads from, which
+ * the caller holds; the headroom. */
+uint64_t adapt_parallel_decode_memory_bound(adapt_sizes sizes, uint64_t workers, uint64_t segment_raw_max,
+                                            uint64_t file_len) {
+    return (adapt_model_bytes(sizes) + segment_raw_max + block_workspace()) * workers + file_len + HEADROOM;
+}
+
+uint64_t adapt_decode_workers(adapt_sizes sizes, uint64_t max_memory, uint64_t segment_raw_max, uint64_t file_len,
+                              uint64_t threads) {
+#ifdef ADAPT_THREADS
+    uint64_t w = threads > ADAPT_WORKERS_MAX ? ADAPT_WORKERS_MAX : threads;
+    if (!sizes.segmented) {
+        return 1;
+    }
+    while (w >= 2 && adapt_parallel_decode_memory_bound(sizes, w, segment_raw_max, file_len) > max_memory) {
+        w--;
+    }
+    return w < 1 ? 1 : w;
+#else
+    (void)sizes;
+    (void)max_memory;
+    (void)segment_raw_max;
+    (void)file_len;
+    (void)threads;
+    return 1;
+#endif
+}
+
+/* The segment table of a complete segmented file, read from its end: the
+ * count before the trailer, the entries before the count. Each entry is
+ * a segment's original and coded length, the coded length counting the
+ * marker byte before every segment after the first. Checks that the
+ * entries account for exactly the bytes between the header and the
+ * table, and for the length the trailer declares. */
+static adapt_status read_segment_table(const uint8_t *file, size_t file_len, size_t header_len, uint64_t declared,
+                                       const uint8_t **entries, uint32_t *count_out, uint64_t *raw_max,
+                                       adapt_error *error) {
+    uint32_t count, i;
+    size_t table_len, table_at;
+    uint64_t raw_total = 0, coded_total = 0, longest = 0;
+    if (file_len < header_len + ADAPT_TRAILER_BYTES + ADAPT_SEGMENT_COUNT_BYTES + 1) {
+        return fail(error, ADAPT_ERROR_TRUNCATED, 0, 0);
+    }
+    count = le32(file + file_len - ADAPT_TRAILER_BYTES - ADAPT_SEGMENT_COUNT_BYTES);
+    table_len = adapt_segment_table_len(count);
+    if (count == 0 || file_len - ADAPT_TRAILER_BYTES < header_len + table_len) {
+        return fail(error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
+    }
+    table_at = file_len - ADAPT_TRAILER_BYTES - table_len;
+    if (file[table_at] != METHOD_TABLE) {
+        return fail(error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
+    }
+    for (i = 0; i < count; i++) {
+        uint32_t raw = le32(file + table_at + 1 + (size_t)i * ADAPT_SEGMENT_ENTRY_BYTES);
+        uint32_t coded = le32(file + table_at + 1 + (size_t)i * ADAPT_SEGMENT_ENTRY_BYTES + 4);
+        if (raw == 0 || coded == 0) {
+            return fail(error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
+        }
+        raw_total += raw;
+        coded_total += coded;
+        if (raw > longest) {
+            longest = raw;
+        }
+    }
+    if (coded_total != table_at - header_len || raw_total != declared) {
+        return fail(error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
+    }
+    *entries = file + table_at + 1;
+    *count_out = count;
+    *raw_max = longest;
+    return ADAPT_OK;
+}
+
+#ifdef ADAPT_THREADS
+#include <pthread.h>
+
+/* One segment's decoding, on a worker: its coded bytes — the marker
+ * before every segment after the first, then its blocks — decoded under a
+ * fresh model into `output`, which must come to exactly `raw` bytes. */
+typedef struct decode_job {
+    adapt_sizes sizes;
+    uint64_t index;
+    uint64_t position;
+    const uint8_t *coded;
+    size_t coded_len;
+    uint8_t *output;
+    size_t raw;
+    size_t produced;
+    adapt_status status;
+    adapt_error error;
+    pthread_t thread;
+    int busy;
+} decode_job;
+
+static void *decode_segment(void *arg) {
+    decode_job *j = arg;
+    block_decoder d;
+    size_t pos = 0;
+    j->produced = 0;
+    j->status = ADAPT_OK;
+    if (j->index > 0) {
+        if (j->coded_len < 1 || j->coded[0] != METHOD_SEGMENT) {
+            j->status = fail(&j->error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
+            return NULL;
+        }
+        pos = 1;
+    }
+    d.m = model_new(j->sizes);
+    if (d.m == NULL) {
+        j->status = fail(&j->error, ADAPT_ERROR_ALLOCATION, 0, 0);
+        return NULL;
+    }
+    while (pos < j->coded_len) {
+        uint8_t method;
+        size_t raw, payload_len;
+        const uint8_t *payload;
+        /* a block the segment's bytes cut short is the table's fault: the
+         * file itself was whole */
+        if (read_block(j->coded, j->coded_len, &pos, &method, &raw, &payload, &payload_len, &j->error) != ADAPT_OK ||
+            method > METHOD_STORED_SKIPPED || raw > j->raw - j->produced) {
+            j->status = fail(&j->error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
+            break;
+        }
+        j->status = decode_block(&d, method, raw, payload, payload_len, j->output + j->produced, &j->error);
+        if (j->status != ADAPT_OK) {
+            break;
+        }
+        if (j->sizes.x86) {
+            x86_inverse(j->output + j->produced, raw);
+        }
+        if (j->sizes.bmp) {
+            bmp_transform(j->output + j->produced, raw, j->position + j->produced, j->sizes, 1);
+        }
+        j->produced += raw;
+    }
+    if (j->status == ADAPT_OK && j->produced != j->raw) {
+        j->status = fail(&j->error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
+    }
+    model_free(d.m);
+    return NULL;
+}
+
+static void decode_job_start(decode_job *j) {
+    j->busy = 1;
+    if (pthread_create(&j->thread, NULL, decode_segment, j) != 0) {
+        decode_segment(j);
+        j->busy = 2;
+    }
+}
+
+static void decode_job_wait(decode_job *j) {
+    if (j->busy == 1) {
+        pthread_join(j->thread, NULL);
+    }
+    j->busy = 0;
+}
+
+/* The finished segment j, in order: its bytes to the writer and into the
+ * checksum. */
+static adapt_status decode_job_emit(decode_job *j, adapt_write_fn write, void *write_context, const crc32_table *t,
+                                    uint32_t *crc, uint64_t *written, adapt_error *error) {
+    int rc;
+    if (j->status != ADAPT_OK) {
+        *error = j->error;
+        return j->status;
+    }
+    *crc = crc32_update(t, *crc, j->output, j->produced);
+    rc = write(write_context, j->output, j->produced);
+    if (rc != 0) {
+        return fail(error, ADAPT_ERROR_IO, (uint64_t)(rc < 0 ? -(int64_t)rc : rc), 0);
+    }
+    *written += j->produced;
+    return ADAPT_OK;
+}
+
+static adapt_status decode_segments_parallel(const uint8_t *file, size_t header_len, adapt_sizes sizes,
+                                             const uint8_t *entries, uint32_t count, uint64_t raw_max, uint64_t workers,
+                                             adapt_write_fn write, void *write_context, uint32_t *crc_out,
+                                             uint64_t *written_out, adapt_error *error) {
+    decode_job *jobs;
+    size_t slots = (size_t)workers, i;
+    size_t coded_at = header_len;
+    uint64_t position = 0, written = 0;
+    uint32_t crc = CRC32_INIT, k;
+    crc32_table t;
+    adapt_status status = ADAPT_OK;
+    crc32_table_init(&t);
+    jobs = calloc(slots, sizeof(*jobs));
+    if (jobs == NULL) {
+        return fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+    }
+    for (i = 0; i < slots; i++) {
+        jobs[i].sizes = sizes;
+        jobs[i].output = malloc((size_t)raw_max);
+        if (jobs[i].output == NULL) {
+            status = fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+        }
+    }
+    for (k = 0; k < count && status == ADAPT_OK; k++) {
+        decode_job *j = &jobs[k % slots];
+        uint32_t raw = le32(entries + (size_t)k * ADAPT_SEGMENT_ENTRY_BYTES);
+        uint32_t coded = le32(entries + (size_t)k * ADAPT_SEGMENT_ENTRY_BYTES + 4);
+        if (j->busy) {
+            decode_job_wait(j);
+            status = decode_job_emit(j, write, write_context, &t, &crc, &written, error);
+            if (status != ADAPT_OK) {
+                break;
+            }
+        }
+        j->index = k;
+        j->position = position;
+        j->coded = file + coded_at;
+        j->coded_len = coded;
+        j->raw = raw;
+        coded_at += coded;
+        position += raw;
+        decode_job_start(j);
+    }
+    for (i = 0; i < slots; i++) {
+        decode_job *j = &jobs[(k + i) % slots];
+        if (!j->busy) {
+            continue;
+        }
+        decode_job_wait(j);
+        if (status == ADAPT_OK) {
+            status = decode_job_emit(j, write, write_context, &t, &crc, &written, error);
+        }
+    }
+    for (i = 0; i < slots; i++) {
+        free(jobs[i].output);
+    }
+    free(jobs);
+    *crc_out = crc;
+    *written_out = written;
+    return status;
+}
+#endif
+
+adapt_status adapt_decode_threads(const uint8_t *file, size_t file_len, adapt_limits limits, uint64_t threads,
+                                  adapt_write_fn write, void *write_context, adapt_stats *stats, adapt_error *error) {
+    adapt_sizes sizes;
+    adapt_status status;
+    size_t header_len;
+    uint64_t declared, workers = 1, raw_max = 0;
+    uint32_t crc, count = 0;
+    const uint8_t *entries = NULL;
+    if ((file == NULL && file_len != 0) || write == NULL || threads == 0) {
+        return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
+    }
+    if (file_len < ADAPT_HEADER_BYTES) {
+        return fail(error, ADAPT_ERROR_TRUNCATED, 0, 0);
+    }
+    status = adapt_read_header(file, file_len, &sizes, error);
+    if (status != ADAPT_OK) {
+        return status;
+    }
+    header_len = adapt_header_len(file);
+    if (sizes.segmented && threads >= 2) {
+        if (file_len < header_len + ADAPT_TRAILER_BYTES) {
+            return fail(error, ADAPT_ERROR_TRUNCATED, 0, 0);
+        }
+        status = adapt_read_trailer(file + file_len - ADAPT_TRAILER_BYTES, &declared, &crc, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        status = read_segment_table(file, file_len, header_len, declared, &entries, &count, &raw_max, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        if (declared > limits.max_output) {
+            return fail(error, ADAPT_ERROR_TOO_LARGE, declared, limits.max_output);
+        }
+        workers = adapt_decode_workers(sizes, limits.max_memory, raw_max, file_len, threads);
+        if (workers > count) {
+            workers = count;
+        }
+    }
+#ifdef ADAPT_THREADS
+    if (workers >= 2) {
+        uint32_t sum;
+        uint64_t written;
+        status = check_memory(adapt_parallel_decode_memory_bound(sizes, workers, raw_max, file_len), limits.max_memory,
+                              error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        status = decode_segments_parallel(file, header_len, sizes, entries, count, raw_max, workers, write, write_context,
+                                          &sum, &written, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        if (written != declared || ~sum != crc) {
+            return fail(error, ADAPT_ERROR_CHECKSUM, 0, 0);
+        }
+        if (stats != NULL) {
+            stats->input_bytes = written;
+            stats->output_bytes = file_len;
+            stats->crc32 = crc;
+            stats->segments = count;
+            stats->workers = (uint32_t)workers;
+        }
+        return fail(error, ADAPT_OK, 0, 0);
+    }
+#endif
+    {
+        memory_reader reader;
+        reader.src = file;
+        reader.len = file_len;
+        reader.pos = 0;
+        return adapt_decode_stream(memory_read, &reader, write, write_context, limits, stats, error);
+    }
 }
 
 adapt_status adapt_declared_len(const uint8_t *file, size_t file_len, uint64_t *length, adapt_error *error) {
