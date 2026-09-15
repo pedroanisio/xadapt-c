@@ -84,10 +84,23 @@ profile (−20 B), and the final blend at 1:1 or 1:7 (+1,072 B, +62 B).
 - The `ADAPT_SHADOW_CHECK` build exempts the two recall-derived slots:
   their lines are guessed after a byte that breaks a match, a wasted
   prefetch at match boundaries and never a bytes fault.
-- `tools/ratio_floor.json` is not re-locked here: the proxy and 32 MiB
-  measurements above are the evidence; the full enwik8 and enwik9 rows
-  are landing runs for the operator (`make ratio-floor`), not
-  development runs.
+- `tools/ratio_floor.json` re-locked on this binary (main 371b42f,
+  sha256 08330fcc…) the same day, on the reference host quiet (load
+  under 1.2 throughout), `tools/check_ratio_floor.py --verify`, every
+  round trip byte for byte, the enwik8 rows the median of three runs:
+
+  | Fixture | Size before | Size after | CPU s before | CPU s after |
+  |---|---:|---:|---:|---:|
+  | enwik8-8MiB | 1,700,354 B | 1,686,110 B (−0.84 %) | 13.3 | 12.2 (12.1, 12.2, 12.3) |
+  | enwik8-16MiB | 3,296,323 B | 3,266,940 B (−0.89 %) | 24.4 | 22.2 (22.2, 22.4, 22.1) |
+  | enwik8 | 18,110,558 B | 17,978,253 B (−0.73 %) | 130.5 | 118.2 (120.0, 117.8, 118.2) |
+  | enwik9 | 150,063,628 B | 147,896,517 B (−1.44 %) | 1,385.4 | 1,159.2 (one run) |
+
+  Size and throughput tighten on every row. enwik9 gains twice what
+  enwik8 does: the four-way recall buckets and the recall-derived slots
+  are worth more on the long file. The enwik8 decode peaks at 653,712
+  KiB of RSS (638 MiB; `cadapt info` names a ~638 MiB model) in 130.8 s
+  wall on the quiet host.
 - The encoder's max vectors are `text-max2.adpt` and `abc-max2.adpt`;
   `text-max.adpt` and `abc-max.adpt` stay as decode fixtures of 21.
 

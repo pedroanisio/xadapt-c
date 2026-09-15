@@ -508,10 +508,10 @@ improve on these (`make gate` checks the first, `make ratio-floor` the rest):
 
 | Fixture | Input | Container floor | Time floor |
 |---|---:|---:|---:|
-| enwik8-8MiB | 8,388,608 B | 1,700,354 B | 13.3 CPU s |
-| enwik8-16MiB | 16,777,216 B | 3,296,323 B | 24.4 CPU s |
-| enwik8 | 100,000,000 B | 18,110,558 B | 130.5 CPU s |
-| enwik9 | 1,000,000,000 B | 150,063,628 B | 1,385.4 CPU s |
+| enwik8-8MiB | 8,388,608 B | 1,686,110 B | 12.2 CPU s |
+| enwik8-16MiB | 16,777,216 B | 3,266,940 B | 22.2 CPU s |
+| enwik8 | 100,000,000 B | 17,978,253 B | 118.2 CPU s |
+| enwik9 | 1,000,000,000 B | 147,896,517 B | 1,159.2 CPU s |
 <!-- floors:end -->
 
 Their thresholds and verification behavior

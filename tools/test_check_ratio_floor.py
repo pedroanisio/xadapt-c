@@ -287,25 +287,25 @@ class FloorCheckTest(unittest.TestCase):
         locked = floor.load_floor(floor.ROOT / "tools" / "ratio_floor.json")
         by_name = {f.fixture: f for f in locked.floors}
         self.assertEqual(sorted(by_name), ["enwik8", "enwik8-16MiB", "enwik8-8MiB", "enwik9"])
-        self.assertEqual(by_name["enwik8-8MiB"].max_container_bytes, 1_700_354)
+        self.assertEqual(by_name["enwik8-8MiB"].max_container_bytes, 1_686_110)
         self.assertEqual(by_name["enwik8-8MiB"].input_bytes, 8 * 1024 * 1024)
-        self.assertEqual(by_name["enwik8-16MiB"].max_container_bytes, 3_296_323)
-        self.assertEqual(by_name["enwik8"].max_container_bytes, 18_110_558)
-        self.assertEqual(by_name["enwik9"].max_container_bytes, 150_063_628)
+        self.assertEqual(by_name["enwik8-16MiB"].max_container_bytes, 3_266_940)
+        self.assertEqual(by_name["enwik8"].max_container_bytes, 17_978_253)
+        self.assertEqual(by_name["enwik9"].max_container_bytes, 147_896_517)
         self.assertEqual(by_name["enwik8"].input_md5, "a1fa5ffddb56f4953e226637dabbb36a")
         self.assertEqual(by_name["enwik9"].input_md5, "e206c3450ac99950df65bf70ef61a12d")
         self.assertEqual(locked.arguments, ["encode", "--max", "--allocation", "context"])
-        # re-locked 2026-09-15 on the merged text-transform binary (LOCKS.md);
-        # the same figures as CPU seconds since the corpus audit's gate fix
+        # re-locked 2026-09-15 on the second max model binary (LOCKS.md), a
+        # quiet host: CPU seconds, the median of three runs on the enwik8 rows
         self.assertEqual({f.measure for f in locked.floors}, {"cpu"})
-        self.assertEqual(by_name["enwik8-8MiB"].seconds, 13.3)
-        self.assertEqual(by_name["enwik8-16MiB"].seconds, 24.4)
-        self.assertEqual(by_name["enwik8"].seconds, 130.5)
-        self.assertEqual(by_name["enwik9"].seconds, 1385.4)
-        self.assertAlmostEqual(by_name["enwik8-8MiB"].min_bytes_per_second, 8 * 1024 * 1024 / 13.3, places=3)
-        self.assertAlmostEqual(by_name["enwik8-16MiB"].min_bytes_per_second, 16 * 1024 * 1024 / 24.4, places=3)
-        self.assertAlmostEqual(by_name["enwik8"].min_bytes_per_second, 100_000_000 / 130.5, places=3)
-        self.assertAlmostEqual(by_name["enwik9"].min_bytes_per_second, 1_000_000_000 / 1385.4, places=3)
+        self.assertEqual(by_name["enwik8-8MiB"].seconds, 12.2)
+        self.assertEqual(by_name["enwik8-16MiB"].seconds, 22.2)
+        self.assertEqual(by_name["enwik8"].seconds, 118.2)
+        self.assertEqual(by_name["enwik9"].seconds, 1159.2)
+        self.assertAlmostEqual(by_name["enwik8-8MiB"].min_bytes_per_second, 8 * 1024 * 1024 / 12.2, places=3)
+        self.assertAlmostEqual(by_name["enwik8-16MiB"].min_bytes_per_second, 16 * 1024 * 1024 / 22.2, places=3)
+        self.assertAlmostEqual(by_name["enwik8"].min_bytes_per_second, 100_000_000 / 118.2, places=3)
+        self.assertAlmostEqual(by_name["enwik9"].min_bytes_per_second, 1_000_000_000 / 1159.2, places=3)
         self.assertEqual(locked.throughput_tolerance, 0.10)
 
 
