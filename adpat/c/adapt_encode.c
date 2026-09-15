@@ -95,6 +95,8 @@ adapt_sizes adapt_sizes_fast(adapt_sizes sizes) {
     sizes.max = 0;
     sizes.compact = 0;
     sizes.lean = 0;
+    sizes.table_frac = 0;
+    sizes.low_start = 0;
     sizes.adaptive = 0;
     sizes.bmp = 0;
     sizes.bmp_offset = sizes.bmp_width = sizes.bmp_rows = 0;
@@ -1797,6 +1799,9 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     if (sizes.text == ADAPT_TEXT_ON ||
         (sizes.text == ADAPT_TEXT_AUTO && !sizes.adaptive && !sizes.bmp && text_detect(block, n))) {
         sizes.text = ADAPT_TEXT_ON;
+        /* the max profile is written sized under the transform, its
+         * arbiters starting at 1/32 (ADAPT_SIZING_LOW_START) */
+        if (sizes.max) sizes.low_start = 1;
         text = text_source_new(read, read_context, &crc_table, v != NULL || verify, block, n);
         if (text == NULL) {
             status = fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
@@ -1852,7 +1857,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     header[3] = 'T';
     header[4] = sizes.adaptive ? (uint8_t)((sizes.max ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + sizes.adaptive - 1) :
                 (sizes.fast ? ADAPT_FAST_VERSION
-                            : (sizes.max ? (sizes.table_frac ? ADAPT_MAX_SIZED_VERSION
+                            : (sizes.max ? (sizes.table_frac || sizes.low_start ? ADAPT_MAX_SIZED_VERSION
                                             : sizes.lean     ? ADAPT_MAX_LEAN_VERSION
                                             : sizes.compact  ? ADAPT_MAX_COMPACT_VERSION
                                                              : ADAPT_MAX_VERSION)
@@ -1879,7 +1884,8 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     }
     if (header[4] == ADAPT_MAX_SIZED_VERSION) {
         header[header_len] = (uint8_t)((sizes.compact ? ADAPT_SIZING_COMPACT : 0) | (sizes.lean ? ADAPT_SIZING_LEAN : 0) |
-                                       (text ? ADAPT_SIZING_TEXT : 0) | (unsigned)sizes.table_frac << ADAPT_SIZING_FRAC_SHIFT);
+                                       (text ? ADAPT_SIZING_TEXT : 0) | (unsigned)sizes.table_frac << ADAPT_SIZING_FRAC_SHIFT |
+                                       (sizes.low_start ? ADAPT_SIZING_LOW_START : 0));
         header_len += ADAPT_SIZING_BYTES;
     }
     if (sizes.bmp) {
@@ -2255,7 +2261,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);

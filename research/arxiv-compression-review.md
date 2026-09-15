@@ -14,7 +14,7 @@ The [paper inventory](arxiv-compression-papers.json) records identifiers, author
 
 ## Verified baseline and version boundary
 
-The reference is the complete saved session [`20260914T123309Z-1e275502`](../bench/results/20260914T123309Z-1e275502/session.json). It encoded the full 100,000,000-byte fixture with a 67,108,864-byte memory budget, one thread, and encode-time verification disabled. The executable identifies itself as `cadapt 0.10.0`; the three profiles emit formats 10, 11, and 12.
+The reference is the complete saved session `20260914T123309Z-1e275502` (`bench/results/20260914T123309Z-1e275502/session.json`, a path git ignores). It encoded the full 100,000,000-byte fixture with a 67,108,864-byte memory budget, one thread, and encode-time verification disabled. The executable identifies itself as `cadapt 0.10.0`; the three profiles emit formats 10, 11, and 12.
 
 | Profile | Archive bytes | Bits per input byte | Recorded encode seconds |
 |---|---:|---:|---:|

@@ -287,10 +287,10 @@ class FloorCheckTest(unittest.TestCase):
         locked = floor.load_floor(floor.ROOT / "tools" / "ratio_floor.json")
         by_name = {f.fixture: f for f in locked.floors}
         self.assertEqual(sorted(by_name), ["enwik8", "enwik8-16MiB", "enwik8-8MiB", "enwik9"])
-        self.assertEqual(by_name["enwik8-8MiB"].max_container_bytes, 1_713_845)
+        self.assertEqual(by_name["enwik8-8MiB"].max_container_bytes, 1_700_354)
         self.assertEqual(by_name["enwik8-8MiB"].input_bytes, 8 * 1024 * 1024)
-        self.assertEqual(by_name["enwik8-16MiB"].max_container_bytes, 3_320_094)
-        self.assertEqual(by_name["enwik8"].max_container_bytes, 18_207_203)
+        self.assertEqual(by_name["enwik8-16MiB"].max_container_bytes, 3_296_323)
+        self.assertEqual(by_name["enwik8"].max_container_bytes, 18_110_558)
         self.assertEqual(by_name["enwik9"].max_container_bytes, 150_063_628)
         self.assertEqual(by_name["enwik8"].input_md5, "a1fa5ffddb56f4953e226637dabbb36a")
         self.assertEqual(by_name["enwik9"].input_md5, "e206c3450ac99950df65bf70ef61a12d")

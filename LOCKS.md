@@ -52,6 +52,108 @@ parallel suite: 887 CPU seconds for 105 wall seconds on 12 CPUs).
 **Status.** Landed 2026-09-15 with the corpus audit's other three fixes
 (CHANGELOG: the hard-link table, whole-block writes, workers capped at
 the CPUs online).
+## 2026-09-15 — A window halved for a table eighth is measured and not taken
+
+**Decision.** The context policy keeps the window whole, as the sized-table
+entry below decided. A rule that halved the window once when the half it
+freed bought the table at least one more eighth of its next doubling was
+written, measured and rejected: it makes enwik8 smaller at every budget
+where the table is short of its target, and larger three rows of the
+mixed corpus at `-6`, which `DLV-3` makes the judge.
+
+**Why.** Measured with `--max --allocation context`, this binary, each
+row the rule's choice against the policy's:
+
+| Input | Budget | Policy | Halved window | Change |
+|---|---:|---:|---:|---:|
+| enwik8, text transform | 128 MiB | 2^22 blocks, window 16 MiB: 18,957,171 B | 9/8 of 2^22, window 8 MiB: 18,920,972 B | −0.19 % |
+| enwik8, `--transform none` | 128 MiB | 19,657,728 B | 19,632,586 B | −0.13 % |
+| enwik8, text transform | 94 MiB (`-6`) | 9/8 of 2^21, window 8 MiB: 19,238,712 B | 10/8 of 2^21, window 4 MiB: 19,230,187 B | −0.04 % |
+| enwik8, text transform | 160 MiB | 10/8 of 2^22, window 32 MiB: 18,857,598 B | 12/8 of 2^22, window 16 MiB: 18,784,270 B | −0.39 % |
+| enwik8, text transform | 256 MiB | 9/8 of 2^23, window 32 MiB: 18,544,928 B | 10/8 of 2^23, window 16 MiB: 18,524,894 B | −0.11 % |
+| the first 32 MiB of `libLLVM.so` | 128 MiB | 3,085,170 B | 3,083,929 B | −0.04 % |
+| silesia/mozilla | `-6` | 12,414,028 B | 12,425,868 B | +0.10 % |
+| silesia/nci | `-6` | 1,278,085 B | 1,279,544 B | +0.11 % |
+| silesia/samba | `-6` | 3,012,350 B (its floor) | 3,023,223 B | +0.36 % |
+
+The corpus rows were attributed by building the encoder both ways, with
+and without the arbiters' 1/32 start of the entry below: mozilla and nci
+reproduce their floors without the halving and change by nothing with the
+start removed, so the halving alone is the loss. A larger recall index
+for the halved window instead of the eighth (enwik8 at 128 MiB:
+18,924,474 B) and both with the window quartered (18,935,762 B) were
+also measured and were smaller gains on enwik8.
+
+**Consequences.**
+- `adapt_sizes_prioritize_context` is unchanged; the measurements are
+  the record of what a 128 MiB text run leaves on the table (0.19 %)
+  and what it would cost a mixed corpus.
+- A future rule that trades the window is judged on `make corpus-floor`
+  at `-6` before enwik8, per the DLV-3 entry.
+
+**Status.** Rejected 2026-09-15.
+
+## 2026-09-15 — The max profile under the text transform is its sized version, the arbiters starting at 1/32
+
+**Decision.** Bit 6 of the sized max profile's sizing byte
+(`adapt_sizes.low_start`, `ADAPT_SIZING_LOW_START`) starts every
+arbiter's trust in a context's stretched probability at the weight 1/32
+rather than 1/4, so the weights are learned from the input sooner than
+trusted. The encoder sets it under the text transform and nowhere else,
+so the max profile under the transform is always written as 58 (61),
+with or without a fraction, and the transform's own max versions 64 to
+66 (69 to 71) are read and no longer written; a decoder honours the bit
+wherever the byte carries it. Bit 7 stays reserved and refused. Every
+file written before decodes as written: bit 6 was zero in every 58 and
+61 file.
+
+**Why.** Measured with `--max --allocation context`, this binary against
+the tree before it, round trips verified where the floor tool ran:
+
+| Input | Budget | Before | After | Change |
+|---|---:|---:|---:|---:|
+| enwik8, first 16 MiB (library) | 128 MiB | 3,336,047 B | 3,330,628 B | −0.16 % |
+| enwik8, first 16 MiB (library) | default tier | 3,320,062 B | 3,296,290 B | −0.72 % |
+| enwik8 (library) | 128 MiB | 18,971,412 B | 18,957,171 B | −0.08 % |
+| enwik8 (the locked command) | default tier | 18,207,203 B | 18,110,558 B | −0.53 % |
+| enwik8-16MiB (the locked command) | default tier | 3,320,094 B | 3,296,323 B | −0.72 % |
+| enwik8-8MiB (`make gate`) | default tier | 1,713,845 B | 1,700,354 B | −0.79 % |
+
+The gain is the transform's: on the plain model the same weight was worth
+0.18 % at 128 MiB and 0.11 % at the default tier on enwik8, measured in
+the session that grew the recall index, and could not be carried by any
+version without a new number; under the transform the model sees words
+as symbols and the arbiters' first trust in each context costs more.
+Gated to the transform so that `DLV-3` holds: text is an input-detected
+path, and the plain model's containers are unchanged byte for byte.
+Also measured under the transform at 128 MiB on the first 16 MiB and
+within noise, so not taken: a 1/64 or 1/16 start, the mixer rate bounds
+(4, 12, 128, 256), its decay (64, 128), the estimation stage's rate (6),
+the mixer's skip (4) and count cap (1,023, 16,383); the lean set stays
+worth 0.16 % there.
+
+Rejected: a text version pair for the sized max profile (a new number
+for a layout the sizing byte already describes); the 1/32 start for
+every max file (unmeasured on the mixed corpus's non-text rows, and the
+bit stays available for the day it is).
+
+**Consequences.**
+- `tools/ratio_floor.json` re-locked on this binary, measured on an Intel
+  Xeon container: enwik8-8MiB 1,700,354 B, enwik8-16MiB 3,296,323 B,
+  enwik8 18,110,558 B, every round trip verified byte for byte; the
+  throughput floors are the reference host's and unchanged. enwik9 is
+  unmeasured on this binary and keeps its floor.
+- The mixed corpus (`make corpus-floor`, the `DLV-3` acceptance): under
+  the default command all 24 rows are byte-identical (the normal profile
+  never carries the bit); under `--max --allocation context -6` the two
+  rows whose first block looks like text shrink, dickens 2,126,598 →
+  2,124,454 B (−0.10 %) and webster 5,838,203 → 5,829,070 B (−0.16 %),
+  and the other 21 are byte-identical, so those two floors are lowered.
+- `cadapt info` prints the arbiters' start (`1/4` or `1/32`).
+- The sized max profile's sizing byte has one reserved bit left, bit 7.
+
+**Status.** Landed 2026-09-15 with `adapt_sizes.low_start`, the sizing
+bit, decoder, encoder and CLI tests, the man page, README and CHANGELOG.
 
 ## 2026-09-15 — `make check` is held to 120 s of wall time
 

@@ -985,6 +985,9 @@ typedef struct model {
     int compact;
     /* Immutable dispatch choice owned by this model, never shared by workers. */
     int cpu_v3;
+    /* 1 when the arbiters' starting weights are 1/32 rather than 1/4
+     * (ADAPT_SIZING_LOW_START); read once, at model_new. */
+    int low_start;
     size_t mix34_row_mask;
     size_t apm2_mask;
     /* The record period in bytes, or 0: when set, the record and field
@@ -2256,14 +2259,18 @@ static void update_fast(model *m, uint32_t bit) {
 }
 
 /* The starting weight of arbiter lane j under a profile: 1/4 for a
- * context's stretched probability, 0 for its other lanes and the runs'. */
-static inline int32_t initial_weight(size_t j, int fast, int max) {
+ * context's stretched probability, or 1/32 when `low` (the sized max
+ * profile's ADAPT_SIZING_LOW_START, measured to leave the arbiters
+ * learning the weights sooner on text), 0 for its other lanes and the
+ * runs'. */
+static inline int32_t initial_weight(size_t j, int fast, int max, int low) {
     size_t base = (size_t)RUN_BASE(fast, max);
+    int32_t trusted = low ? 1 << 11 : 1 << 14;
     if (j < base) {
         /* the first plane, the stretched probabilities, is trusted */
-        return j < base / (size_t)CTX_LANES(max) ? 1 << 14 : 0;
+        return j < base / (size_t)CTX_LANES(max) ? trusted : 0;
     }
-    return j < base + (size_t)RUNS_OF(max) ? 0 : 1 << 14;
+    return j < base + (size_t)RUNS_OF(max) ? 0 : trusted;
 }
 
 static inline model *model_new(adapt_sizes sizes) {
@@ -2337,6 +2344,7 @@ static inline model *model_new(adapt_sizes sizes) {
     m->fast = sizes.fast != 0;
     m->max = sizes.max != 0;
     m->compact = sizes.compact != 0;
+    m->low_start = sizes.low_start != 0;
     m->mix34_row_mask = MIX34_ROW_MASK(m->compact);
     m->apm2_mask = APM2_CONTEXTS(m->max, m->compact) - 1;
     m->period = sizes.period;
@@ -2370,7 +2378,7 @@ static inline model *model_new(adapt_sizes sizes) {
         for (i = 0; i < MIXER_SETS; i++) {
             int32_t *w = m->weights + i * (lanes + 1);
             for (j = 0; j < lanes; j++) {
-                w[j] = initial_weight(j, m->fast, m->max);
+                w[j] = initial_weight(j, m->fast, m->max, m->low_start);
             }
             w[lanes] = 0;
         }
@@ -2380,7 +2388,7 @@ static inline model *model_new(adapt_sizes sizes) {
                              ? m->weights3 + (i - MIXER2_SETS) * (lanes2 + 1)
                              : m->weights4 + (i - MIXER2_SETS - MIXER34_SETS(m->compact)) * (lanes2 + 1);
             for (j = 0; j < lanes2; j++) {
-                w[j] = initial_weight(j, 0, m->max);
+                w[j] = initial_weight(j, 0, m->max, m->low_start);
             }
             w[lanes2] = 0;
         }
@@ -2580,7 +2588,8 @@ static inline int sizes_valid(adapt_sizes s) {
            s.bmp <= 1 && (!s.bmp || (!s.fast && !s.x86 && !s.archive)) &&
            s.compact <= 1 && (!s.compact || (s.max && !s.adaptive && !s.bmp)) && s.lean <= 1 && (!s.lean || s.compact) &&
            s.table_frac <= ADAPT_SIZING_FRAC_MAX && (s.table_frac == 0 || (s.max && !s.adaptive && !s.bmp)) &&
-           s.text <= ADAPT_TEXT_OFF && (s.text != ADAPT_TEXT_ON || (!s.adaptive && !s.bmp && !s.x86));
+           s.text <= ADAPT_TEXT_OFF && (s.text != ADAPT_TEXT_ON || (!s.adaptive && !s.bmp && !s.x86)) &&
+           s.low_start <= 1 && (!s.low_start || (s.max && !s.adaptive && !s.bmp));
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {

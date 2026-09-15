@@ -566,18 +566,56 @@ static void test_framing(void) {
     CHECK(adapt_table_blocks(sizes) == (uint64_t)1 << sizes.table_log);
     /* The sized max profile carries a sizing byte after the fixed header:
      * bit 0 the compact side tables, bit 1 the lean context set, bits 2-4
-     * the table's fraction. A header cut before the byte is truncated; a
-     * reserved bit set is a bad header, as is the lean bit without the
-     * compact one; the compact bit halves the model by the side tables;
-     * the fraction sizes the table in eighths past its power of two. */
+     * the table's fraction, bit 5 the text transform, bit 6 the arbiters'
+     * 1/32 starting weight. A header cut before the byte is truncated;
+     * the reserved bit set is a bad header, as is the lean bit without
+     * the compact one; the compact bit halves the model by the side
+     * tables; the fraction sizes the table in eighths past its power of
+     * two. */
     {
         uint8_t sized[ADAPT_HEADER_BYTES + ADAPT_SIZING_BYTES];
         memcpy(sized, EMPTY_FILE, ADAPT_HEADER_BYTES);
         sized[4] = ADAPT_MAX_SIZED_VERSION;
         CHECK_STATUS(adapt_read_header(sized, ADAPT_HEADER_BYTES, &sizes, &error), ADAPT_ERROR_TRUNCATED);
-        sized[ADAPT_HEADER_BYTES] = 0x40; /* reserved bit 6 */
-        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
         sized[ADAPT_HEADER_BYTES] = 0x80; /* reserved bit 7 */
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+        sized[ADAPT_HEADER_BYTES] = 0xFF;
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+        /* bit 6 is the arbiters' 1/32 start, alone or with everything
+         * else the byte names, and the max profile's alone */
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_LOW_START;
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.max == 1 && sizes.low_start == 1 && sizes.text == 0 && sizes.compact == 0 && sizes.table_frac == 0);
+        CHECK(adapt_sizes_valid(sizes) && adapt_header_len(sized) == sizeof(sized));
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_LOW_START | ADAPT_SIZING_TEXT | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN |
+                                    (uint8_t)(5u << ADAPT_SIZING_FRAC_SHIFT);
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.low_start == 1 && sizes.text == ADAPT_TEXT_ON && sizes.compact == 1 && sizes.lean == 1 && sizes.table_frac == 5);
+        CHECK(adapt_sizes_valid(sizes) && adapt_table_blocks(sizes) == (uint64_t)13 << (sizes.table_log - 3));
+        {
+            adapt_sizes other = sizes;
+            other.max = 0;
+            other.compact = 0;
+            other.lean = 0;
+            other.table_frac = 0;
+            other.text = 0;
+            CHECK(!adapt_sizes_valid(other));
+            other.low_start = 0;
+            CHECK(adapt_sizes_valid(other));
+            other = sizes;
+            other.adaptive = 1;
+            other.text = 0;
+            other.compact = 0;
+            other.lean = 0;
+            other.table_frac = 0;
+            CHECK(!adapt_sizes_valid(other));
+            other.low_start = 0;
+            CHECK(adapt_sizes_valid(other));
+            other = sizes;
+            other.low_start = 2;
+            CHECK(!adapt_sizes_valid(other));
+        }
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_LOW_START | ADAPT_SIZING_LEAN; /* lean without compact, with it too */
         CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
         /* bit 5 is the text transform ahead of the sized model, with any
          * of the tables, sets and fractions; a sized header without it

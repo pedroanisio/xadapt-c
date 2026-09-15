@@ -187,6 +187,16 @@ The binary reports `0.12.0`; the tag is pending.
   transform off.
 
 ### Changed
+- The max profile under the text transform writes its sized version (58,
+  61 with metadata) instead of 64–66 (69–71), which stay readable: bit 6
+  of the sizing byte starts every arbiter's trust in a context's
+  stretched probability at 1/32 rather than 1/4 (`adapt_sizes.low_start`,
+  `ADAPT_SIZING_LOW_START`), which the encoder sets under the transform.
+  Measured on the first 16 MiB of enwik8 under the transform: 3,336,047 →
+  3,330,628 bytes at 128 MiB, 3,320,062 → 3,296,290 at the default tier;
+  on enwik8 at the default tier 18,207,203 → 18,110,558. `cadapt info`
+  prints the arbiters' start; bit 7 of the sizing byte stays reserved and
+  refused.
 - `make check` is held to 120 s of wall time: it runs under `timeout`
   (`CHECK_SECONDS`, root Makefile) and fails when exceeded, with the
   codec's check and the tools' tests at once. The coverage pass runs every suite at

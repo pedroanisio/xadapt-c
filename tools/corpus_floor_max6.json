@@ -15,10 +15,10 @@
       "fixture": "silesia/dickens",
       "input_bytes": 10192446,
       "input_md5": "88334708559f6db57d79096bc0aca07e",
-      "max_container_bytes": 2126598,
+      "max_container_bytes": 2124454,
       "wall_seconds": 13.34,
       "min_bytes_per_second": 764308.9190428917,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs; lowered 2026-09-15 to 2,124,454 B with the max profile's 1/32 arbiter start under the text transform (sizing bit 6 of versions 58/61), make corpus-floor on an Intel Xeon container, round trip verified"
     },
     {
       "fixture": "silesia/mozilla",
@@ -96,10 +96,10 @@
       "fixture": "silesia/webster",
       "input_bytes": 41458703,
       "input_md5": "474931ad907ac27bf962c75ded46c069",
-      "max_container_bytes": 5838203,
+      "max_container_bytes": 5829070,
       "wall_seconds": 56.23,
       "min_bytes_per_second": 737246.3722843685,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs; lowered 2026-09-15 to 5,829,070 B with the max profile's 1/32 arbiter start under the text transform (sizing bit 6 of versions 58/61), make corpus-floor on an Intel Xeon container, round trip verified"
     },
     {
       "fixture": "silesia/x-ray",
