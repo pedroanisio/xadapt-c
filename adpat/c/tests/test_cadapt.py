@@ -34,9 +34,11 @@ SOURCE = b"optional verification\n" * 128
 
 def payload_stream(container: bytes) -> bytes:
     """Remove only validated filesystem metadata for legacy stream comparisons."""
-    if container[4] not in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52, 56, 57, 67, 68, 69, 70, 71):
+    if container[4] not in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52, 56, 57, 61, 67, 68, 69, 70, 71):
         return container
-    base = 8 + (2 if container[7] & 0x80 else 0) + (12 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 0)
+    # the period bytes, the BMP descriptor and the sized max profile's sizing byte precede the metadata
+    base = (8 + (2 if container[7] & 0x80 else 0) + (12 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 0)
+            + (1 if container[4] == 61 else 0))
     assert zlib.crc32(container[:base + 28]) == int.from_bytes(container[base + 28:base + 32], "little")
     offset = 4 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 5 if 67 <= container[4] <= 71 else 3
     return container[:4] + bytes([container[4] - offset]) + container[5:base] + container[base + 32:]
@@ -79,11 +81,13 @@ class CodecTest(unittest.TestCase):
 
 class AllocationTest(CodecTest):
     def test_explicit_text_composes_with_fractional_context_allocation(self):
-        # A pipe at this tier gets a fractional table. The explicit text
-        # option must preserve both the fraction and the transform bit.
+        # A pipe at this tier gets a fractional table (the tier follows the
+        # model's size: with the second max model's int16 side tables the
+        # slack at -3 no longer holds an eighth, -5 does). The explicit
+        # text option must preserve both the fraction and the transform bit.
         for options in ((), ("--threads", "2")):
             with self.subTest(options=options):
-                encoded = self.run_codec("encode", "-", "--max", "-3", "--allocation", "context",
+                encoded = self.run_codec("encode", "-", "--max", "-5", "--allocation", "context",
                                          "--transform", "text", "-o", "-", *options, data=SOURCE)
                 self.assertEqual(encoded.returncode, 0, encoded.stderr)
                 header = encoded.stdout
@@ -130,9 +134,10 @@ class AllocationTest(CodecTest):
                 self.assertEqual(decoded.stdout, data)
         # The compact side tables with the lean context set: a max budget
         # that stops the context table short of the target under
-        # --allocation context writes version 54 (57 with metadata), the
-        # same reader decodes it, and the default budget still writes
-        # version 21 for this input. A pipe's length is unknown, so its
+        # --allocation context writes the sized version 58 (61 with
+        # metadata) whose sizing byte names the second max model, the
+        # compact tables and the lean set, and the same reader decodes it.
+        # A pipe's length is unknown, so its
         # sizes are the tier's alone, whatever it holds: one block of the
         # text is enough, and -7 (186 MiB, which the sizer shares with the
         # proof it may be asked for) stops at 2^21 blocks with no slack for
@@ -140,7 +145,8 @@ class AllocationTest(CodecTest):
         block = (SOURCE * ((1 << 18) // len(SOURCE) + 1))[: 1 << 18]
         compact = self.run_codec("encode", "-", "--max", "--allocation", "context", "-7", data=block)
         self.assertEqual(compact.returncode, 0, compact.stderr)
-        self.assertEqual(compact.stdout[4], 54)
+        self.assertEqual(compact.stdout[4], 58)
+        self.assertEqual(compact.stdout[8] & 0x83, 0x83)  # the second model, the compact tables, the lean set
         back = self.run_codec("decode", "-", data=compact.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual(back.stdout, block)
@@ -165,7 +171,8 @@ class AllocationTest(CodecTest):
         self.assertEqual(back.stdout, block)
         full = self.run_codec("encode", "-", "--max", "--allocation", "context", data=block)
         self.assertEqual(full.returncode, 0, full.stderr)
-        self.assertEqual(full.stdout[4], 21)
+        self.assertEqual(full.stdout[4], 58)  # the default tier: the second max model on the full tables
+        self.assertEqual(full.stdout[8], 0x80)
         auto = self.run_codec("encode", self.source, "-o", "-", "--max", "--allocation", "context", "--adaptive", "auto", "--verify")
         self.assertEqual(auto.returncode, 0, auto.stderr)
         self.assertEqual(len(auto.stdout), min(sizes))
@@ -183,20 +190,22 @@ class AllocationTest(CodecTest):
     @LONG
     def test_named_input_sizes_stop_at_its_target_and_spend_the_slack(self):
         # The named file's length is known, so its table stops at the input's
-        # target (2^21 from -5 up, no fraction: version 57, compact and
-        # lean with metadata); at -4 (48 MiB, raised to the max profile's
-        # floor) the table is short of it and the slack past the 4 MiB
-        # window is spent in eighths, version 61 with metadata, which info
-        # names and which decodes. 4 MiB is the shortest input whose target
-        # is 2^21.
+        # target: 4 MiB, the shortest input whose target is 2^21, reaches it
+        # at -5 with the full tables (version 61, the second max model
+        # alone in its sizing byte). An 8 MiB input's target is 2^22; at -5
+        # (94 MiB) the compact tables and the lean set stop short of it and
+        # the slack past the window is spent in eighths, which info names
+        # and which decodes. (The tiers follow the model's size: a tier
+        # below the max profile's smallest model is raised to it, and the
+        # second model's int16 side tables lowered that floor.)
         big = self.root / "big.bin"
-        big.write_bytes((SOURCE * ((4 << 20) // len(SOURCE) + 1))[: 4 << 20])
+        big.write_bytes((SOURCE * ((8 << 20) // len(SOURCE) + 1))[: 8 << 20])
         named_sized = self.root / "big-sized.adpt"
-        run = self.run_codec("encode", big, "-o", named_sized, "--max", "--allocation", "context", "-4")
+        run = self.run_codec("encode", big, "-o", named_sized, "--max", "--allocation", "context", "-5")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(named_sized.read_bytes()[4], 61)
-        self.assertEqual(named_sized.read_bytes()[8] & 3, 3)
-        self.assertNotEqual(named_sized.read_bytes()[8] >> 2 & 7, 0, "no fraction was taken at -4")
+        self.assertEqual(named_sized.read_bytes()[8] & 0x83, 0x83)
+        self.assertNotEqual(named_sized.read_bytes()[8] >> 2 & 7, 0, "no fraction was taken at -5")
         run = self.run_codec("info", named_sized)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn(b"adapt container version 61", run.stdout)
@@ -206,10 +215,17 @@ class AllocationTest(CodecTest):
         run = self.run_codec("decode", named_sized, "-o", restored_sized)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(restored_sized.read_bytes(), big.read_bytes())
-        named = self.root / "big.adpt"
-        run = self.run_codec("encode", big, "-o", named, "--max", "--allocation", "context", "-5")
+        small = self.root / "small.bin"
+        small.write_bytes((SOURCE * ((4 << 20) // len(SOURCE) + 1))[: 4 << 20])
+        named = self.root / "small.adpt"
+        run = self.run_codec("encode", small, "-o", named, "--max", "--allocation", "context", "-5")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(named.read_bytes()[4], 57)
+        self.assertEqual(named.read_bytes()[4], 61)
+        self.assertEqual(named.read_bytes()[8], 0x80)
+        run = self.run_codec("info", named)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b"context table   2^21 blocks", run.stdout)
+        self.assertIn(b"profile         max\n", run.stdout)
 
     def test_invalid_policy_and_explicit_default(self):
         bad = self.run_codec("encode", self.source, "-o", "-", "--allocation", "unknown")
@@ -284,7 +300,7 @@ class AdaptiveTest(CodecTest):
         asked = self.run_codec("encode", self.source, "-o", "-", "--max", "--transform", "text", "--verify")
         self.assertEqual(asked.returncode, 0, asked.stderr)
         self.assertEqual(asked.stdout[4], 61)
-        self.assertEqual(asked.stdout[8], 0x60)
+        self.assertEqual(asked.stdout[8], 0xE0)  # the second max model, the transform, the 1/32 start
         back = self.run_codec("decode", "-", data=asked.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual(back.stdout, SOURCE)
@@ -807,7 +823,7 @@ class InstructionSetTest(unittest.TestCase):
                 written.append(payload_stream((root / "o.adpt").read_bytes()))
             self.assertEqual(written[0], written[1])
             self.assertEqual(written[1], written[2])
-            self.assertEqual(written[0], (VECTORS / "text-max.adpt").read_bytes())
+            self.assertEqual(written[0], (VECTORS / "text-max2.adpt").read_bytes())
 
 
 class FolderTest(unittest.TestCase):
@@ -1491,7 +1507,7 @@ class CommandTest(CodecTest):
     def test_encode_switches_and_reports(self) -> None:
         text = VECTORS / "text.bin"
         # a file to standard output, and the profiles' version bytes
-        for flags, version in (((), 22), (("--fast",), 23), (("--max",), 24)):
+        for flags, version in (((), 22), (("--fast",), 23), (("--max",), 61)):
             with self.subTest(flags=flags):
                 run = self.run_codec("encode", text, "-o", "-", *flags)
                 self.assertEqual(run.returncode, 0, run.stderr)

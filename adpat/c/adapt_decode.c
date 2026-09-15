@@ -191,13 +191,14 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         }
         sizing = header[at];
         if (sizing & ~(ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START |
-                       (ADAPT_SIZING_FRAC_MAX << ADAPT_SIZING_FRAC_SHIFT))) {
+                       ADAPT_SIZING_MODEL2 | (ADAPT_SIZING_FRAC_MAX << ADAPT_SIZING_FRAC_SHIFT))) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
         s.compact = (sizing & ADAPT_SIZING_COMPACT) != 0;
         s.lean = (sizing & ADAPT_SIZING_LEAN) != 0;
         if (sizing & ADAPT_SIZING_TEXT) s.text = ADAPT_TEXT_ON;
         s.low_start = (sizing & ADAPT_SIZING_LOW_START) != 0;
+        s.model2 = (sizing & ADAPT_SIZING_MODEL2) != 0;
         /* the lean set is never run with the full side tables */
         if (s.lean && !s.compact) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
@@ -288,7 +289,7 @@ uint64_t adapt_table_blocks(adapt_sizes sizes) {
 uint64_t adapt_model_bytes(adapt_sizes sizes) {
     return table_blocks(sizes) * 16 + (sizes.fast ? O1_BYTES : 0) + ((uint64_t)1 << sizes.match_log) * 4 +
            (uint64_t)(APM_CONTEXTS + APM2_CONTEXTS(sizes.max, sizes.compact)) * APM_BUCKETS * 2 +
-           side_table_bytes(sizes.fast, sizes.max, sizes.compact) +
+           side_table_bytes(sizes.fast, sizes.max, sizes.compact, sizes.model2) +
            ((uint64_t)1 << sizes.window_log) + (sizes.adaptive ? sizeof(adaptive_model) : 0);
 }
 

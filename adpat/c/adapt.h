@@ -174,7 +174,20 @@ extern "C" {
  * transform, so the max profile under the transform is always this
  * version; measured on the first 16 MiB of enwik8 under it, 3,336,047 ->
  * 3,330,628 bytes at 128 MiB and 3,320,062 -> 3,296,290 at the default
- * tier. Bit 7 is reserved and zero. */
+ * tier. Bit 7 (ADAPT_SIZING_MODEL2, adapt_sizes.model2) is the second
+ * max model: the first-layer arbiters' weights as int16 in 1/32768 with
+ * a rounded train step (vpmulhrsw) and sixteen-lane dot products
+ * (vpmaddwd), four context slots carrying other contexts than their
+ * names (o5 the 21-byte class history, o8 the order-1 indirect context,
+ * word3 recall's expected byte, sparse2 its next two), recall buckets of
+ * four positions, and a fifth arbiter keyed by the bytes since a space
+ * and the previous byte's class; the encoder sets it for every max
+ * encode, so the max profile is always this version now, and a decoder
+ * sets it from the sizing byte. Measured on the first 8 MiB of enwik8
+ * under the text transform, 1,700,354 -> 1,686,110 bytes with 4.9 %
+ * fewer instructions and a decode 5 % faster; on the first 32 MiB,
+ * 6,351,878 -> 6,297,375. The int16 tables halve the side tables' 36.5
+ * MiB and the fifth arbiter takes 4.8 MiB. */
 #define ADAPT_MAX_SIZED_VERSION 58u
 #define ADAPT_MAX_SIZED_METADATA_VERSION 61u
 #define ADAPT_SIZING_BYTES 1u
@@ -184,6 +197,7 @@ extern "C" {
 #define ADAPT_SIZING_FRAC_MAX 7u
 #define ADAPT_SIZING_TEXT 32u
 #define ADAPT_SIZING_LOW_START 64u
+#define ADAPT_SIZING_MODEL2 128u
 /* The text transform (adapt_text.h) ahead of the normal, fast, max,
  * compact and lean models: versions 62 to 66 in that order, 67 to 71 with
  * metadata (ADAPT_TEXT_METADATA_OFFSET more; 58 to 61 are left to the
@@ -433,6 +447,11 @@ typedef struct adapt_sizes {
      * max profile only); the encoder sets it under the text transform,
      * and a decoder sets it from the sizing byte. */
     uint8_t low_start;
+    /* 1 for the second max model (ADAPT_SIZING_MODEL2, the sized max
+     * profile only): the encoder sets it for every max encode that is
+     * neither adaptive nor BMP, whatever the caller's value, and a decoder
+     * from the sizing byte; see ADAPT_MAX_SIZED_VERSION. */
+    uint8_t model2;
 } adapt_sizes;
 
 /* Blocks of the context table `sizes` describes: 2^table_log, or with a

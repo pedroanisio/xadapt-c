@@ -515,7 +515,9 @@ static void test_compact_side_tables(void) {
     CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, (uint64_t)192 << 20, &s, &error), ADAPT_OK);
     CHECK(s.compact == 0 && s.lean == 0);
     CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, (uint64_t)192 << 20, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
-    CHECK(s.compact == 1 && s.lean == 0 && s.table_log == 23);
+    /* (the second max model's int16 side tables are 13 MiB smaller, so the
+     * full tables reach 2^23 here without the compact ones) */
+    CHECK(s.compact == 0 && s.lean == 0 && s.table_log == 23);
     /* the same input at the default budget reaches its target with the
      * full tables and stays on them (the locked bytes) */
     CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
@@ -527,11 +529,13 @@ static void test_compact_side_tables(void) {
      * next eighth not fitting */
     CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, (uint64_t)256 << 20, &s, &error), ADAPT_OK);
     CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, (uint64_t)256 << 20, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
-    CHECK(s.compact == 0 && s.table_log == 23 && s.table_frac == 1 && s.window_log == 25);
-    CHECK(adapt_table_blocks(s) == (uint64_t)9 << 20);
+    /* (with the int16 side tables the window's doubling fits first, and
+     * the eighth no longer does beside it) */
+    CHECK(s.compact == 0 && s.table_log == 23 && s.table_frac == 0 && s.window_log == 26);
+    CHECK(adapt_table_blocks(s) == (uint64_t)8 << 20);
     CHECK(adapt_encode_memory_bound(s) <= (uint64_t)256 << 20);
     full = s;
-    full.table_frac = 2;
+    full.table_frac = 1;
     CHECK(adapt_encode_memory_bound(full) > (uint64_t)256 << 20);
     /* the default budget reaches the target and takes no fraction; 128
      * MiB has no slack past the compact tables' doubling */
@@ -560,7 +564,8 @@ static void test_compact_side_tables(void) {
     CHECK(s.compact == 0 && s.table_log == adapt_table_log_for(8 << 20));
     CHECK_STATUS(adapt_sizes_for_input_max(1, 8 << 20, (uint64_t)128 << 20, &s, &error), ADAPT_OK);
     CHECK_STATUS(adapt_sizes_prioritize_context(1, 8 << 20, (uint64_t)128 << 20, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
-    CHECK(s.compact == 1 && s.lean == 1 && s.table_log == adapt_table_log_for(8 << 20));
+    /* (the int16 side tables let the full tables reach it at 128 MiB too) */
+    CHECK(s.compact == 0 && s.lean == 0 && s.table_log == adapt_table_log_for(8 << 20));
     /* compact is the max profile's alone, and lean the compact model's */
     full = s;
     full.compact = 1;
@@ -588,7 +593,10 @@ static void test_compact_side_tables(void) {
     s.text = ADAPT_TEXT_OFF; /* the versions under test are the models' own */
     reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error), ADAPT_OK);
-    CHECK(w.len > ADAPT_HEADER_BYTES && coded[4] == ADAPT_MAX_LEAN_VERSION);
+    /* every max encode is the sized version now, its sizing byte naming
+     * the second model with the compact tables and the lean set */
+    CHECK(w.len > ADAPT_HEADER_BYTES && coded[4] == ADAPT_MAX_SIZED_VERSION &&
+          coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
     CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
     adapt_free(back);
@@ -601,7 +609,8 @@ static void test_compact_side_tables(void) {
         reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
-        CHECK(coded[4] == ADAPT_MAX_COMPACT_VERSION && w.len != lean_len);
+        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT) &&
+              w.len != lean_len);
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
         adapt_free(back);
@@ -610,7 +619,7 @@ static void test_compact_side_tables(void) {
         reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
-        CHECK(coded[4] == ADAPT_MAX_COMPACT_VERSION);
+        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT));
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
         adapt_free(back);
@@ -624,7 +633,7 @@ static void test_compact_side_tables(void) {
         reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
-        CHECK(coded[4] == ADAPT_MAX_VERSION && w.len != compact_len);
+        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == ADAPT_SIZING_MODEL2 && w.len != compact_len);
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
         adapt_free(back);
@@ -640,7 +649,7 @@ static void test_compact_side_tables(void) {
         reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
-        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (3u << ADAPT_SIZING_FRAC_SHIFT));
+        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | (3u << ADAPT_SIZING_FRAC_SHIFT)));
         CHECK(w.len != full_len);
         CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
         CHECK(read.compact == 0 && read.lean == 0 && read.table_frac == 3 && read.table_log == s.table_log);
@@ -654,7 +663,7 @@ static void test_compact_side_tables(void) {
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
         CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION);
-        CHECK(coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | (1u << ADAPT_SIZING_FRAC_SHIFT)));
+        CHECK(coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | (1u << ADAPT_SIZING_FRAC_SHIFT)));
         CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
         CHECK(read.compact == 1 && read.lean == 1 && read.table_frac == 1);
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
@@ -1167,7 +1176,7 @@ static void test_segments(void) {
 /* The max profile: the vector, a round trip, and its sizes. */
 static void test_max_profile(void) {
     size_t want_len, src_len, n = 60000, i, out_len;
-    uint8_t *want = read_file("abc-max.adpt", &want_len);
+    uint8_t *want = read_file("abc-max2.adpt", &want_len);
     uint8_t *src = read_file("abc.bin", &src_len);
     uint8_t *data = malloc(n);
     uint8_t *normal = malloc(n + 64);
@@ -1185,7 +1194,7 @@ static void test_max_profile(void) {
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                  ADAPT_OK);
     CHECK(w.len == want_len && memcmp(coded, want, want_len) == 0);
-    CHECK(coded[4] == ADAPT_MAX_VERSION);
+    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == ADAPT_SIZING_MODEL2);
     reset(&r, src, src_len, 1000, &w, coded, n + 64);
     CHECK_STATUS(adapt_encode_stream_verified(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL,
                                               &error),
@@ -1203,7 +1212,7 @@ static void test_max_profile(void) {
     reset(&r, data, n, 4096, &w, coded, n + 64);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                  ADAPT_OK);
-    CHECK(coded[4] == ADAPT_MAX_VERSION && w.len < n / 4);
+    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && w.len < n / 4);
     CHECK(memcmp(coded + ADAPT_HEADER_BYTES, normal + ADAPT_HEADER_BYTES, 32) != 0);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
     CHECK(out_len == n && memcmp(out, data, n) == 0);
@@ -1510,7 +1519,7 @@ static void test_text_transform(void) {
     s.text = ADAPT_TEXT_ON;
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
-    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START));
+    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START));
     CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
     CHECK(read.text == ADAPT_TEXT_ON && read.max && read.low_start && !read.compact && read.table_frac == 0);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
@@ -1532,7 +1541,7 @@ static void test_text_transform(void) {
         reset(&r, data, len, 4096, &w, again, len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error),
                      ADAPT_OK);
-        CHECK(again[4] == ADAPT_MAX_SIZED_VERSION && again[ADAPT_HEADER_BYTES] == ADAPT_SIZING_LOW_START);
+        CHECK(again[4] == ADAPT_MAX_SIZED_VERSION && again[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_LOW_START));
         CHECK_STATUS(adapt_read_header(again, w.len, &read_plain, &error), ADAPT_OK);
         CHECK(read_plain.low_start == 1 && read_plain.text == 0);
         CHECK_STATUS(adapt_decode(again, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
@@ -1546,7 +1555,7 @@ static void test_text_transform(void) {
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
     CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION &&
-          coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT));
+          coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT));
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
     CHECK(back_len == len && memcmp(back, data, len) == 0);
     adapt_free(back);
@@ -1554,7 +1563,7 @@ static void test_text_transform(void) {
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
     CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION &&
-          coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
+          coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
     CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
     CHECK(read.text == ADAPT_TEXT_ON && read.max && read.compact && read.lean && read.low_start);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
@@ -1596,7 +1605,7 @@ static void test_text_transform(void) {
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
         sized_len = w.len;
         CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION);
-        CHECK(coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN |
+        CHECK(coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN |
                                             (3u << ADAPT_SIZING_FRAC_SHIFT)));
         CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
         CHECK(read.text == ADAPT_TEXT_ON && read.table_frac == 3 && read.compact == 1 && read.lean == 1 && read.max == 1 &&
@@ -1609,7 +1618,7 @@ static void test_text_transform(void) {
         reset(&r, data, len, 4096, &w, again, len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
         CHECK(again[4] == ADAPT_MAX_SIZED_VERSION && w.len != sized_len);
-        CHECK(again[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
+        CHECK(again[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
         CHECK_STATUS(adapt_decode(again, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == len && memcmp(back, data, len) == 0);
         adapt_free(back);
@@ -1736,7 +1745,7 @@ static void test_x86_transform(void) {
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, adapt_sizes_max(sizes), ADAPT_DEFAULT_MAX_MEMORY,
                                      &stats, &error),
                  ADAPT_OK);
-    CHECK(coded[4] == ADAPT_MAX_VERSION && (coded[7] & ADAPT_X86_FLAG) != 0);
+    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && (coded[7] & ADAPT_X86_FLAG) != 0);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
     CHECK(out_len == n && memcmp(out, data, n) == 0);
     adapt_free(out);
@@ -1932,7 +1941,7 @@ int main(int argc, char **argv) {
     SHARD(test_vector("records.adpt", "records.bin"));
     SHARD(test_vector_profile("text.adpt", "text.bin", 0));
     SHARD(test_vector_profile("text-fast.adpt", "text.bin", 1));
-    SHARD(test_vector_profile("text-max.adpt", "text.bin", 2));
+    SHARD(test_vector_profile("text-max2.adpt", "text.bin", 2));
     SHARD(test_vector_profile("records.adpt", "records.bin", 0));
     SHARD(test_vector_segments("segmented.adpt", "segmented.bin", 2, ADAPT_BLOCK_BYTES));
     /* FMT-8: two scripts that are three and two bytes a character, pinned

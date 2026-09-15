@@ -567,9 +567,9 @@ static void test_framing(void) {
     /* The sized max profile carries a sizing byte after the fixed header:
      * bit 0 the compact side tables, bit 1 the lean context set, bits 2-4
      * the table's fraction, bit 5 the text transform, bit 6 the arbiters'
-     * 1/32 starting weight. A header cut before the byte is truncated;
-     * the reserved bit set is a bad header, as is the lean bit without
-     * the compact one; the compact bit halves the model by the side
+     * 1/32 starting weight, bit 7 the second max model. A header cut
+     * before the byte is truncated; the lean bit without the compact one
+     * is a bad header; the compact bit halves the model by the side
      * tables; the fraction sizes the table in eighths past its power of
      * two. */
     {
@@ -577,9 +577,13 @@ static void test_framing(void) {
         memcpy(sized, EMPTY_FILE, ADAPT_HEADER_BYTES);
         sized[4] = ADAPT_MAX_SIZED_VERSION;
         CHECK_STATUS(adapt_read_header(sized, ADAPT_HEADER_BYTES, &sizes, &error), ADAPT_ERROR_TRUNCATED);
-        sized[ADAPT_HEADER_BYTES] = 0x80; /* reserved bit 7 */
-        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
-        sized[ADAPT_HEADER_BYTES] = 0xFF;
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_MODEL2; /* bit 7: the second max model, alone */
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.max == 1 && sizes.model2 == 1 && sizes.low_start == 0 && sizes.compact == 0 && adapt_sizes_valid(sizes));
+        sized[ADAPT_HEADER_BYTES] = 0xFF; /* every bit: compact, lean, a fraction of 7, the transform, both starts */
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.model2 == 1 && sizes.compact == 1 && sizes.lean == 1 && sizes.table_frac == 7 && adapt_sizes_valid(sizes));
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_LEAN; /* the lean set without the compact tables */
         CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
         /* bit 6 is the arbiters' 1/32 start, alone or with everything
          * else the byte names, and the max profile's alone */
