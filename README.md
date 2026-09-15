@@ -474,9 +474,9 @@ improve on these (`make gate` checks the first, `make ratio-floor` the rest):
 
 | Fixture | Input | Container floor | Time floor |
 |---|---:|---:|---:|
-| enwik8-8MiB | 8,388,608 B | 1,713,845 B | 13.3 s |
-| enwik8-16MiB | 16,777,216 B | 3,320,094 B | 24.4 s |
-| enwik8 | 100,000,000 B | 18,207,203 B | 130.5 s |
+| enwik8-8MiB | 8,388,608 B | 1,700,354 B | 13.3 s |
+| enwik8-16MiB | 16,777,216 B | 3,296,323 B | 24.4 s |
+| enwik8 | 100,000,000 B | 18,110,558 B | 130.5 s |
 | enwik9 | 1,000,000,000 B | 150,063,628 B | 1,385.4 s |
 <!-- floors:end -->
 
