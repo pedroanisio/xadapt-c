@@ -38,14 +38,21 @@ static int header_has_bmp(const uint8_t *header) {
 int adapt_header_has_metadata(const uint8_t *header) {
     return header != NULL && ((header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION) ||
                               header[4] == ADAPT_MAX_COMPACT_METADATA_VERSION || header[4] == ADAPT_MAX_LEAN_METADATA_VERSION ||
+                              header[4] == ADAPT_MAX_SIZED_METADATA_VERSION ||
                               (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_MAX_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_MAX_BMP_METADATA_VERSION && header[4] <= ADAPT_MAX_BMP_METADATA_LAST_VERSION));
 }
 
+/* The sized max profile's versions carry the sizing byte. */
+static int header_is_sized(const uint8_t *fixed) {
+    return fixed[4] == ADAPT_MAX_SIZED_VERSION || fixed[4] == ADAPT_MAX_SIZED_METADATA_VERSION;
+}
+
 size_t adapt_header_len(const uint8_t *fixed) {
     return ADAPT_HEADER_BYTES + ((fixed[7] & ADAPT_PERIOD_FLAG) ? ADAPT_PERIOD_BYTES : 0) +
+           (header_is_sized(fixed) ? ADAPT_SIZING_BYTES : 0) +
            (adapt_header_has_metadata(fixed) ? ADAPT_METADATA_HEADER_BYTES : 0) + (header_has_bmp(fixed) ? ADAPT_BMP_BYTES : 0);
 }
 
@@ -137,6 +144,11 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         s.max = 1;
         s.compact = 1;
         s.lean = (uint8_t)(version == ADAPT_MAX_LEAN_VERSION);
+    } else if (version == ADAPT_MAX_SIZED_VERSION) {
+        /* the sized max profile: its tables, context set and fraction are
+         * the sizing byte's, read below */
+        s.fast = 0;
+        s.max = 1;
     } else if (version >= ADAPT_ADAPTIVE_VERSION && version <= ADAPT_ADAPTIVE_LAST_VERSION) {
         s.fast = 0;
         s.adaptive = (uint8_t)(version - ADAPT_ADAPTIVE_VERSION + 1);
@@ -155,6 +167,25 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         if (s.period == 0) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
+    }
+    s.table_frac = 0;
+    if (version == ADAPT_MAX_SIZED_VERSION) {
+        size_t at = ADAPT_HEADER_BYTES + (s.period ? ADAPT_PERIOD_BYTES : 0);
+        uint8_t sizing;
+        if (len < at + ADAPT_SIZING_BYTES) {
+            return fail(error, ADAPT_ERROR_TRUNCATED, 0, 0);
+        }
+        sizing = header[at];
+        if (sizing & ~(ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | (ADAPT_SIZING_FRAC_MAX << ADAPT_SIZING_FRAC_SHIFT))) {
+            return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
+        }
+        s.compact = (sizing & ADAPT_SIZING_COMPACT) != 0;
+        s.lean = (sizing & ADAPT_SIZING_LEAN) != 0;
+        /* the lean set is never run with the full side tables */
+        if (s.lean && !s.compact) {
+            return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
+        }
+        s.table_frac = (uint8_t)((sizing >> ADAPT_SIZING_FRAC_SHIFT) & ADAPT_SIZING_FRAC_MAX);
     }
     if (s.bmp) {
         size_t at = ADAPT_HEADER_BYTES + (s.period ? ADAPT_PERIOD_BYTES : 0);
@@ -233,8 +264,12 @@ void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len) {
     }
 }
 
+uint64_t adapt_table_blocks(adapt_sizes sizes) {
+    return table_blocks(sizes);
+}
+
 uint64_t adapt_model_bytes(adapt_sizes sizes) {
-    return ((uint64_t)1 << sizes.table_log) * 16 + (sizes.fast ? O1_BYTES : 0) + ((uint64_t)1 << sizes.match_log) * 4 +
+    return table_blocks(sizes) * 16 + (sizes.fast ? O1_BYTES : 0) + ((uint64_t)1 << sizes.match_log) * 4 +
            (uint64_t)(APM_CONTEXTS + APM2_CONTEXTS(sizes.max, sizes.compact)) * APM_BUCKETS * 2 +
            side_table_bytes(sizes.fast, sizes.max, sizes.compact) +
            ((uint64_t)1 << sizes.window_log) + (sizes.adaptive ? sizeof(adaptive_model) : 0);

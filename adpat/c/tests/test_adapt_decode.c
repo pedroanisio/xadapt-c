@@ -520,32 +520,120 @@ static void test_framing(void) {
     file[4] = 4;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
-    file[4] = ADAPT_MAX_LEAN_METADATA_VERSION + 1;
+    file[4] = ADAPT_MAX_SIZED_METADATA_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_MAX_LEAN_METADATA_VERSION + 1);
-    /* the number between the lean max profile and the compact one's
-     * metadata variant names no format and is refused */
+    CHECK(error.detail == ADAPT_MAX_SIZED_METADATA_VERSION + 1);
+    /* the numbers between the lean max profile and the compact one's
+     * metadata variant, and between the sized profile and its own, name
+     * no format and are refused */
     file[4] = ADAPT_MAX_LEAN_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == ADAPT_MAX_LEAN_VERSION + 1);
+    file[4] = ADAPT_MAX_SIZED_VERSION + 1;
+    CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
+    CHECK(error.detail == ADAPT_MAX_SIZED_VERSION + 1);
+    file[4] = ADAPT_MAX_SIZED_VERSION + 2;
+    CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     /* the compact max profile reads as max with compact set and every
      * context, and its model is smaller than the full one by the side
      * tables it halves */
     file[4] = ADAPT_MAX_COMPACT_VERSION;
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
-    CHECK(sizes.max == 1 && sizes.compact == 1 && sizes.lean == 0 && sizes.fast == 0);
+    CHECK(sizes.max == 1 && sizes.compact == 1 && sizes.lean == 0 && sizes.fast == 0 && sizes.table_frac == 0);
+    CHECK(adapt_header_len(file) == ADAPT_HEADER_BYTES);
+    CHECK(adapt_table_blocks(sizes) == (uint64_t)1 << sizes.table_log);
+    /* The sized max profile carries a sizing byte after the fixed header:
+     * bit 0 the compact side tables, bit 1 the lean context set, bits 2-4
+     * the table's fraction. A header cut before the byte is truncated; a
+     * reserved bit set is a bad header, as is the lean bit without the
+     * compact one; the compact bit halves the model by the side tables;
+     * the fraction sizes the table in eighths past its power of two. */
     {
-        adapt_sizes full = sizes;
-        full.compact = 0;
-        CHECK(adapt_model_bytes(full) > adapt_model_bytes(sizes));
-        CHECK(adapt_model_bytes(full) - adapt_model_bytes(sizes) ==
-              (uint64_t)(1u << 15) * 2 * (uint64_t)(3 * 21 + 6 + 2 + 1 + 1) * 4 + (uint64_t)(1u << 17) * 33 * 2);
+        uint8_t sized[ADAPT_HEADER_BYTES + ADAPT_SIZING_BYTES];
+        memcpy(sized, EMPTY_FILE, ADAPT_HEADER_BYTES);
+        sized[4] = ADAPT_MAX_SIZED_VERSION;
+        CHECK_STATUS(adapt_read_header(sized, ADAPT_HEADER_BYTES, &sizes, &error), ADAPT_ERROR_TRUNCATED);
+        sized[ADAPT_HEADER_BYTES] = 0x20; /* reserved bit 5 */
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+        sized[ADAPT_HEADER_BYTES] = 0x80; /* reserved bit 7 */
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_LEAN; /* lean without compact */
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_LEAN | (uint8_t)(2u << ADAPT_SIZING_FRAC_SHIFT);
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+        /* a zero byte is the full model with a power-of-two table, which
+         * the encoder writes as version 21 but the reader accepts */
+        sized[ADAPT_HEADER_BYTES] = 0;
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.max == 1 && sizes.compact == 0 && sizes.lean == 0 && sizes.table_frac == 0);
+        CHECK(adapt_header_len(sized) == sizeof(sized));
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_COMPACT;
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.max == 1 && sizes.compact == 1 && sizes.lean == 0 && sizes.fast == 0 && sizes.table_frac == 0);
+        CHECK(adapt_header_len(sized) == sizeof(sized));
+        CHECK(adapt_table_blocks(sizes) == (uint64_t)1 << sizes.table_log);
+        {
+            adapt_sizes full = sizes;
+            full.compact = 0;
+            CHECK(adapt_model_bytes(full) > adapt_model_bytes(sizes));
+            CHECK(adapt_model_bytes(full) - adapt_model_bytes(sizes) ==
+                  (uint64_t)(1u << 15) * 2 * (uint64_t)(3 * 21 + 6 + 2 + 1 + 1) * 4 + (uint64_t)(1u << 17) * 33 * 2);
+        }
+        /* full side tables, table 3/8 past 2^table_log: 11/8 of the blocks */
+        sized[ADAPT_HEADER_BYTES] = (uint8_t)(3u << ADAPT_SIZING_FRAC_SHIFT);
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.max == 1 && sizes.compact == 0 && sizes.table_frac == 3);
+        CHECK(adapt_table_blocks(sizes) == (uint64_t)11 << (sizes.table_log - 3));
+        {
+            adapt_sizes whole = sizes;
+            whole.table_frac = 0;
+            CHECK(adapt_model_bytes(sizes) - adapt_model_bytes(whole) == ((uint64_t)3 << (sizes.table_log - 3)) * 16);
+        }
+        /* the fraction belongs to the max profile: a normal-profile sizes
+         * struct with one is invalid */
+        {
+            adapt_sizes normal = sizes;
+            normal.max = 0;
+            CHECK(!adapt_sizes_valid(normal));
+            normal.table_frac = 0;
+            CHECK(adapt_sizes_valid(normal));
+        }
+        /* with a record period the byte follows the period */
+        {
+            uint8_t with_period[ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES + ADAPT_SIZING_BYTES];
+            memcpy(with_period, sized, ADAPT_HEADER_BYTES);
+            with_period[7] |= ADAPT_PERIOD_FLAG;
+            with_period[8] = 3;
+            with_period[9] = 0;
+            with_period[10] = ADAPT_SIZING_COMPACT | (uint8_t)(1u << ADAPT_SIZING_FRAC_SHIFT);
+            CHECK_STATUS(adapt_read_header(with_period, sizeof(with_period), &sizes, &error), ADAPT_OK);
+            CHECK(sizes.period == 3 && sizes.compact == 1 && sizes.table_frac == 1);
+            CHECK(adapt_header_len(with_period) == sizeof(with_period));
+        }
+        /* the lean bit with the compact one reads as the lean model, with
+         * its fraction from the same byte */
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | (uint8_t)(2u << ADAPT_SIZING_FRAC_SHIFT);
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.max == 1 && sizes.lean == 1 && sizes.compact == 1 && sizes.table_frac == 2);
+        CHECK(adapt_table_blocks(sizes) == (uint64_t)10 << (sizes.table_log - 3));
+        /* the sized metadata variant carries the byte too, and the
+         * numbers between are refused */
+        sized[4] = ADAPT_MAX_SIZED_METADATA_VERSION;
+        CHECK(adapt_header_has_metadata(sized));
+        CHECK(adapt_header_len(sized) == sizeof(sized) + ADAPT_METADATA_HEADER_BYTES);
+        sized[4] = ADAPT_MAX_SIZED_VERSION + 1;
+        CHECK(!adapt_header_has_metadata(sized));
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
+        sized[4] = ADAPT_MAX_SIZED_VERSION + 2;
+        CHECK(!adapt_header_has_metadata(sized));
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     }
     /* the lean one reads as compact with lean set; the metadata variants
      * of both carry a metadata record, the numbers between do not */
     file[4] = ADAPT_MAX_LEAN_VERSION;
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
-    CHECK(sizes.max == 1 && sizes.compact == 1 && sizes.lean == 1 && sizes.fast == 0);
+    CHECK(sizes.max == 1 && sizes.compact == 1 && sizes.lean == 1 && sizes.fast == 0 && sizes.table_frac == 0);
+    CHECK(adapt_header_len(file) == ADAPT_HEADER_BYTES);
     file[4] = ADAPT_MAX_COMPACT_METADATA_VERSION;
     CHECK(adapt_header_has_metadata(file));
     file[4] = ADAPT_MAX_LEAN_METADATA_VERSION;

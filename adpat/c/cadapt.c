@@ -3280,8 +3280,13 @@ static int info_command(int argc, char **argv) {
     if (sizes.segmented) {
         printf("segments        %lu\n", (unsigned long)count);
     }
-    printf("context table   2^%u blocks (%llu MiB)\n", sizes.table_log,
-           (unsigned long long)((((uint64_t)1 << sizes.table_log) * 16) >> 20));
+    if (sizes.table_frac == 0) {
+        printf("context table   2^%u blocks (%llu MiB)\n", sizes.table_log,
+               (unsigned long long)((adapt_table_blocks(sizes) * 16) >> 20));
+    } else {
+        printf("context table   %llu blocks (%llu MiB, %u/8 past 2^%u)\n", (unsigned long long)adapt_table_blocks(sizes),
+               (unsigned long long)((adapt_table_blocks(sizes) * 16) >> 20), 8u + sizes.table_frac, sizes.table_log);
+    }
     printf("recall table    2^%u entries (%llu MiB)\n", sizes.match_log,
            (unsigned long long)((((uint64_t)1 << sizes.match_log) * 4) >> 20));
     printf("window          2^%u bytes (%llu MiB)\n", sizes.window_log, (unsigned long long)(((uint64_t)1 << sizes.window_log) >> 20));

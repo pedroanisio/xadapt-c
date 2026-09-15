@@ -152,10 +152,33 @@ extern "C" {
  * `lean` from the version, so a version-53 file keeps every context. */
 #define ADAPT_MAX_LEAN_VERSION 54u
 #define ADAPT_MAX_LEAN_METADATA_VERSION 57u
+/* The max profile sized to its budget (ADAPT_MAX_SIZED_VERSION, 58; 61
+ * with metadata): one sizing byte follows the fixed header and the period
+ * bytes, ahead of any metadata, and describes the whole model. Bit 0 is
+ * the compact side tables (the model of version 53), bit 1 the lean
+ * context set (the model of 54; never without bit 0), bits 2 to 4 the
+ * context table's fraction f, 0 to 7: the table holds
+ * (8 + f) << (table_log - 3) blocks, so a budget between two powers of
+ * two is spent on it rather than left idle — a hash then picks its line
+ * by a range multiply instead of a mask (see adapt_table_blocks).
+ * Measured on enwik8 at 256 MiB, a 160 MiB table against the 128 MiB one,
+ * 19,185,877 -> 19,066,780 bytes. The encoder takes only the fraction the
+ * budget's slack holds after the window, never a smaller window, and
+ * writes this version only for a fraction above 0: a power-of-two table
+ * keeps versions 21, 53 and 54, so every file they wrote decodes as
+ * written. Bits 5 to 7 are reserved and zero. */
+#define ADAPT_MAX_SIZED_VERSION 58u
+#define ADAPT_MAX_SIZED_METADATA_VERSION 61u
+#define ADAPT_SIZING_BYTES 1u
+#define ADAPT_SIZING_COMPACT 1u
+#define ADAPT_SIZING_LEAN 2u
+#define ADAPT_SIZING_FRAC_SHIFT 2u
+#define ADAPT_SIZING_FRAC_MAX 7u
 #define ADAPT_BMP_BYTES 12u
 #define ADAPT_METADATA_BYTES 28u
 #define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)
-#define ADAPT_HEADER_MAX_BYTES (ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES + ADAPT_BMP_BYTES + ADAPT_METADATA_HEADER_BYTES)
+#define ADAPT_HEADER_MAX_BYTES \
+    (ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES + ADAPT_BMP_BYTES + ADAPT_SIZING_BYTES + ADAPT_METADATA_HEADER_BYTES)
 
 /* POSIX permission bits and signed Unix seconds plus nanoseconds. ctime
  * and creation time are filesystem-managed and are not reconstructed. */
@@ -335,7 +358,17 @@ typedef struct adapt_sizes {
      * policy sets it with `compact` at a table of ADAPT_COMPACT_TABLE_LOG
      * blocks or fewer; a decoder sets it from the version. */
     uint8_t lean;
+    /* The context table's fraction, 0 to 7 (ADAPT_SIZING_FRAC_MAX): it
+     * holds (8 + table_frac) << (table_log - 3) blocks. Only the sized max
+     * profile carries it (ADAPT_MAX_SIZED_VERSION); every other version
+     * has 0, a power of two. adapt_sizes_prioritize_context sets it from
+     * the budget's slack. */
+    uint8_t table_frac;
 } adapt_sizes;
+
+/* Blocks of the context table `sizes` describes: 2^table_log, or with a
+ * fraction (8 + table_frac) << (table_log - 3). */
+uint64_t adapt_table_blocks(adapt_sizes sizes);
 
 /* Probe a BMP24 header without decoding text or modifying sizes on failure. */
 int adapt_bmp_probe(const uint8_t *prefix, size_t length, adapt_sizes *sizes);

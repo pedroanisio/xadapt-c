@@ -2,6 +2,62 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — A budget between two powers of two is spent on the context table (the sized max profile, versions 58/61)
+
+**Decision.** The context table's block count is no longer bound to a
+power of two: the sized max profile (version 58, 61 with metadata) carries
+one sizing byte after the fixed header and the period bytes, which names
+the whole model — bit 0 the compact side tables of the entries below, bit
+1 their lean context set (never without bit 0), bits 2–4 the table's
+fraction f, the table holding (8 + f) << (table_log − 3) blocks; bits 5–7
+are reserved and zero. For a fractional table a hash picks its line by a
+range multiply of its low 32 bits (`block_line`) — the idea is Daniel
+Lemire's "fastrange" (2016, a published technique; the three lines here
+are this project's own) — for a power of two by the mask as before, so
+every unsized container's bytes are unchanged.
+Under `--allocation context` the encoder, once the table has reached what
+the budget holds as a power of two and the window has grown, gives the
+slack to the table an eighth of its next doubling at a time; it never
+shrinks the window for it, and a table at its target takes none. The
+version is written only for a fraction above 0: a power-of-two table
+keeps versions 21, 53 and 54, so the files those versions wrote — the
+pinned `text-compact.adpt` and `text-lean.adpt` among them — decode as
+written. The alternative, the byte on 53/54 themselves, was rejected for
+that reason: it would have re-laid a version already on `main`.
+
+**Why.** Measured on enwik8, `--max --allocation context`, this binary:
+
+| Budget | Table before | Table after | Container | Change |
+|---:|---:|---:|---:|---:|
+| 256 MiB | 128 MiB (2^23), window 32 MiB | 160 MiB (10/8), window 32 MiB, bound bypassed | 19,185,877 → 19,066,780 B | −0.62 % |
+| 256 MiB, first 32 MiB | 128 MiB | 144 MiB (9/8), window 32 MiB — the sizer's choice | 6,539,402 → 6,524,109 B | −0.23 % |
+| 512 MiB | 256 MiB (2^24), window 128 MiB | 288 MiB (9/8), window 128 MiB — the sizer's choice | 18,831,629 → 18,780,150 B | −0.27 % |
+| 256 MiB, first 32 MiB | 128 MiB, window 32 MiB | 160 MiB, window 16 MiB | 6,539,402 → 6,513,205 B | −0.40 % (not chosen: the window is not traded) |
+| 128 MiB, first 32 MiB | 64 MiB, window 16 MiB (compact) | 80 MiB, window 1 MiB | 6,659,483 → 6,679,868 B | +0.31 % (why the window is kept) |
+
+The table's exchange rate on this file is −2.46, −2.10, −1.85, −1.42 % per
+doubling from 32 MiB (`docs/performance-audit-128mib-2026-09-15.md`); the
+fraction spends what the power-of-two steps skip. At 128 MiB the compact
+model leaves no slack, so the fraction is 0 and the entry below stands.
+
+**Consequences.**
+- The locked floors (enwik8 at 674 MiB, enwik9) reach their table target
+  and take no fraction; their bytes are unchanged, `cmp`-identical on the
+  8 MiB proxy.
+- A decoder reads `compact`, `lean` and the fraction from the sizing
+  byte on versions 58/61, where the byte is required (a header cut before
+  it is truncated; a reserved bit set, or the lean bit without the
+  compact one, is a bad header); on 53/54 it reads them from the version
+  as before. Versions 59 and 60 name no format and are refused.
+- The window policy (`--allocation window`) and the threaded sizers take
+  no fraction; extending them is a new entry with its runs.
+- Peak RSS follows the model: 240 MiB at 256 MiB (was 224).
+
+**Status.** Landed 2026-09-15 with `adapt_sizes.table_frac`,
+`adapt_table_blocks()`, the sizer rule, `cadapt info`, and C and CLI tests
+(header parsing and its failure paths, the sizer's choices at 160 and 256
+MiB, sized round trips of the full, compact and lean models through both
+instruction-set paths, a named sized container with metadata).
 ## 2026-09-15 — Lean context set for compact tables of 2^22 blocks or fewer (versions 54/57)
 
 **Decision.** A compact model whose context table is at most 2^22 blocks

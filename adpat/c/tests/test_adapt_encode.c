@@ -521,10 +521,37 @@ static void test_compact_side_tables(void) {
     CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
     CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
     CHECK(s.compact == 0 && s.lean == 0 && s.table_log == 25);
-    /* a table already past ADAPT_COMPACT_TABLE_LOG keeps the full tables */
+    /* a table already past ADAPT_COMPACT_TABLE_LOG keeps the full tables,
+     * and the budget's slack past the window goes to the table as a
+     * fraction of its next doubling: at 256 MiB, 9/8 of 2^23 blocks, the
+     * next eighth not fitting */
     CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, (uint64_t)256 << 20, &s, &error), ADAPT_OK);
     CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, (uint64_t)256 << 20, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
-    CHECK(s.compact == 0 && s.table_log == 23);
+    CHECK(s.compact == 0 && s.table_log == 23 && s.table_frac == 1 && s.window_log == 25);
+    CHECK(adapt_table_blocks(s) == (uint64_t)9 << 20);
+    CHECK(adapt_encode_memory_bound(s) <= (uint64_t)256 << 20);
+    full = s;
+    full.table_frac = 2;
+    CHECK(adapt_encode_memory_bound(full) > (uint64_t)256 << 20);
+    /* the default budget reaches the target and takes no fraction; 128
+     * MiB has no slack past the compact tables' doubling */
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.table_frac == 0);
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, (uint64_t)128 << 20, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, (uint64_t)128 << 20, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.compact == 1 && s.table_log == 22 && s.table_frac == 0);
+    /* between the compact tables' 2^22 (128 MiB) and 2^23 (192 MiB) the
+     * slack past the window is the table's: at 160 MiB two eighths, with
+     * the lean set kept since the table's power of two is still 2^22 */
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, (uint64_t)160 << 20, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, (uint64_t)160 << 20, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.compact == 1 && s.lean == 1 && s.table_log == 22 && s.table_frac == 2 && s.window_log == 25);
+    CHECK(adapt_table_blocks(s) == (uint64_t)10 << 19);
+    CHECK(adapt_encode_memory_bound(s) <= (uint64_t)160 << 20);
+    full = s;
+    full.table_frac = 3;
+    CHECK(adapt_encode_memory_bound(full) > (uint64_t)160 << 20);
     /* a small input whose target the full tables reach keeps them (the
      * CI proxy's bytes at the default budget); at 128 MiB the full tables
      * stop one short of it and the compact ones reach it */
@@ -600,6 +627,41 @@ static void test_compact_side_tables(void) {
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
         adapt_free(back);
+    }
+    {
+        /* a fraction of any of the three writes the sized version, whose
+         * sizing byte names the tables, the set and the fraction, and the
+         * reader gives the same sizes back; a lean sized file is read
+         * with its lean set */
+        adapt_sizes read;
+        size_t full_len = w.len;
+        s.table_frac = 3;
+        reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
+        CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
+                     ADAPT_OK);
+        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (3u << ADAPT_SIZING_FRAC_SHIFT));
+        CHECK(w.len != full_len);
+        CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
+        CHECK(read.compact == 0 && read.lean == 0 && read.table_frac == 3 && read.table_log == s.table_log);
+        CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+        CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
+        adapt_free(back);
+        s.compact = 1;
+        s.lean = 1;
+        s.table_frac = 1;
+        reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
+        CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
+                     ADAPT_OK);
+        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION);
+        CHECK(coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | (1u << ADAPT_SIZING_FRAC_SHIFT)));
+        CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
+        CHECK(read.compact == 1 && read.lean == 1 && read.table_frac == 1);
+        CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+        CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
+        adapt_free(back);
+        s.compact = 0;
+        s.lean = 0;
+        s.table_frac = 0;
     }
     free(coded);
     free(data);

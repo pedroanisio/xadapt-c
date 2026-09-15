@@ -58,6 +58,24 @@ The binary reports `0.12.0`; the tag is pending.
   and the full set is kept (the lean one lost 0.05 % there). A version-53 file keeps every
   context; `cadapt info` names the compact tables and the lean set.
   `adapt_sizes` gains `lean`.
+- Container versions 58 and 61 (with metadata): the max profile sized to
+  its budget. One sizing byte follows the fixed header (and the period
+  bytes): bit 0 the compact side tables, bit 1 the lean context set, bits
+  2–4 the context table's fraction f, so a table may hold
+  (8 + f) << (table_log − 3) blocks and a budget between two powers of
+  two is spent on it rather than left idle — a hash then picks its line
+  by a range multiply instead of a mask. `--allocation context` takes
+  only the fraction the budget's slack holds after the window, never a
+  smaller window, and writes the version only for a fraction above 0, so
+  a power-of-two table keeps versions 21, 53 and 54 and every file they
+  wrote decodes as written. Measured on enwik8 at 256 MiB: a 160 MiB
+  table against the 128 MiB one, 19,185,877 → 19,066,780 bytes
+  (−0.62 %); the sizer's own choice there, 9/8 (144 MiB), −0.23 % on the
+  first 32 MiB, and at 512 MiB, 9/8 (288 MiB), 18,831,629 → 18,780,150
+  (−0.27 %). The default budget reaches its target and takes none, so
+  the locked floors are byte-identical. `adapt_sizes` gains `table_frac`;
+  `adapt_table_blocks()` gives the block count; `cadapt info` prints it
+  for a sized table.
 
 ### Changed
 - The per-bit path of the normal and max profiles is faster and writes the
