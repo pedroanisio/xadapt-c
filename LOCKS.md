@@ -31,7 +31,7 @@ other agents' jobs, every file decoded byte for byte):
 | Command | Corpus | Bytes |
 |---|---|---:|
 | `encode` (default) | Silesia + Canterbury, 214,749,364 B | 40,478,327 B (18.85 %) |
-| `encode --max --allocation context -6` | the same | 40,330,336 B (18.78 %) |
+| `encode --max --allocation context -6` | the same | 40,330,336 B (18.78 %); 40,311,762 B once the text bit below landed (dickens −0.17 %, webster −0.26 %, the rest identical) |
 
 **Consequences.**
 - `make corpus-floor` joins `make gate` and `make ratio-floor` as the
@@ -77,6 +77,32 @@ old rate would let the transform's speed be given back unnoticed. The
 **Status.** Locked 2026-09-15, enwik8 first (c279849) and enwik9 after
 its measured round trip (decoded byte for byte in 1,748 s); the operator
 asked for this lock ahead of every other session's work.
+
+## 2026-09-15 — The sizing byte carries the text transform (bit 5), so a fraction and the transform compose
+
+**Decision.** On the sized max versions 58/61 bit 5 of the sizing byte is
+the text transform; the encoder writes 58/61 with the bit when it takes
+both a fraction and the transform, and the text versions 62–71 (a
+power-of-two table) when there is no fraction. Bits 6 and 7 stay
+reserved. A sized header without the bit reads with the transform off.
+
+**Why.** At `-6` the encoder took the transform and dropped the fraction
+(the text versions have no sizing byte), losing the −0.39 % the fraction
+was worth there. Measured on enwik8, `--max --allocation context -6`,
+this binary against main at 15d0cbe: 19,306,669 → 19,252,902 B
+(−0.28 %), version 61, table 9/8 of 2^21 (36 MiB), peak RSS 89 MB,
+decoded byte for byte. Rejected: a text bit in the fixed header's flag
+byte (its bits are the window's), and a sized text version pair (four
+more numbers for one bit).
+
+**Consequences.** The corpus rows whose first block looks like text and
+whose tier leaves slack change under `--max -6`; the default command's
+bytes are unchanged (the normal profile takes no fraction).
+
+**Status.** Landed 2026-09-15 with `ADAPT_SIZING_TEXT`, the encoder and
+decoder rules, and C tests (the bit with every table, set and fraction; a
+sized text container written, read back and decoded; the same sizes
+without a fraction still the text version).
 
 ## 2026-09-15 — The memory tier is encode's only memory setting; `-10`/`-11`; decode's caps apply only when given
 

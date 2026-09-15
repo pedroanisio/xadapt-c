@@ -15,10 +15,10 @@
       "fixture": "silesia/dickens",
       "input_bytes": 10192446,
       "input_md5": "88334708559f6db57d79096bc0aca07e",
-      "max_container_bytes": 2130154,
+      "max_container_bytes": 2126598,
       "wall_seconds": 14.2,
       "min_bytes_per_second": 717828.7204713163,
-      "measured_with": "cadapt at main 15d0cbe"
+      "measured_with": "cadapt at main 15d0cbe; lowered by the sizing byte's text bit (text transform with a table fraction), identical round trip, 2026-09-15, host shared with other agents' jobs"
     },
     {
       "fixture": "silesia/mozilla",
@@ -96,10 +96,10 @@
       "fixture": "silesia/webster",
       "input_bytes": 41458703,
       "input_md5": "474931ad907ac27bf962c75ded46c069",
-      "max_container_bytes": 5853221,
+      "max_container_bytes": 5838203,
       "wall_seconds": 60.01,
       "min_bytes_per_second": 690910.809272386,
-      "measured_with": "cadapt at main 15d0cbe"
+      "measured_with": "cadapt at main 15d0cbe; lowered by the sizing byte's text bit (text transform with a table fraction), identical round trip, 2026-09-15, host shared with other agents' jobs"
     },
     {
       "fixture": "silesia/x-ray",

@@ -190,11 +190,13 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
             return fail(error, ADAPT_ERROR_TRUNCATED, 0, 0);
         }
         sizing = header[at];
-        if (sizing & ~(ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | (ADAPT_SIZING_FRAC_MAX << ADAPT_SIZING_FRAC_SHIFT))) {
+        if (sizing & ~(ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | ADAPT_SIZING_TEXT |
+                       (ADAPT_SIZING_FRAC_MAX << ADAPT_SIZING_FRAC_SHIFT))) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
         s.compact = (sizing & ADAPT_SIZING_COMPACT) != 0;
         s.lean = (sizing & ADAPT_SIZING_LEAN) != 0;
+        if (sizing & ADAPT_SIZING_TEXT) s.text = ADAPT_TEXT_ON;
         /* the lean set is never run with the full side tables */
         if (s.lean && !s.compact) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);

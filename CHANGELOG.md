@@ -107,6 +107,14 @@ The binary reports `0.12.0`; the tag is pending.
   `tools/corpus_floor_max6.json`; `check_ratio_floor.py --corpus DIR`).
   Locked at 15d0cbe: 214,749,364 → 40,478,327 B under the default command.
 
+- The sized max profile's sizing byte carries the text transform (bit 5),
+  so a table fraction and the transform are taken together where before
+  the transform dropped the fraction: enwik8 `--max --allocation context
+  -6`, 19,306,669 → 19,252,902 B (−0.28 %), version 61, peak RSS 89 MB,
+  decoded byte for byte. A text version (62–71) still names a
+  power-of-two table; a sized header without the bit reads with the
+  transform off.
+
 ### Changed
 - The memory tier is encode's only memory setting. `-10` and `-11` are new,
   1 and 2 GiB, the tiers above xz's ladder that the max profile's largest

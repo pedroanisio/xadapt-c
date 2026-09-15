@@ -1795,9 +1795,6 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     if (sizes.text == ADAPT_TEXT_ON ||
         (sizes.text == ADAPT_TEXT_AUTO && !sizes.adaptive && !sizes.bmp && text_detect(block, n))) {
         sizes.text = ADAPT_TEXT_ON;
-        /* the text versions name a power-of-two table: the transform is
-         * worth more than a table's fraction, so the fraction goes */
-        sizes.table_frac = 0;
         text = text_source_new(read, read_context, &crc_table, v != NULL || verify, block, n);
         if (text == NULL) {
             status = fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
@@ -1859,8 +1856,9 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
                                                              : ADAPT_MAX_VERSION)
                                          : ADAPT_FORMAT_VERSION));
     if (sizes.bmp) header[4] = (uint8_t)((sizes.max ? ADAPT_MAX_BMP_VERSION : ADAPT_BMP_VERSION) + sizes.adaptive);
-    if (text) {
-        /* the text versions, in the order of the models they front */
+    if (text && header[4] != ADAPT_MAX_SIZED_VERSION) {
+        /* the text versions, in the order of the models they front; a
+         * sized model carries the transform in its sizing byte instead */
         header[4] = (uint8_t)(sizes.fast ? ADAPT_TEXT_FAST_VERSION
                               : !sizes.max ? ADAPT_TEXT_VERSION
                               : sizes.lean ? ADAPT_TEXT_MAX_LEAN_VERSION
@@ -1879,7 +1877,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     }
     if (header[4] == ADAPT_MAX_SIZED_VERSION) {
         header[header_len] = (uint8_t)((sizes.compact ? ADAPT_SIZING_COMPACT : 0) | (sizes.lean ? ADAPT_SIZING_LEAN : 0) |
-                                       (unsigned)sizes.table_frac << ADAPT_SIZING_FRAC_SHIFT);
+                                       (text ? ADAPT_SIZING_TEXT : 0) | (unsigned)sizes.table_frac << ADAPT_SIZING_FRAC_SHIFT);
         header_len += ADAPT_SIZING_BYTES;
     }
     if (sizes.bmp) {

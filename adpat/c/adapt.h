@@ -166,7 +166,9 @@ extern "C" {
  * budget's slack holds after the window, never a smaller window, and
  * writes this version only for a fraction above 0: a power-of-two table
  * keeps versions 21, 53 and 54, so every file they wrote decodes as
- * written. Bits 5 to 7 are reserved and zero. */
+ * written. Bit 5 is the text transform (adapt_text.h, the transform of
+ * versions 64 to 66) ahead of the sized model, so a fraction and the
+ * transform are taken together; bits 6 and 7 are reserved and zero. */
 #define ADAPT_MAX_SIZED_VERSION 58u
 #define ADAPT_MAX_SIZED_METADATA_VERSION 61u
 #define ADAPT_SIZING_BYTES 1u
@@ -174,6 +176,7 @@ extern "C" {
 #define ADAPT_SIZING_LEAN 2u
 #define ADAPT_SIZING_FRAC_SHIFT 2u
 #define ADAPT_SIZING_FRAC_MAX 7u
+#define ADAPT_SIZING_TEXT 32u
 /* The text transform (adapt_text.h) ahead of the normal, fast, max,
  * compact and lean models: versions 62 to 66 in that order, 67 to 71 with
  * metadata (ADAPT_TEXT_METADATA_OFFSET more; 58 to 61 are left to the
@@ -190,9 +193,9 @@ extern "C" {
  * with the model unchanged, at 128 MiB (--max --allocation context)
  * 19,657,760 -> 18,958,016 bytes, the model coding 62 % of the bytes.
  * Never with the adaptive predictors, the BMP transform or the x86
- * transform, and never with a table fraction: a text version names a
- * power-of-two table, and the transform is worth more than the fraction,
- * which the encoder drops when it takes the transform. Each side's book,
+ * transform. A text version names a power-of-two table; with a table
+ * fraction the transform rides the sized version's sizing byte instead
+ * (ADAPT_SIZING_TEXT), so the two are taken together. Each side's book,
  * index and buffers are under 3 MiB (TEXT_STATE_BYTES), part of what
  * HEADROOM allows for. */
 #define ADAPT_TEXT_VERSION 62u

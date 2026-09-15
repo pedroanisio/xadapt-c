@@ -575,10 +575,23 @@ static void test_framing(void) {
         memcpy(sized, EMPTY_FILE, ADAPT_HEADER_BYTES);
         sized[4] = ADAPT_MAX_SIZED_VERSION;
         CHECK_STATUS(adapt_read_header(sized, ADAPT_HEADER_BYTES, &sizes, &error), ADAPT_ERROR_TRUNCATED);
-        sized[ADAPT_HEADER_BYTES] = 0x20; /* reserved bit 5 */
+        sized[ADAPT_HEADER_BYTES] = 0x40; /* reserved bit 6 */
         CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
         sized[ADAPT_HEADER_BYTES] = 0x80; /* reserved bit 7 */
         CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+        /* bit 5 is the text transform ahead of the sized model, with any
+         * of the tables, sets and fractions; a sized header without it
+         * reads with the transform off */
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_TEXT | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | (uint8_t)(3u << ADAPT_SIZING_FRAC_SHIFT);
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.text == ADAPT_TEXT_ON && sizes.compact == 1 && sizes.lean == 1 && sizes.table_frac == 3 && sizes.max == 1);
+        CHECK(adapt_sizes_valid(sizes));
+        sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_TEXT | (uint8_t)(1u << ADAPT_SIZING_FRAC_SHIFT);
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.text == ADAPT_TEXT_ON && sizes.compact == 0 && sizes.table_frac == 1);
+        sized[ADAPT_HEADER_BYTES] = (uint8_t)(1u << ADAPT_SIZING_FRAC_SHIFT);
+        CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.text == 0 && sizes.table_frac == 1);
         sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_LEAN; /* lean without compact */
         CHECK_STATUS(adapt_read_header(sized, sizeof(sized), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
         sized[ADAPT_HEADER_BYTES] = ADAPT_SIZING_LEAN | (uint8_t)(2u << ADAPT_SIZING_FRAC_SHIFT);
