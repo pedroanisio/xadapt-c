@@ -18,7 +18,7 @@ from pathlib import Path
 
 CADAPT = Path(__file__).resolve().parent.parent / "build" / "cadapt"
 VECTORS = Path(__file__).resolve().parent / "vectors"
-LOW_MEMORY = str(32 << 20)
+LOW_MEMORY = str(32 << 20)  # decode caps only; encode uses the preset -3 (32 MiB)
 # Seconds one codec run may take: a bound against a hang, wide enough for
 # the coverage gate's unoptimised build on a slow host.
 TIMEOUT = 600
@@ -105,31 +105,31 @@ class AllocationTest(CodecTest):
                 self.assertEqual(decoded.returncode, 0, decoded.stderr)
                 self.assertEqual(decoded.stdout, data)
         # The compact side tables with the lean context set: a max budget
-        # that stops the context table short of a 4 MiB input's target under
-        # --allocation context (80 MiB: the full tables reach 2^19 blocks,
-        # the compact ones 2^20, within the lean set's 2^22) writes version
-        # 54 (57 with metadata), the same reader decodes it, and the default
-        # budget still writes version 21 for this input.
+        # that stops the context table short of the target under
+        # --allocation context writes version 54 (57 with metadata), the
+        # same reader decodes it, and the default budget still writes
+        # version 21 for this input. A pipe's length is unknown, so its
+        # target is the largest table and -7 (186 MiB, which the sizer
+        # shares with the proof it may be asked for) stops at 2^21 blocks
+        # with no slack for a fraction.
         big = self.root / "big.bin"
         big.write_bytes((SOURCE * ((4 << 20) // len(SOURCE) + 1))[: 4 << 20])
-        compact = self.run_codec("encode", "-", "--max", "--allocation", "context", "--max-memory", str(80 << 20),
-                                 data=big.read_bytes())
+        compact = self.run_codec("encode", "-", "--max", "--allocation", "context", "-7", data=big.read_bytes())
         self.assertEqual(compact.returncode, 0, compact.stderr)
         self.assertEqual(compact.stdout[4], 54)
         back = self.run_codec("decode", "-", data=compact.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual(back.stdout, big.read_bytes())
         # A budget with slack past the power of two the table reaches sizes
-        # the table in eighths: this input at 100 MiB takes the compact tables,
-        # the lean set and a fraction, written as version 58 (61 with metadata)
-        # whose sizing byte names all three, and the container decodes through
-        # both instruction-set paths.
-        sized = self.run_codec("encode", "-", "--max", "--allocation", "context", "--max-memory", str(100 << 20),
-                               data=big.read_bytes())
+        # the table in eighths: the pipe at -5 (94 MiB) takes the compact
+        # tables, the lean set and a fraction, written as version 58 (61
+        # with metadata) whose sizing byte names all three, and the
+        # container decodes through both instruction-set paths.
+        sized = self.run_codec("encode", "-", "--max", "--allocation", "context", "-5", data=big.read_bytes())
         self.assertEqual(sized.returncode, 0, sized.stderr)
         self.assertEqual(sized.stdout[4], 58)
-        self.assertEqual(sized.stdout[8] & 3, 3, "the compact tables and the lean set were not both taken at 100 MiB")
-        self.assertNotEqual(sized.stdout[8] >> 2 & 7, 0, "no fraction was taken at 100 MiB")
+        self.assertEqual(sized.stdout[8] & 3, 3, "the compact tables and the lean set were not both taken at -5")
+        self.assertNotEqual(sized.stdout[8] >> 2 & 7, 0, "no fraction was taken at -5")
         self.assertLess(len(sized.stdout), len(compact.stdout) + 64)
         back = self.run_codec("decode", "-", data=sized.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
@@ -140,15 +140,16 @@ class AllocationTest(CodecTest):
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual(back.stdout, big.read_bytes())
         # The named file's length is known, so its table stops at the input's
-        # target (2^21 at 80 MiB and above, no fraction: the version-57 file
-        # above); at 76 MiB the table is short of it and the slack past the
-        # 4 MiB window is spent in eighths, version 61 with metadata.
+        # target (2^21 from -5 up, no fraction: the version-57 file below);
+        # at -4 (48 MiB, raised to the max profile's floor) the table is
+        # short of it and the slack past the 4 MiB window is spent in
+        # eighths, version 61 with metadata.
         named_sized = self.root / "big-sized.adpt"
-        run = self.run_codec("encode", big, "-o", named_sized, "--max", "--allocation", "context", "--max-memory", str(76 << 20))
+        run = self.run_codec("encode", big, "-o", named_sized, "--max", "--allocation", "context", "-4")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(named_sized.read_bytes()[4], 61)
         self.assertEqual(named_sized.read_bytes()[8] & 3, 3)
-        self.assertNotEqual(named_sized.read_bytes()[8] >> 2 & 7, 0, "no fraction was taken at 76 MiB")
+        self.assertNotEqual(named_sized.read_bytes()[8] >> 2 & 7, 0, "no fraction was taken at -4")
         run = self.run_codec("info", named_sized)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn(b"adapt container version 61", run.stdout)
@@ -159,7 +160,7 @@ class AllocationTest(CodecTest):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(restored_sized.read_bytes(), big.read_bytes())
         named = self.root / "big.adpt"
-        run = self.run_codec("encode", big, "-o", named, "--max", "--allocation", "context", "--max-memory", str(80 << 20))
+        run = self.run_codec("encode", big, "-o", named, "--max", "--allocation", "context", "-5")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(named.read_bytes()[4], 57)
         restored = self.root / "big.restored"
@@ -339,11 +340,13 @@ class AdaptiveTest(CodecTest):
         lengths = []
         for mode in (None, "rates", "sparse", "retained", "auto"):
             args = () if mode is None else ("--adaptive", mode)
-            run = self.run_codec("encode", self.source, "-o", "-", "--max-memory", str(64 << 20), *args)
+            run = self.run_codec("encode", self.source, "-o", "-", "-4", *args)
             self.assertEqual(run.returncode, 0, run.stderr)
             lengths.append(len(run.stdout))
         self.assertEqual(lengths[-1], min(lengths[:-1]))
-        run = self.run_codec("encode", "-", "--adaptive", "auto", "--verify", "--max-memory", str(28 << 20), data=SOURCE)
+        # -2 is raised to the normal floor, which the retained state's
+        # 2.8 MB no longer fits beside
+        run = self.run_codec("encode", "-", "--adaptive", "auto", "--verify", "-2", data=SOURCE)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn(b", verified", run.stderr)
         self.assertIn(b"skipped: memory", run.stderr)
@@ -354,7 +357,7 @@ class AdaptiveTest(CodecTest):
     def test_invalid_profiles_and_memory(self):
         for extra in (("--adaptive", "bad"), ("--adaptive", "rates", "--fast")):
             self.assert_usage_error(self.run_codec("encode", self.source, *extra), b"--adaptive")
-        self.assert_failure(self.run_codec("encode", self.source, "--adaptive", "retained", "--max-memory", str(1 << 20)), b"memory")
+        self.assert_failure(self.run_codec("encode", self.source, "--adaptive", "retained", "-0"), b"memory")
 
     def test_segment_reset_stored_bytes_and_folder(self):
         data = random.Random(23).randbytes(262144) + SOURCE * 100
@@ -405,7 +408,7 @@ class VerificationTest(CodecTest):
                 self.assert_roundtrip(output.read_bytes())
 
     def test_default_pipe_succeeds_with_one_model_budget(self) -> None:
-        encoded = self.run_codec("encode", "-", "--max-memory", LOW_MEMORY, data=SOURCE)
+        encoded = self.run_codec("encode", "-", "-3", data=SOURCE)
         self.assertEqual(encoded.returncode, 0, encoded.stderr)
         self.assertIn(b"not verified", encoded.stderr)
         self.assert_roundtrip(encoded.stdout)
@@ -417,7 +420,7 @@ class VerificationTest(CodecTest):
         self.assert_roundtrip(encoded.stdout)
 
     def test_verified_pipe_refuses_insufficient_memory_before_output(self) -> None:
-        encoded = self.run_codec("encode", "-", "--verify", "--max-memory", LOW_MEMORY, data=SOURCE)
+        encoded = self.run_codec("encode", "-", "--verify", "-3", data=SOURCE)
         self.assertEqual(encoded.returncode, 1, encoded.stderr)
         self.assertIn(b"two models", encoded.stderr)
         self.assertEqual(encoded.stdout, b"")
@@ -425,14 +428,14 @@ class VerificationTest(CodecTest):
     def test_verified_file_uses_second_pass_with_one_model_budget(self) -> None:
         output = self.root / "verified.adpt"
         encoded = self.run_codec(
-            "encode", self.source, "-o", output, "--verify", "--max-memory", LOW_MEMORY
+            "encode", self.source, "-o", output, "--verify", "-3"
         )
         self.assertEqual(encoded.returncode, 0, encoded.stderr)
         self.assertIn(b"verified after encoding", encoded.stderr)
         self.assert_roundtrip(output.read_bytes())
 
     def test_no_verify_remains_compatible_with_default(self) -> None:
-        args = ("encode", self.source, "-o", "-", "--max-memory", LOW_MEMORY)
+        args = ("encode", self.source, "-o", "-", "-3")
         plain = self.run_codec(*args)
         explicit = self.run_codec(*args, "--no-verify")
         self.assertEqual(plain.returncode, 0, plain.stderr)
@@ -567,7 +570,7 @@ class MetadataTest(CodecTest):
             os.utime(path, ns=times, follow_symlinks=False)
             expected[rel] = (mode, *times)
         container = self.root / "tree.adpt"
-        encoded = self.run_codec("encode", folder, "-o", container, "--verify", "--max-memory", LOW_MEMORY)
+        encoded = self.run_codec("encode", folder, "-o", container, "--verify", "-3")
         self.assertEqual(encoded.returncode, 0, encoded.stderr)
         restored = self.root / "restored"
         decoded = self.run_codec("decode", container, "-o", restored)
@@ -620,38 +623,52 @@ class MetadataTest(CodecTest):
 
 
 class MemoryContractTest(CodecTest):
-    def test_one_mib_refusal_matches_documented_minimum(self):
+    """The preset is encode's only memory setting: a preset below the
+    profile's smallest model is raised to it, never refused, so -0 writes
+    the smallest model of each profile; --help states the two floors; and
+    decode --max-memory, the cap, refuses that container one byte below
+    its floor with the bytes it needs."""
+
+    def test_lowest_preset_writes_the_floor_and_decode_cap_pins_it(self):
         help_run = self.run_codec("--help")
         self.assertEqual(help_run.returncode, 0, help_run.stderr)
         help_text = help_run.stdout + help_run.stderr
-        self.assertNotIn(b"never a refused input", help_text)
-        advertised = re.search(rb"minimum\s+normal single-model budget is (\d+) bytes", help_text)
+        advertised = re.search(rb"smallest normal model takes (\d+)\s+bytes, the max profile's (\d+)", help_text)
         self.assertIsNotNone(advertised, help_text)
-        for profile in ((), ("--fast",), ("--max",)):
-            output = self.root / "too-small.adpt"
-            run = self.run_codec("encode", self.source, "-o", output, "--max-memory", str(1 << 20), *profile)
-            self.assert_failure(run, b"memory budget exceeded")
-            match = re.search(rb"need (\d+) bytes, limit (\d+)", run.stderr)
-            self.assertIsNotNone(match, run.stderr)
-            self.assertGreater(int(match[1]), 1 << 20)
-            if not profile:
-                self.assertEqual(int(match[1]), int(advertised[1]))
-            self.assertEqual(int(match[2]), 1 << 20)
-            self.assertFalse(output.exists())
-            self.assertEqual([], list(self.root.glob("*.part")))
-
-        # The documented floor is usable, and one byte less is refused.
-        for budget, success in ((int(advertised[1]), True), (int(advertised[1]) - 1, False)):
-            with self.subTest(budget=budget):
-                run = self.run_codec("encode", self.source, "-o", "-", "--max-memory", str(budget))
-                if success:
-                    self.assertEqual(run.returncode, 0, run.stderr)
-                    decoded = self.run_codec("decode", "-", "--max-memory", str(budget), data=run.stdout)
-                    self.assertEqual(decoded.returncode, 0, decoded.stderr)
-                    self.assertEqual(decoded.stdout, SOURCE)
+        floors = {(): int(advertised[1]), ("--fast",): None, ("--max",): int(advertised[2])}
+        for profile, advertised_floor in floors.items():
+            with self.subTest(profile=profile):
+                output = self.root / "floor.adpt"
+                run = self.run_codec("encode", self.source, "-o", output, "--force", "-0", *profile)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                # the cap at one byte names what the file needs; the normal
+                # and max floors are the advertised ones, the fast profile's
+                # smaller model needs less than the floor its budget shares
+                probe = self.run_codec("decode", output, "-o", "-", "--max-memory", "1")
+                self.assert_failure(probe, b"memory budget exceeded")
+                match = re.search(rb"need (\d+) bytes, limit 1\b", probe.stderr)
+                self.assertIsNotNone(match, probe.stderr)
+                floor = int(match[1])
+                if advertised_floor is not None:
+                    self.assertEqual(floor, advertised_floor)
                 else:
-                    self.assert_failure(run, b"memory budget exceeded")
-                    self.assertEqual(run.stdout, b"")
+                    self.assertLess(floor, int(advertised[1]))
+                decoded = self.run_codec("decode", output, "-o", "-", "--max-memory", str(floor))
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                self.assertEqual(decoded.stdout, SOURCE)
+                refused = self.run_codec("decode", output, "-o", "-", "--max-memory", str(floor - 1))
+                self.assert_failure(refused, b"memory budget exceeded")
+                match = re.search(rb"need (\d+) bytes, limit (\d+)", refused.stderr)
+                self.assertIsNotNone(match, refused.stderr)
+                self.assertEqual(int(match[1]), floor)
+                self.assertEqual(int(match[2]), floor - 1)
+                self.assertEqual(refused.stdout, b"")
+
+    def test_encode_has_no_byte_budget(self):
+        for value in ("1000", str(64 << 20), "lots"):
+            run = self.run_codec("encode", self.source, "-o", "-", "--max-memory", value)
+            self.assert_usage_error(run, b"--max-memory is a decode option; encode sets its budget with a preset, -0 .. -11")
+            self.assertEqual(run.stdout, b"")
 
 
 def snapshot(root: Path) -> dict:
@@ -697,7 +714,7 @@ class InstructionSetTest(unittest.TestCase):
             for name in ("text.bin", "records.bin"):
                 source = VECTORS / name
                 for profile in (["--max"], [], ["--fast"]):
-                    args = [*profile, "--max-memory", str(74 << 20), "--allocation", "context"]
+                    args = [*profile, "-4", "--allocation", "context"]
                     vector = self.encode(source, root / "vector.adpt", *args, baseline=False)
                     scalar = self.encode(source, root / "scalar.adpt", *args, baseline=True)
                     self.assertEqual(vector, scalar, f"{name} {profile}: the two instruction-set paths differ")
@@ -802,10 +819,10 @@ class FolderTest(unittest.TestCase):
 
     def test_folder_is_proven_both_ways(self) -> None:
         container = self.root / "tree.adpt"
-        alongside = self.run_codec("encode", self.folder, "-o", container, "--verify", "--max-memory", str(300 << 20))
+        alongside = self.run_codec("encode", self.folder, "-o", container, "--verify", "-8")
         self.assertEqual(alongside.returncode, 0, alongside.stderr)
         self.assertIn(b", verified\n", alongside.stderr)
-        after = self.run_codec("encode", self.folder, "-o", container, "--force", "--verify", "--max-memory", LOW_MEMORY)
+        after = self.run_codec("encode", self.folder, "-o", container, "--force", "--verify", "-3")
         self.assertEqual(after.returncode, 0, after.stderr)
         self.assertIn(b"verified after encoding", after.stderr)
         restored = self.root / "back"
@@ -922,8 +939,8 @@ class FolderTest(unittest.TestCase):
 
 
 class PresetTest(unittest.TestCase):
-    """-0 .. -9 name xz's compression memory; -9 is the default; an explicit
-    --max-memory overrides a preset."""
+    """-0 .. -9 name xz's compression memory, -10 and -11 the 1 and 2 GiB
+    tiers above it; -9 is the default; the last preset given wins."""
 
     def setUp(self) -> None:
         scratch = tempfile.TemporaryDirectory()
@@ -944,16 +961,54 @@ class PresetTest(unittest.TestCase):
         line = next(row for row in info.stdout.decode().splitlines() if row.startswith("context table"))
         return int(line.split("2^")[1].split()[0])
 
-    def test_default_is_minus_nine_and_explicit_memory_overrides(self) -> None:
+    def test_default_is_minus_nine_and_the_last_preset_wins(self) -> None:
         plain = self.root / "plain.adpt"
         nine = self.root / "nine.adpt"
         small = self.root / "small.adpt"
-        for out, flags in ((plain, ()), (nine, ("-9",)), (small, ("-9", "--max-memory", LOW_MEMORY))):
+        for out, flags in ((plain, ()), (nine, ("-9",)), (small, ("-9", "-3"))):
             r = self.run_codec("encode", self.source, "-o", out, "--no-verify", *flags)
             self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(payload_stream(plain.read_bytes()), payload_stream(nine.read_bytes()))
         self.assertLess(self.table_log(small), self.table_log(nine))
         self.assertGreater(small.stat().st_size, nine.stat().st_size)
+
+    def test_tiers_above_xz_are_accepted_and_change_nothing_a_small_input_cannot_use(self) -> None:
+        # A named input's table stops at its target, which -9 already
+        # reaches for this one: -10 and -11 are accepted and write the same
+        # bytes. A pipe's length is unknown, so its target is the largest
+        # table, and the two tiers buy a bigger model than -9: the max
+        # profile at -9 holds 2^24 blocks, at -10 and -11 more.
+        nine = self.root / "nine.adpt"
+        r = self.run_codec("encode", self.source, "-o", nine, "--no-verify", "-9")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for preset in ("-10", "-11"):
+            out = self.root / f"p{preset[1:]}.adpt"
+            r = self.run_codec("encode", self.source, "-o", out, "--no-verify", preset)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(payload_stream(out.read_bytes()), payload_stream(nine.read_bytes()))
+        blocks = {}
+        for preset in ("-9", "-10", "-11"):
+            r = self.run_codec("encode", "-", "--max", "--allocation", "context", preset, data=self.source.read_bytes())
+            self.assertEqual(r.returncode, 0, r.stderr)
+            out = self.root / f"pipe{preset[1:]}.adpt"
+            out.write_bytes(r.stdout)
+            info = self.run_codec("info", out)
+            self.assertEqual(info.returncode, 0, info.stderr)
+            line = next(row for row in info.stdout.decode().splitlines() if row.startswith("context table"))
+            blocks[preset] = self.blocks_of(line)
+            decoded = self.run_codec("decode", "-", data=r.stdout)
+            self.assertEqual(decoded.returncode, 0, decoded.stderr)
+            self.assertEqual(decoded.stdout, self.source.read_bytes())
+        self.assertLess(blocks["-9"], blocks["-10"])
+        self.assertLess(blocks["-10"], blocks["-11"])
+        help_run = self.run_codec("--help")
+        self.assertIn(b"-10 and -11 are\n1 and 2 GiB", help_run.stdout + help_run.stderr)
+
+    @staticmethod
+    def blocks_of(line: str) -> int:
+        """The block count on an info line: '2^N blocks' or 'M blocks (...)'."""
+        field = line.split()[2]
+        return 1 << int(field[2:]) if field.startswith("2^") else int(field)
 
     def test_presets_order_the_model_and_the_lowest_clamp_to_the_floor(self) -> None:
         logs = {}
@@ -1023,8 +1078,8 @@ class SurfaceTest(unittest.TestCase):
             (("encode", self.source, "--bogus"), b"--bogus"),
             (("encode", self.source, "--fast", "--max"), b"pass one"),
             (("encode", self.source, "--max-memory", "lots"), b"--max-memory"),
-            (("encode", self.source, "--max-memory", ""), b"--max-memory"),
-            (("encode", self.source, "--max-memory", "99999999999999999999999"), b"--max-memory"),
+            (("encode", self.source, "--max-memory", str(64 << 20)), b"--max-memory is a decode option"),
+            (("encode", self.source, "-12"), b"unknown option -12"),
             (("encode", self.source, "--threads", "0"), b"--threads"),
             (("encode", self.source, "--threads", "2", "--segment-bytes", "100"), b"--segment-bytes"),
             (("encode", self.source, "--segment-bytes", "262144"), b"needs --threads"),
@@ -1158,9 +1213,9 @@ class CommandTest(CodecTest):
             (("decode", self.source, "--fast"), b"unknown option --fast"),
             (("info", self.source, "--force"), b"unknown option --force"),
             (("encode", self.source, "-o"), b"-o needs a value"),
-            (("encode", self.source, "--max-memory", "64M"), b"--max-memory: not a byte count: 64M"),
-            (("encode", self.source, "--max-memory", ""), b"--max-memory: not a byte count"),
-            (("encode", self.source, "--max-memory", "99999999999999999999999"), b"--max-memory: not a byte count"),
+            (("encode", self.source, "--max-memory", "64M"), b"--max-memory is a decode option; encode sets its budget with a preset, -0 .. -11"),
+            (("decode", self.source, "--max-memory", ""), b"--max-memory: not a byte count"),
+            (("decode", self.source, "--max-memory", "99999999999999999999999"), b"--max-memory: not a byte count"),
             (("decode", self.source, "--max-output", "-1"), b"--max-output: not a byte count: -1"),
             (("decode", self.source, "--max-output", "1e9"), b"--max-output: not a byte count: 1e9"),
             (("decode", self.source, "--max-memory", "lots"), b"--max-memory: not a byte count: lots"),
@@ -1290,10 +1345,10 @@ class CommandTest(CodecTest):
         self.assertIn(b"2 segments on 2 threads", run.stderr)
         decoded = self.run_codec("decode", "-", data=run.stdout)
         self.assertEqual(decoded.stdout, (VECTORS / "segmented.bin").read_bytes())
-        # a budget below the smallest model is refused before any output
-        run = self.run_codec("encode", text, "-o", self.root / "tiny.adpt", "--max-memory", "1000")
-        self.assert_failure(run, b"error: memory budget exceeded")
-        self.assertFalse((self.root / "tiny.adpt").exists())
+        # the lowest preset is raised to the smallest model, never refused
+        run = self.run_codec("encode", text, "-o", self.root / "tiny.adpt", "-0")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue((self.root / "tiny.adpt").exists())
         # the proof alongside with segments, and the empty input
         run = self.run_codec("encode", VECTORS / "segmented.bin", "-o", self.root / "seg.adpt", "--threads", "2", "--segment-bytes", "262144", "--verify")
         self.assertEqual(run.returncode, 0, run.stderr)

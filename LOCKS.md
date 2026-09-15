@@ -2,6 +2,40 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — The memory tier is encode's only memory setting; `-10`/`-11`; decode's caps apply only when given
+
+**Decision.** (Operator's, 2026-09-15.) `encode` chooses its memory by tier
+alone: `-0` … `-9` are xz's presets as before, `-10` and `-11` are 1 and
+2 GiB. `--max-memory` belongs to `decode`, where it is a cap; on `encode`
+it is refused with a message naming the tiers. `decode --max-output` has
+no default: a valid container decodes whatever it declares, and only a cap
+the caller gives can refuse it (`FMT-6`, `RUN-1` in `docs/CONSTRAINTS.md`).
+
+**Why.** The tier a file is written at is the memory every decoder of it
+will need, so it is a promise about other machines, not a knob for this
+run; a byte count on encode named a model no tier describes and made that
+promise invisible. The 1 GiB output cap that the security hardening had
+made a default was unrelated to the tiers (`-9` exists for inputs of
+enwik9's size) and contradicted `FMT-6` as written; decompression bombs
+are bounded by the declared size the header carries, which `cadapt info`
+shows and a service caps with `--max-output`. Rejected: a byte-count
+budget with units (`1G`, `50%`) on encode, the xz shape — it keeps the
+knob the decision removes; a default output cap proportional to the tier —
+disk and RAM are unrelated axes.
+
+**Consequences.**
+- A tier below the profile's floor is raised, never refused; the encode
+  refusal "memory budget exceeded" is now decode's alone.
+- The CLI tests pin the tiers' choices (a pipe at `-5`, `-7`; a named
+  4 MiB input at `-4`, `-5`; `-9`/`-10`/`-11` on a pipe grow the max
+  profile's table 2^24 → 9/8 of 2^24 → 10/8 of 2^25) and the two refusals.
+- The library API is unchanged: `adapt_sizes_for_input(max_memory)` and
+  `adapt_default_limits()` (1 GiB output for API callers) stay.
+- `tools/ratio_floor.json` commands carry no `--max-memory`; the floors
+  are unchanged. `bench/` scripts that passed it to encode are historical.
+
+**Status.** Landed 2026-09-15 with the CLI, man page, README, CONSTRAINTS
+codes, CLI and safety tests.
 ## 2026-09-15 — The text transform builds its book as it codes (versions 62–71)
 
 **Decision.** A word both sides have seen written out three times becomes,

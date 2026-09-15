@@ -98,6 +98,32 @@ The binary reports `0.12.0`; the tag is pending.
   for a sized table.
 
 ### Changed
+- The memory tier is encode's only memory setting. `-10` and `-11` are new,
+  1 and 2 GiB, the tiers above xz's ladder that the max profile's largest
+  tables and a 1 GB input's window need; `-9` stays the default and the
+  last tier given wins. `encode --max-memory` is refused with a message
+  naming the presets: the tier a file is written at is the memory every
+  decoder of it needs (`RUN-1`), and a byte count named a model no tier
+  describes. A tier below the profile's smallest model is raised to it,
+  never refused. `decode --max-memory` is unchanged, the cap that refuses a
+  container with the bytes it needs. Historical scripts under `bench/`
+  that passed `--max-memory` to encode are records, not gates.
+- `decode --max-output` applies only when given: a valid container decodes
+  whatever it declares (`FMT-6`), and a service that decodes untrusted
+  containers sets the cap itself. The library's `adapt_default_limits()`
+  keeps its conservative 1 GiB for API callers; the command line applies
+  neither cap unless asked.
+- `docs/CONSTRAINTS.md` gains the runtime codes `RUN-1`–`RUN-5` (the tier
+  as a decode promise, streaming, nothing half-published, refusals with
+  their numbers, the same bytes on every machine), `DLV-1` (every
+  published version decodes forever), `DLV-3` (general-purpose first:
+  enwik8/enwik9 are benchmark rows, never the judge of a default) and
+  `DLV-4` (provenance); `FMT-6` names both caps, and `FMT-8` allows a
+  transform or dictionary the encoder builds from the input itself and
+  carries in the container. The README's command line, build switches and
+  format section follow, with a map of every container version.
+
+### Changed
 - The per-bit path of the normal and max profiles is faster and writes the
   same bytes: on the x86-64-v3 instantiation the twenty-one memories are
   read, learned and advanced as vectors (the slots' lanes in planes), the

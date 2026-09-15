@@ -171,16 +171,25 @@ class SafetyTest(unittest.TestCase):
         self.assertIn(b"memory budget exceeded", run.stderr)
 
     def test_sparse_restoration_cannot_exceed_output_limit(self):
-        for limit, size in ((None, (1 << 30) + 1), (1024, 1025), (1024, (1 << 64) - 1)):
+        for limit, size in ((1 << 30, (1 << 30) + 1), (1024, 1025), (1024, (1 << 64) - 1)):
             with self.subTest(limit=limit, size=size):
                 destination = self.root / f"restored-{size}"
-                options = () if limit is None else ("--max-output", limit)
                 run = self.decode("-", archive([entry(5, "holes", size=size)]),
-                                  "-o", destination, *options)
+                                  "-o", destination, "--max-output", limit)
                 self.assertEqual(run.returncode, 1, run.stderr)
                 self.assertIn(b"restored file sizes exceed --max-output", run.stderr)
                 self.assertFalse(destination.exists())
                 self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    def test_output_limit_applies_only_when_given(self):
+        # FMT-6: a valid container decodes whatever it declares; the cap is
+        # the caller's. A folder whose one file is a hole past 1 GiB is
+        # restored to that apparent length without --max-output.
+        destination = self.root / "restored-uncapped"
+        run = self.decode("-", archive([entry(5, "holes", size=(1 << 30) + 1)]), "-o", destination)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual((destination / "holes").stat().st_size, (1 << 30) + 1)
+        self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
 
     def test_restoration_limit_counts_files_holes_and_hardlink_aliases_together(self):
         cases = [

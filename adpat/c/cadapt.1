@@ -14,9 +14,7 @@ cadapt \- compress and decompress files and folders with the adapt context-mixin
 .RB [ \-\-force ]
 .RB [ \-\-verify " | " \-\-no\-verify ]
 .RB [ \-\-fast " | " \-\-max ]
-.RB [ \-0 " .. " \-9 ]
-.RB [ \-\-max\-memory
-.IR bytes ]
+.RB [ \-0 " .. " \-11 ]
 .RB [ \-\-allocation
 .BR window | context ]
 .RB [ \-\-threads
@@ -66,16 +64,17 @@ runs: how many contexts, how many inputs per context, how many arbiters and
 estimation stages.
 A bigger model writes fewer bytes and takes longer, whatever its memory.
 .TP
-.B the memory budget
-.RB ( \-0 " .. " \-9
-or
-.BR \-\-max\-memory )
+.B the memory tier
+.RB ( \-0 " .. " \-11 )
 selects
 .I how much memory
 that model may fill.
 The model shrinks or grows its context table, recall table and history
-window to fit; the profile's fixed tables are the same at every budget.
+window to fit; the profile's fixed tables are the same at every tier.
 More memory buys ratio, not speed.
+The tier is encode's only memory setting, and the file records the model
+it produced: whoever decodes the file needs that model's memory, so the
+tier is a promise about every decoder, not only about this run.
 .PP
 So
 .B \-9 \-\-max
@@ -86,6 +85,8 @@ alone means the same),
 is the same model squeezed into 94 MiB, and
 .B \-9
 alone is the normal model in 674 MiB.
+The two axes are independent: no tier changes the model's shape, no
+profile changes the memory.
 .SH COMMANDS
 .TP
 .BI encode " input"
@@ -173,38 +174,53 @@ or
 Versions 62 to 66, 67 to 71 with metadata.
 .SH MEMORY OPTIONS
 .TP
-.BR \-0 " .. " \-9
-The budget, after what
+.BR \-0 " .. " \-11
+The tier:
+.B \-0
+to
+.B \-9
+are what
 .BR xz (1)
-takes to compress at the same preset:
+takes to compress at the same preset, so a user of xz reads them as
+before;
+.B \-10
+and
+.B \-11
+are the two tiers above xz's ladder, for the max profile's largest tables
+and a window the size of a 1 GB input:
 .TS
-l l l l l l l l l l l.
-preset	-0	-1	-2	-3	-4	-5	-6	-7	-8	-9
-MiB	3	9	17	32	48	94	94	186	370	674
+l l l l l l l.
+preset	-0	-1	-2	-3	-4	-5
+MiB	3	9	17	32	48	94
+.TE
+.TS
+l l l l l l l.
+preset	-6	-7	-8	-9	-10	-11
+MiB	94	186	370	674	1024	2048
 .TE
 .IP
 .B \-9
-is the default.
-A preset below the profile's smallest model is raised to that model.
-.TP
-.BI \-\-max\-memory " bytes"
-The budget as a byte count (default 706740224, the
-.B \-9
-figure); overrides a preset.
-Bounds the model, its window and the workspace; a folder's path and
-metadata bookkeeping is additional.
+is the default; the last tier given wins.
+A tier below the profile's smallest model is raised to that model, never
+refused.
+The tier bounds the model, its window and the workspace; a folder's path
+and metadata bookkeeping is additional.
+There is no byte-count budget on
+.BR encode :
+.B \-\-max\-memory
+belongs to
+.BR decode ,
+where it is a cap, and is refused on
+.BR encode .
 .TP
 Floors
 The smallest model of the fast and normal profiles takes 28,178,567 bytes
 (about 27 MiB), the max profile's 73,283,719 (about 70 MiB), so
 .BR \-0 " to " \-3
-all mean the 27 MiB floor and
-.B \-\-max
-needs
-.B \-5
-or more.
-A budget below the floor fails before anything is written and reports the
-bytes needed.
+all mean the 27 MiB floor and, under
+.BR \-\-max ,
+.BR \-0 " to " \-4
+all mean the 70 MiB one.
 .B \-\-verify
 alongside the coder needs two models.
 .TP
@@ -263,11 +279,14 @@ Decoding memory
 allocates the model the container's header names, so a file written at
 .B \-9
 takes about 640 MB to decode on any machine (for the max profile; about
-370 MB for the normal one).
-.B \-\-max\-memory
+370 MB for the normal one), and a file written at
+.B \-11
+up to 2 GiB.
+.BI \-\-max\-memory " bytes"
 on
 .B decode
-only caps that: a container needing more is refused, never shrunk.
+only caps that: a container needing more is refused with the bytes it
+needs, never shrunk; without it nothing is refused.
 .SH OTHER OPTIONS
 .TP
 .BI \-o " output"
@@ -281,10 +300,14 @@ is standard output (encode) or standard input (decode).
 Overwrite an existing output.
 .TP
 .BI \-\-max\-output " bytes"
-On decode, cap the decoded stream at this many bytes (default 1073741824).
-For folders, also cap the combined logical sizes of restored files,
-including sparse holes and each hard-link alias. A refused entry discards
+On decode, refuse a container that declares more decoded bytes than this.
+For folders the cap is on the combined logical sizes of restored files,
+including sparse holes and each hard-link alias; a refused entry discards
 the staging directory and leaves the existing destination intact.
+Without it nothing is refused: the container alone decides what decoding
+writes (see FMT-6 in
+.IR docs/CONSTRAINTS.md ),
+and a service that decodes untrusted containers sets the cap itself.
 .TP
 .BR \-\-verify ", " \-\-no\-verify
 .B encode
@@ -318,10 +341,6 @@ The report says how many threads ran.
 .BI \-\-segment\-bytes " bytes"
 The segment length for
 .BR \-\-threads .
-.TP
-.BI \-\-max\-output " bytes"
-.B decode
-refuses to write more than this (default 1 GiB).
 .SH ENVIRONMENT
 .TP
 .B ADAPT_ISA
@@ -351,17 +370,25 @@ table grown first:
     cadapt encode enwik8 --max --allocation context
 .fi
 .PP
-The same model in 128 MiB, and what it will take to decode:
+The same model in 94 MiB, and what it will take to decode:
 .PP
 .nf
-    cadapt encode enwik8 --max --allocation context --max-memory 134217728
+    cadapt encode enwik8 --max --allocation context -5
     cadapt info enwik8.adpt
 .fi
 .PP
-The normal model in 64 MiB, which the max model cannot enter:
+The normal model in 32 MiB, which the max model cannot enter:
 .PP
 .nf
-    cadapt encode data.bin --max-memory 67108864
+    cadapt encode data.bin -3
+.fi
+.PP
+The max model in 2 GiB, the top tier, for a 1 GB input; and a decoder on
+a 1 GiB machine refusing it with the bytes it needs:
+.PP
+.nf
+    cadapt encode enwik9 --max --allocation context -11
+    cadapt decode enwik9.adpt --max-memory 1073741824
 .fi
 .PP
 A folder, proven as it is written, and restored:

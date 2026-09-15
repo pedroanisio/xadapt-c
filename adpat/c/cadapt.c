@@ -3,7 +3,7 @@
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
- *   cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [--max-memory <bytes>]
+ *   cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -11]
  *                 [--threads <n>] [--segment-bytes <bytes>]
  *   cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
  *   cadapt info   <file>
@@ -445,8 +445,8 @@ static void print_usage(FILE *stream) {
             "cadapt — the adapt self-adaptive lossless codec, in C\n"
             "\n"
             "usage:\n"
-            "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -9]\n"
-            "                [--max-memory <bytes>] [--threads <n>] [--segment-bytes <bytes>]\n"
+            "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -11]\n"
+            "                [--threads <n>] [--segment-bytes <bytes>]\n"
             "                [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation window|context]\n"
             "  cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]\n"
             "  cadapt info   <file>\n"
@@ -483,31 +483,29 @@ static void print_usage(FILE *stream) {
             "--allocation context grows the context table before the recall window;\n"
             "window is the default. Either policy can win depending on the input.\n"
             "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
-            "preset: 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset below the\n"
-            "smallest model of the profile raised to it; -9 is the default, since memory buys ratio\n"
-            "and decode takes the model's memory as the header\n"
-            "names it. For encode, --max-memory <bytes> (default %llu) bounds codec\n"
-            "model/window/workspace allocations. Folder path and metadata bookkeeping\n"
-            "is additional.\n"
-            "Models shrink only to their supported minimum; lower budgets fail\n"
-            "before output is published and report the required bytes. The minimum\n"
-            "normal single-model budget is %llu bytes, the max profile's %llu;\n"
-            "verification/segments may need more.\n"
+            "preset: 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB; -10 and -11 are\n"
+            "1 and 2 GiB, above xz's ladder. A preset below the smallest model of the\n"
+            "profile is raised to it; -9 is the default. The preset is the only memory\n"
+            "setting of encode: it bounds the model, window and workspace, and decode\n"
+            "takes the model's memory as the header names it, so the preset a file was\n"
+            "written with is the memory every decoder of it needs. Folder path and\n"
+            "metadata bookkeeping is additional. The smallest normal model takes %llu\n"
+            "bytes, the max profile's %llu; verification and segments may need more.\n"
             "Named files and folders preserve modes and access/modification timestamps.\n"
             "encode skips round-trip verification by default. --verify proves its output\n"
             "as it writes it when the budget holds two models, or, for a file written\n"
             "to a file, in a second pass with one. --no-verify explicitly skips this proof.\n"
             "decode allocates the model its input's header names, whatever the size\n"
             "(FMT-6: the container alone decodes); --max-memory <bytes> caps that and\n"
-            "refuses a container needing more, and --max-output <bytes> (default 1 GiB)\n"
-            "caps the bytes written.\n"
+            "refuses a container needing more; --max-output <bytes> refuses a container\n"
+            "declaring more decoded bytes than that (a folder's restored sizes together).\n"
+            "Neither cap applies unless given.\n"
             "--threads <n> (default 1) with n of two or more cuts the input into segments\n"
             "of --segment-bytes (default %llu, whole blocks of %llu) that start the\n"
             "model afresh, the file the crate's threads write, and codes them at once on\n"
             "as many of the n threads as the budget holds a model, a segment and a block's\n"
             "workspace for; decode --threads <n> decodes a file's segments the same way.\n"
             "The report says how many threads ran.\n",
-            (unsigned long long)ADAPT_DEFAULT_MAX_MEMORY,
             (unsigned long long)minimum_error.detail, (unsigned long long)minimum_max_error.detail,
             (unsigned long long)ADAPT_SEGMENT_BYTES, (unsigned long long)ADAPT_BLOCK_BYTES);
 }
@@ -605,9 +603,13 @@ static const char *value_of(const args *a, const char *name) {
 }
 
 /* The encode presets -0 to -9: xz's compression-side memory, in MiB, at the
- * same numbers, so that a user of xz reads them as before. */
-static const uint64_t PRESET_MIB[10] = {3, 9, 17, 32, 48, 94, 94, 186, 370, 674};
-static const char *const PRESET_FLAGS[10] = {"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9"};
+ * same numbers, so that a user of xz reads them as before; -10 and -11
+ * are 1 and 2 GiB, the tiers above xz's ladder that the max profile's
+ * largest tables and a 1 GB input's window need. The preset is encode's
+ * only memory setting. */
+#define PRESETS 12
+static const uint64_t PRESET_MIB[PRESETS] = {3, 9, 17, 32, 48, 94, 94, 186, 370, 674, 1024, 2048};
+static const char *const PRESET_FLAGS[PRESETS] = {"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9", "-10", "-11"};
 
 /* The budget a preset names: the last preset given, or -9; a preset below
  * the smallest model of the profile in force is raised to it. 0 when no
@@ -616,7 +618,7 @@ static uint64_t preset_budget(const args *a) {
     uint64_t budget = 0;
     int i, p;
     for (i = 0; i < a->nflags && i < 8; i++) {
-        for (p = 0; p < 10; p++) {
+        for (p = 0; p < PRESETS; p++) {
             if (strcmp(a->flags[i], PRESET_FLAGS[p]) == 0) {
                 budget = PRESET_MIB[p] << 20;
             }
@@ -2352,10 +2354,13 @@ static int decode_command(int argc, char **argv) {
     staged stage = {NULL, NULL};
     adapt_stats stats;
     /* FMT-6: the container alone decodes. Its header names the model, and
-     * the model is allocated as named; --max-memory below is the one cap
-     * that can refuse a valid container. The format bounds what a header
-     * can name (the largest tables and window, about 1.2 GiB). */
+     * the model is allocated as named; --max-memory and --max-output below
+     * are the only caps that can refuse a valid container, and neither
+     * applies unless given: the library's default limits are an API's
+     * conservative ones, not the command line's. The format bounds what a
+     * header can name (the largest tables and window, about 1.2 GiB). */
     limits.max_memory = UINT64_MAX;
+    limits.max_output = UINT64_MAX;
     adapt_error error;
     adapt_status status;
     uint64_t threads;
@@ -2751,7 +2756,7 @@ done:
 static int encode_command(int argc, char **argv) {
     static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", "--allocation", NULL};
     static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", "-0", "-1", "-2", "-3",
-                                        "-4",      "-5",       "-6",          "-7",     "-8",    "-9", NULL};
+                                        "-4",      "-5",       "-6",          "-7",     "-8",    "-9", "-10", "-11", NULL};
     args a;
     const char *input, *o, *text, *how;
     char *output = NULL;
@@ -2869,14 +2874,15 @@ static int encode_command(int argc, char **argv) {
     if (output == NULL) {
         return other_error(input, "memory allocation failed");
     }
-    /* a preset names the budget; an explicit --max-memory overrides it */
+    /* the preset names the budget, and is encode's only memory setting:
+     * --max-memory is decode's cap, and a byte count here would name a
+     * model no tier describes */
+    if (value_of(&a, "--max-memory") != NULL) {
+        free(output);
+        return usage_error("%s is a decode option; encode sets its budget with a preset, -0 .. -11", "--max-memory");
+    }
     if (preset_budget(&a) != 0) {
         max_memory = preset_budget(&a);
-    }
-    text = value_of(&a, "--max-memory");
-    if (text != NULL && !parse_bytes(text, &max_memory)) {
-        free(output);
-        return usage_error("--max-memory: not a byte count: %s", text);
     }
     threads = thread_count(&a);
     if (threads == 0) {
@@ -2998,7 +3004,7 @@ static int encode_command(int argc, char **argv) {
     if (verify && adaptive != 4 && !alongside && (in.file == stdin || !known_length || strcmp(output, "-") == 0)) {
         snprintf(message, sizeof(message),
                  "proving the output here needs a memory budget of %llu bytes for two models, "
-                 "or a file input written to a file; raise --max-memory or omit --verify",
+                 "or a file input written to a file; choose a higher preset or omit --verify",
                  (unsigned long long)adapt_verified_memory_bound(sizes));
         rc = other_error(input, message);
         if (in.file != NULL && in.file != stdin) {

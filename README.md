@@ -9,14 +9,16 @@ stored-and-skipped, and ends with the original length and its CRC-32. The
 implementation is C99 with nothing beyond the C standard library (POSIX
 threads for the encoder's optional proof). Byte streams use format versions
 19 (normal), 20 (fast) and 21 (max); named files and folders use versions
-22, 23 and 24 respectively to carry filesystem metadata. The decoder reads
-all six versions. Experimental profiles also use versions 25–52 for
+22, 23 and 24 respectively to carry filesystem metadata. Experimental
+profiles also use versions 25–52 for
 causal adaptive predictors and a reversible BMP24 transform; the max
 profile with compact side tables uses 53 and 56, with its lean context
 set as well 54 and 57, and sized to its budget — a context table any
 eighth past a power of two, named by a sizing byte — 58 and 61; the text
 transform ahead of the normal, fast, max, compact and lean models uses
-62 to 66, 67 to 71 with metadata. The CLI uses native filesystem APIs to
+62 to 66, 67 to 71 with metadata. The decoder reads every version ever
+published; versions 10–18 and the unused numbers (55, 59, 60) are
+refused. The CLI uses native filesystem APIs to
 restore metadata.
 
 The [experimental implementation report](research/causal-byte-implementation.md)
@@ -68,17 +70,19 @@ strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
   thread, with nothing beyond the C standard library.
 - `-DADAPT_NO_MULTIVERSION` (add it to `CFLAGS`) builds the per-bit path for
   the baseline instruction set only. By default, on x86-64 under GCC or
-  Clang, it is compiled twice — baseline and x86-64-v3 — and bound at
-  program start through an ifunc, which needs a glibc-style loader; on
-  musl or another platform without ifunc support pass the switch.
+  Clang, it is compiled twice — baseline and x86-64-v3 — and the pair is
+  chosen once per model from a CPU test; `ADAPT_ISA=baseline` in the
+  environment selects the portable pair on any CPU (both write the same
+  bytes, which the CLI tests hold them to).
   `-DADAPT_NO_HUGEPAGES` likewise takes the `calloc` path for the model's
   tables instead of an anonymous mapping advised `MADV_HUGEPAGE`.
 
 ## Command line
 
 ```
-cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -9]
-              [--max-memory <bytes>] [--threads <n>] [--segment-bytes <bytes>]
+cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -11]
+              [--allocation window|context] [--threads <n>] [--segment-bytes <bytes>]
+              [--adaptive rates|sparse|retained|auto] [--transform bmp]
 cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
 cadapt info   <file>
 cadapt --version
@@ -86,44 +90,44 @@ cadapt --version
 
 The manual page, [`adpat/c/cadapt.1`](adpat/c/cadapt.1) (`man -l adpat/c/cadapt.1`),
 sets out the two axes every run is made of — the profile (`--fast`, default,
-`--max`: which model) and the memory budget (`-0` … `-9`, `--max-memory`: how
-much it may fill) — with the floors, ceilings and the measured bytes each
-budget buys.
+`--max`: which model) and the memory tier (`-0` … `-11`: how much it may
+fill) — with the floors, ceilings and the measured bytes each tier buys.
 
 `<input>` or `<output>` may be `-` for standard input or output. Without
 `-o`, `encode` writes `<input>.adpt` and `decode` strips that suffix (or
 appends `.out`). An existing output is kept unless `--force` is given. Both
 directions stream: codec working memory is the model, window, block workspace
-and reserved headroom. `-0` … `-9` set the budget to what xz takes to compress
-at the same preset — 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB, a preset
-below the smallest model raised to it — and `-9` (674 MiB) is the default:
-the budget controls table and window capacity
-(see the [current measurements](research/current-baseline.md)).
-`--max-memory <bytes>` overrides any preset and bounds that allocation, which
-chooses the model. Models shrink only to their supported minimum: **1 MiB is
-insufficient**. `--help` prints the normal and max single-model minimums
-(about 27 and 70 MiB). An insufficient budget fails before publication and
-reports required and allowed bytes. Verification and segments can require
-more. A decoder holds the same model and window; `decode` allocates whatever
-the container's header names — the container alone decodes (`FMT-6` in
-[docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)) — and `--max-memory` is the one
-memory cap that can refuse a valid container; the format also bounds table
-and window sizes. Threaded decoding also counts the buffered container:
-regular files are buffered only when the input and a decoder fit together;
-larger inputs and pipes use one streaming decoder. `--max-output`
-(default 1 GiB) caps the decoded stream's bytes and, for a folder, also the
-combined logical sizes of restored files. Sparse holes and each hard-link
-alias count toward that folder limit; a refusal discards the staged output.
+and reserved headroom. The memory tier `-0` … `-9` is what xz takes to
+compress at the same preset — 3, 9, 17, 32, 48, 94, 94, 186, 370 and
+674 MiB — and `-10` and `-11` are 1 and 2 GiB, the two tiers above xz's
+ladder; `-9` is the default, the last tier given wins, and a tier below the
+profile's smallest model (`--help` prints the two: about 27 and 70 MiB) is
+raised to it, never refused. The tier is encode's only memory setting: it
+bounds the model, window and workspace, and the file records the model it
+produced, so **the tier a file is written at is the memory every decoder of
+it needs** (`RUN-1` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)).
+Verification and segments can require more than one model. `decode`
+allocates whatever the container's header names — the container alone
+decodes (`FMT-6`) — and its two caps apply only when given: `--max-memory
+<bytes>` refuses a container whose model needs more, with the bytes it
+needs, and `--max-output <bytes>` refuses one that declares more decoded
+bytes (for a folder, the combined logical sizes of restored files, sparse
+holes and each hard-link alias counted; a refusal discards the staged
+output). The format also bounds table and window sizes. Threaded decoding
+also counts the buffered container: regular files are buffered only when
+the input and a decoder fit together; larger inputs and pipes use one
+streaming decoder.
 Folder encoding additionally
 retains an entry/path inventory, and restoration retains pending directory
 metadata; this CLI bookkeeping is outside the codec's working-memory bound.
 
 - `--fast` writes the fast profile (version 20 or 23): two hashed contexts, one
-  arbiter, about three times the decoding speed for about an eighth more
-  bytes. `--max` writes the max profile (version 21 or 24): ten more contexts,
-  run memories and a wider second estimation stage, fewer bytes for about
-  three times the time; its smallest model is larger (`--help` prints both
-  minimums), so the low presets clamp higher under `--max`.
+  arbiter, about three times the decoding speed for more bytes (5 % on the
+  49 KB `text` vector, about a twelfth on enwik8). `--max` writes the max
+  profile (version 21 or 24): ten more contexts, run memories and a wider
+  second estimation stage, fewer bytes for about 1.8 times the time; its
+  smallest model is larger (`--help` prints both minimums), so the low tiers
+  clamp higher under `--max`.
 - `--verify` proves the output as it is written, with a second model
   decoding every block, when the budget holds two models; for a file
   written to a file it falls back to a second pass with one. Encoding skips
@@ -356,12 +360,32 @@ confirms that the toolchain it names rebuilds the same bytes.
 
 A file is an 8-byte fixed header (signature `ADPT`, version, table size and
 class code, recall size and context-set code, window size and flags), an
-optional 2-byte record period, an optional metadata extension, blocks, an
-optional segment table, and a 13-byte trailer. The constants that pin it are the `ADAPT_*` macros at the
-top of [adapt.h](adpat/c/adapt.h); a change to any of them is a new version.
-Versions 19, 20 and 21 are the normal, fast and max byte-stream profiles.
-Versions 22, 23 and 24 use the same predictors and append a 32-byte extension
-after the record period (or fixed header when absent):
+optional 2-byte record period, the sized max profile's 1-byte sizing byte,
+a BMP transform's 12-byte descriptor, an optional metadata extension,
+blocks, an optional segment table, and a 13-byte trailer — in that order,
+each present only when its version or flag says so. The constants that pin
+it are the `ADAPT_*` macros at the top of [adapt.h](adpat/c/adapt.h); a
+change to any of them is a new version, and every version once published
+stays readable (`DLV-1` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)):
+
+| Version | Stream | With metadata | Model |
+|---|---|---|---|
+| 10–18 | refused | — | earlier layouts, no published files |
+| 19 / 20 / 21 | normal / fast / max | 22 / 23 / 24 | power-of-two tables |
+| 25–27 | normal + `--adaptive` rates / sparse / retained | 28–30 | experimental causal predictors |
+| 31–34 | normal + `--transform bmp`, alone or with each predictor | 35–38 | the BMP24 residual transform, a 12-byte descriptor |
+| 39–41 | max + `--adaptive` | 42–44 | the same predictors over the max profile |
+| 45–48 | max + `--transform bmp` | 49–52 | the transform over the max profile |
+| 53 | max, compact side tables | 56 | table 2^22 blocks or fewer |
+| 54 | max, compact and lean | 57 | as 53 without three contexts |
+| 58 | max, sized | 61 | a sizing byte: compact, lean, the table's eighths |
+| 55, 59, 60 | refused | — | no format |
+
+The encoder writes 19–24 by default, 53/54 (56/57) when a small tier under
+`--allocation context` earns them, and 58 (61) only when a fraction is
+taken; the ranges 25–52 are written only with `--adaptive` or `--transform`.
+Versions 22, 23 and 24 use the same predictors as 19–21 and append a
+32-byte extension after the record period (or fixed header when absent):
 
 | Bytes | Field (little-endian) |
 |---|---|
