@@ -108,7 +108,7 @@ static void test_context_allocation(void) {
     CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 24 && s.window_log == 27);
     CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
-    CHECK(s.table_log == 25 && s.window_log == 26 && s.match_log == 20 && s.max);
+    CHECK(s.table_log == 25 && s.window_log == 26 && s.match_log == 22 && s.max);
     CHECK(adapt_encode_memory_bound(s) <= ADAPT_DEFAULT_MAX_MEMORY);
     saved = s;
     CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, 1, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_ERROR_MEMORY_LIMIT);
@@ -254,12 +254,17 @@ static void test_sizes(void) {
      * window over the whole input; 64 MiB, the old default, holds neither */
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 25 && s.match_log == 20 && s.window_log == 27);
+    /* the recall index takes what the table and the window leave once the
+     * window has all it can use: nothing at 64 MiB, its spare cap at 256 */
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, (uint64_t)64 << 20, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20 && s.match_log == 20 && s.window_log == 24);
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, (uint64_t)256 << 20, &s, &error), ADAPT_OK);
-    CHECK(s.table_log == 22 && s.match_log == 20 && s.window_log == 27);
+    CHECK(s.table_log == 22 && s.match_log == 22 && s.window_log == 27);
     CHECK(adapt_encode_memory_bound(s) <= (uint64_t)256 << 20);
+    /* a budget exactly holding the table-21 model with the usual recall
+     * index takes it; one byte less, the table-20 one */
     s.table_log = 21;
+    s.match_log = 20;
     two = adapt_encode_memory_bound(s);
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, two, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 21);
