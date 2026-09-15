@@ -1,19 +1,19 @@
 {
   "schema": "cadapt.build-manifest.v1",
   "version": "0.12.0",
-  "commit": "ce3acddf2509ce278042e0c15d6cd33bfcaa0bc7",
-  "generated_at": "2026-09-14T19:58:23+00:00",
+  "commit": "a849c6a360fd959ddf5313376536c76c7aabcf14",
+  "generated_at": "2026-09-15T05:50:27+00:00",
   "sources": {
-    "adpat/c/adapt.h": "5ff7a8794ce679bf5d889cf35861d25f7ac7e62f7a17a8ef7245a005ef32e7a0",
+    "adpat/c/adapt.h": "dcb851bd2a394947e28ac9dc22813a3596917971b94e27be0ab5a96e6c0e6594",
     "adpat/c/adapt_adaptive.h": "d21a75f99b8d19400819a538becd7b459673de4fef8e2b889e5423fdb17fb5c7",
     "adpat/c/adapt_archive.c": "089f77084f6fde6d824e2946cb494912daf52909ea3fe8ef389061778d04339f",
     "adpat/c/adapt_bmp.h": "1c2517ba6a05ee609afde4292c1afabb94452f23d97aac90531d31dcca083d96",
-    "adpat/c/adapt_decode.c": "239eee4e6fc0b36a8817dbe12217f080e91154a5492581603d1493d84d3fc129",
-    "adpat/c/adapt_encode.c": "57fe95d6c49ef6369e82fe8ae818a5cf62093663b55c106625edb4f3f4bc581b",
-    "adpat/c/adapt_model.h": "a0bdd432f3c576454e0ab039e5272fcb7bbc365ed2cb343f7350c1a942c7b012",
-    "adpat/c/cadapt.c": "abcc6c7129b9dfa48eb5b5517bf7cfcfa60bb1ac759739ef2ad064b4f83ccaad"
+    "adpat/c/adapt_decode.c": "6b4ff57e6a800a3fad110b764fdb00c1517e596eeb1556d377e5be0e9992110a",
+    "adpat/c/adapt_encode.c": "471bb58e3b1f9067c8c71ac771e3e227509417db45755d51daee8e957f08b473",
+    "adpat/c/adapt_model.h": "7f5f7dd1ecb6066c490544a5f3db74c7612ab81ae666a114d3a8dcd5b02e2fe8",
+    "adpat/c/cadapt.c": "3f49965bb3437d46ca4c2faeb751981d5fe65b73dec692aaa12c5d980a6c5a07"
   },
-  "makefile_sha256": "ec702dc90855d110274a2b320506c7db3a4afaa9de79165b532ba91125e713dc",
+  "makefile_sha256": "5e424bc9d53ff62bb13aa93dbc46fc908fab9b9cc039ebaff88d4ef1134e179b",
   "toolchain": {
     "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
     "cc_command": "cc",
@@ -22,17 +22,17 @@
     "make": "GNU Make 4.3"
   },
   "host": {
-    "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.39",
+    "platform": "Linux-6.18.44-fc-v33-x86_64-with-glibc2.39",
     "machine": "x86_64"
   },
   "outputs": {
     "adpat/c/build/cadapt": {
-      "sha256": "3a76d07bb8210e1a907669a34f32f6449e02c2506646f9885849439fa8bb3ae0",
-      "bytes": 334968
+      "sha256": "2ca0b8fdc6652c9f9ab90073cd548847a3d830b9a3d9fba265433e122a007887",
+      "bytes": 408680
     },
     "adpat/c/build/libadapt.a": {
-      "sha256": "9d9bd2ab434afe123d45143a992242f80fa269ca4a90774cc791c5ca7509cd60",
-      "bytes": 288842
+      "sha256": "e920ec81b24464c20bbc379aab8cdd5a481bdeebcb7567a067ffe7cb8adba0ee",
+      "bytes": 367148
     }
   }
 }
