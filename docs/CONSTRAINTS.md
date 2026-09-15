@@ -27,3 +27,6 @@ whatever it measures. The rest are required capabilities.
 | `DLV-2` | Delivery | **Operational readiness**           | Expose metrics and diagnostic errors; provide reproducible builds, SBOMs, predictable licensing, security updates, and enterprise support. |
 | `SAF-1` | Safety   | **Fault containment**               | Detect corruption and truncation; use independently verifiable chunks, restart points, and explicit partial-recovery behavior. |
 | `SAF-2` | Safety   | **Security**                        | Harden against malicious containers, decompression bombs, path traversal, and compression side channels; provide fuzzing evidence and independent audits. |
+---
+BTW:
+“enwik8 and enwik9 are benchmarks, but this is a general-purpose tool; keep that distinction central. I would love to compress enwik8 to 17 MB and enwik9 below 130 MB, without compromising broader applicability or enterprise readiness. Avoid introducing code or material with incompatible licenses or unclear intellectual property provenance. This codebase will undergo an audit and may support patent applications where applicable.”
