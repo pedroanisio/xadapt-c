@@ -949,6 +949,13 @@ adapt_status adapt_decode_threads(const uint8_t *file, size_t file_len, adapt_li
 #endif
     {
         memory_reader reader;
+        uint64_t bound = adapt_decode_memory_bound(sizes);
+        uint64_t required = file_len > UINT64_MAX - bound ? UINT64_MAX : bound + file_len;
+        /* The input remains resident when only one worker fits, including
+         * unsegmented files and builds without thread support. */
+        status = check_memory(required, limits.max_memory, error);
+        if (status != ADAPT_OK) return status;
+        limits.max_memory -= file_len;
         reader.src = file;
         reader.len = file_len;
         reader.pos = 0;

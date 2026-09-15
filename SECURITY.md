@@ -21,14 +21,27 @@ untrusted:
 - A folder's archive is checked rule by rule at the byte that breaks one,
   and no entry can name a path outside the directory being restored (no
   empty, `.` or `..` component, no NUL, no absolute path). Restoration
-  happens under a staging directory that is removed on any failure, so a
-  refused container leaves nothing behind.
+  happens under a staging directory that is removed on any failure. On
+  POSIX the staging root stays private during extraction, and each entry's
+  parent is opened relative to it with symlink following disabled at every
+  component. Symbolic links may be restored but cannot serve as parents;
+  hard-link sources must resolve to regular files inside that root. Windows
+  also rejects native backslash and drive/stream syntax in archive paths.
 - Memory is bounded by what the container's header names (at most about
   1.2 GiB by the format's own limits) and by `--max-memory`; output by
-  `--max-output`.
+  `--max-output`. For folders, that output cap applies both to the decoded
+  archive stream and to the combined logical sizes of restored files,
+  including sparse holes and each hard-link alias. The sink checks this
+  cumulative limit before creating, extending or linking a file.
+- Threaded decoding reserves the container buffer before reading it and
+  counts retained input even when only one worker fits. A file that would
+  exceed the input-buffer budget, or a pipe of unknown size, uses streaming
+  decoding without that buffer.
 - The two decoders are fuzzed against each other under AddressSanitizer and
   UndefinedBehaviorSanitizer ([adpat/c/fuzz/](adpat/c/fuzz/)), and the test
   suites run clean under both plus LeakSanitizer (`make sanitize`).
+  A regression runs the actual fuzz harness on modeled normal, fast and
+  max fixtures so a stale memory cap cannot silently exclude those paths.
 
 Out of scope: the encoder run on untrusted *source* files is not a
 security boundary (it reads what it is given), and the command line trusts

@@ -1597,7 +1597,8 @@ static int packer_failure(const char *input, const packer *p) {
 }
 
 /* The sink that restores an archive under a staging directory. Every
- * path has passed the unpacker's rules, so it stays under the root. */
+ * path has passed the unpacker's syntax rules; filesystem parents still
+ * have to be resolved without following an archive's symbolic links. */
 typedef struct deferred_metadata {
     char *path;
     adapt_metadata metadata;
@@ -1611,6 +1612,7 @@ typedef struct deferred_metadata {
 typedef struct restorer {
     const char *root;
     FILE *file;
+    uint64_t restored_size, max_output;
     int error; /* errno of the failure */
     char *failed; /* the entry's path, malloc'd, or NULL */
     const char *why; /* a failure the errno does not name, or NULL */
@@ -1618,6 +1620,16 @@ typedef struct restorer {
     /* the directory whose attributes are arriving, deferred with it */
     deferred_metadata *pending;
 } restorer;
+
+/* Reserve apparent file bytes before creating a file or link. Holes and
+ * hard-link aliases count too; subtraction avoids cumulative overflow. */
+static int restore_reserve(restorer *r, uint64_t size) {
+    if (size > r->max_output - r->restored_size) {
+        return EFBIG;
+    }
+    r->restored_size += size;
+    return 0;
+}
 
 static int restore_fail(restorer *r, const char *path, int e, const char *why) {
     r->error = e;
@@ -1630,42 +1642,114 @@ static int restore_fail(restorer *r, const char *path, int e, const char *why) {
     return e != 0 ? e : EIO;
 }
 
+#ifndef _WIN32
+/* Return the entry's parent descriptor, rooted in our private staging
+ * directory. Every component must be a real directory, never a symlink.
+ * The caller owns both the descriptor and the storage holding *leaf. */
+static int restore_parent(restorer *r, const char *path, char **storage, char **leaf) {
+    char *part, *slash;
+    int parent;
+    long path_limit;
+    *storage = NULL;
+    if (!adapt_archive_path_valid(path)) {
+        errno = EINVAL;
+        return -1;
+    }
+    /* Metadata and rollback still use full paths. Do not create entries
+     * that those operations could no longer address, even though openat
+     * can traverse beyond a full pathname's limit. */
+    path_limit = pathconf(r->root, _PC_PATH_MAX);
+    if (path_limit < 0) {
+#ifdef PATH_MAX
+        path_limit = PATH_MAX;
+#else
+        errno = ENOTSUP;
+        return -1;
+#endif
+    }
+    if (strlen(r->root) + 1 + strlen(path) >= (size_t)path_limit) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    *storage = strdup(path);
+    if (*storage == NULL) {
+        return -1;
+    }
+    parent = open(r->root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    part = *storage;
+    while (parent >= 0 && (slash = strchr(part, '/')) != NULL) {
+        int next, e;
+        *slash = '\0';
+        next = openat(parent, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        e = errno;
+        close(parent);
+        parent = next;
+        errno = e;
+        part = slash + 1;
+    }
+    *leaf = part;
+    return parent;
+}
+#else
+/* Archive separators are '/', including on Windows. Reject native
+ * separators and drive/stream syntax before handing paths to the CRT. */
+static int restore_windows_path(const char *path) {
+    return adapt_archive_path_valid(path) && strchr(path, '\\') == NULL && strchr(path, ':') == NULL;
+}
+#endif
+
 static int restore_directory(void *context, const char *path) {
     restorer *r = context;
-    char *full = join(r->root, path);
     int rc;
+#ifdef _WIN32
+    char *full;
+    if (!restore_windows_path(path)) return restore_fail(r, path, EINVAL, "invalid archive path");
+    full = join(r->root, path);
     if (full == NULL) {
         return restore_fail(r, path, ENOMEM, NULL);
     }
-#ifdef _WIN32
-    rc = _mkdir(full);
-#else
-    rc = mkdir(full, 0777);
-#endif
+    rc = _mkdir(full) == 0 ? 0 : errno;
     free(full);
+#else
+    char *storage, *leaf;
+    int parent = restore_parent(r, path, &storage, &leaf);
+    rc = parent < 0 ? errno : (mkdirat(parent, leaf, 0777) == 0 ? 0 : errno);
+    if (parent >= 0) close(parent);
+    free(storage);
+#endif
     if (rc != 0) {
-        return restore_fail(r, path, errno, errno == EEXIST ? "named twice in the archive" : NULL);
+        return restore_fail(r, path, rc, rc == EEXIST ? "named twice in the archive" : NULL);
     }
     return 0;
 }
 
 static int restore_file_open(void *context, const char *path, uint64_t size) {
     restorer *r = context;
-    char *full = join(r->root, path);
-    int fd;
-    (void)size;
+    int fd, e;
+    if (restore_reserve(r, size) != 0) {
+        return restore_fail(r, path, EFBIG, "restored file sizes exceed --max-output");
+    }
+#ifdef _WIN32
+    char *full;
+    if (!restore_windows_path(path)) return restore_fail(r, path, EINVAL, "invalid archive path");
+    full = join(r->root, path);
     if (full == NULL) {
         return restore_fail(r, path, ENOMEM, NULL);
     }
     /* exclusive: an archive that names a file twice is refused */
-#ifdef _WIN32
     fd = _open(full, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
-#else
-    fd = open(full, O_WRONLY | O_CREAT | O_EXCL, 0666);
-#endif
+    e = errno;
     free(full);
+#else
+    char *storage, *leaf;
+    int parent = restore_parent(r, path, &storage, &leaf);
+    fd = parent < 0 ? -1 : openat(parent, leaf, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
+    e = errno;
+    if (parent >= 0) close(parent);
+    free(storage);
+#endif
     if (fd < 0) {
-        return restore_fail(r, path, errno, errno == EEXIST ? "named twice in the archive" : NULL);
+        return restore_fail(r, path, e, e == EEXIST ? "named twice in the archive" : NULL);
     }
 #ifdef _WIN32
     r->file = _fdopen(fd, "wb");
@@ -1717,15 +1801,13 @@ static int restore_symlink(void *context, const char *path, const char *target) 
     (void)target;
     return restore_fail(r, path, ENOTSUP, "a symbolic link is not restored on this platform");
 #else
-    char *full = join(r->root, path);
-    int rc;
-    if (full == NULL) {
-        return restore_fail(r, path, ENOMEM, NULL);
-    }
-    rc = symlink(target, full);
-    free(full);
+    char *storage, *leaf;
+    int parent = restore_parent(r, path, &storage, &leaf);
+    int rc = parent < 0 ? errno : (symlinkat(target, parent, leaf) == 0 ? 0 : errno);
+    if (parent >= 0) close(parent);
+    free(storage);
     if (rc != 0) {
-        return restore_fail(r, path, errno, errno == EEXIST ? "named twice in the archive" : NULL);
+        return restore_fail(r, path, rc, rc == EEXIST ? "named twice in the archive" : NULL);
     }
     return 0;
 #endif
@@ -1736,23 +1818,36 @@ static int restore_symlink(void *context, const char *path, const char *target) 
  * states. */
 static int restore_hardlink(void *context, const char *path, const char *target) {
     restorer *r = context;
+    int rc;
+#ifdef _WIN32
     char *full = join(r->root, path);
     char *to = join(r->root, target);
-    int rc;
+    if (!restore_windows_path(path) || !restore_windows_path(target)) {
+        free(full);
+        free(to);
+        return restore_fail(r, path, EINVAL, "invalid archive path");
+    }
     if (full == NULL || to == NULL) {
         free(full);
         free(to);
         return restore_fail(r, path, ENOMEM, NULL);
     }
-#ifdef _WIN32
     {
         FILE *in = fopen(to, "rb"), *out = NULL;
+        struct _stat64 st;
         uint8_t buf[65536];
         size_t n;
         rc = 0;
         if (in == NULL) {
             rc = errno;
+        } else if (_fstat64(_fileno(in), &st) != 0) {
+            rc = errno;
+        } else if ((st.st_mode & _S_IFMT) != _S_IFREG || st.st_size < 0) {
+            rc = EINVAL;
         } else {
+            rc = restore_reserve(r, (uint64_t)st.st_size);
+        }
+        if (rc == 0) {
             int fd = _open(full, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
             out = fd < 0 ? NULL : _fdopen(fd, "wb");
             if (out == NULL) {
@@ -1774,13 +1869,31 @@ static int restore_hardlink(void *context, const char *path, const char *target)
             rc = errno;
         }
     }
-#else
-    rc = link(to, full) == 0 ? 0 : errno;
-#endif
     free(full);
     free(to);
+#else
+    char *storage, *leaf, *target_storage = NULL, *target_leaf;
+    int parent = restore_parent(r, path, &storage, &leaf), source = -1;
+    struct stat st;
+    rc = parent < 0 ? errno : 0;
+    if (rc == 0) {
+        source = restore_parent(r, target, &target_storage, &target_leaf);
+        if (source < 0) rc = errno;
+        else if (fstatat(source, target_leaf, &st, AT_SYMLINK_NOFOLLOW) != 0) rc = errno;
+        else if (!S_ISREG(st.st_mode) || st.st_size < 0) rc = EINVAL;
+        else {
+            rc = restore_reserve(r, (uint64_t)st.st_size);
+            if (rc == 0 && linkat(source, target_leaf, parent, leaf, 0) != 0) rc = errno;
+        }
+    }
+    if (source >= 0) close(source);
+    if (parent >= 0) close(parent);
+    free(target_storage);
+    free(storage);
+#endif
     if (rc != 0) {
-        return restore_fail(r, path, rc, rc == EEXIST ? "named twice in the archive" : "cannot restore hard link");
+        return restore_fail(r, path, rc, rc == EFBIG ? "restored file sizes exceed --max-output" :
+                            rc == EEXIST ? "named twice in the archive" : "cannot restore hard link");
     }
     return 0;
 }
@@ -2016,7 +2129,8 @@ static int staged_dir_open(staged *s, const char *target, int force) {
 #ifdef _WIN32
         rc = _mkdir(path);
 #else
-        rc = mkdir(path, 0777);
+        /* Keep other users out until all entries and metadata are final. */
+        rc = mkdir(path, 0700);
 #endif
         if (rc != 0) {
             int e = errno;
@@ -2095,8 +2209,8 @@ static int read_replay(void *context, uint8_t *buf, size_t len, size_t *got) {
 /* The rest of the input after the replayed header, all of it, into one
  * buffer: the parallel decoder reads a file's segment table from its end.
  * Returns 0 with the buffer, or an errno. */
-static int read_whole(replay *r, uint8_t **buf, size_t *len) {
-    size_t cap = (size_t)1 << 20, at = 0, got;
+static int read_whole(replay *r, size_t cap, uint8_t **buf, size_t *len) {
+    size_t at = 0, got;
     uint8_t *b = malloc(cap);
     if (b == NULL) {
         return ENOMEM;
@@ -2104,18 +2218,15 @@ static int read_whole(replay *r, uint8_t **buf, size_t *len) {
     for (;;) {
         int rc;
         if (at == cap) {
-            uint8_t *grown;
-            if (cap > ((size_t)-1) / 2) {
+            uint8_t extra;
+            /* The source may have grown since its size was checked.
+             * Refuse growth instead of allocating past the reservation. */
+            rc = read_replay(r, &extra, 1, &got);
+            if (rc != 0 || got != 0) {
                 free(b);
-                return ENOMEM;
+                return rc != 0 ? rc : EFBIG;
             }
-            cap *= 2;
-            grown = realloc(b, cap);
-            if (grown == NULL) {
-                free(b);
-                return ENOMEM;
-            }
-            b = grown;
+            break;
         }
         rc = read_replay(r, b + at, cap - at, &got);
         if (rc != 0) {
@@ -2132,25 +2243,49 @@ static int read_whole(replay *r, uint8_t **buf, size_t *len) {
     return 0;
 }
 
+/* Only regular inputs have a bounded size we can reserve before reading.
+ * Pipes keep the streaming decoder and never accumulate an input buffer. */
+static int replay_length(replay *r, size_t *length) {
+    cadapt_off position = cadapt_ftell(r->in->file);
+    uint64_t remaining;
+#ifdef _WIN32
+    struct _stat64 st;
+    if (position < 0 || _fstat64(_fileno(r->in->file), &st) != 0 || (st.st_mode & _S_IFMT) != _S_IFREG) return 0;
+#else
+    struct stat st;
+    if (position < 0 || fstat(fileno(r->in->file), &st) != 0 || !S_ISREG(st.st_mode)) return 0;
+#endif
+    if (st.st_size < position) return 0;
+    remaining = (uint64_t)(st.st_size - position) + (r->held_len - r->held_at);
+    if (remaining > SIZE_MAX || remaining == 0) return 0;
+    *length = (size_t)remaining;
+    return 1;
+}
+
 /* Decode through the stream decoder, or — for a segmented file on two or
  * more threads — the whole input read into memory and its segments
  * decoded at once; `stats->workers` says which. */
 static adapt_status decode_input(replay *ahead, uint64_t threads, adapt_sizes sizes, adapt_limits limits,
                                  adapt_write_fn write, void *write_context, adapt_stats *stats, adapt_error *error) {
     uint8_t *whole;
-    size_t whole_len;
+    size_t whole_len, capacity;
+    uint64_t stream_memory = adapt_decode_memory_bound(sizes);
     adapt_status status;
     int rc;
-    if (threads < 2 || !sizes.segmented) {
+    if (threads < 2 || !sizes.segmented || stream_memory > limits.max_memory ||
+        !replay_length(ahead, &capacity) || capacity > limits.max_memory - stream_memory) {
         return adapt_decode_stream(read_replay, ahead, write, write_context, limits, stats, error);
     }
-    rc = read_whole(ahead, &whole, &whole_len);
+    rc = read_whole(ahead, capacity, &whole, &whole_len);
     if (rc != 0) {
         ahead->in->error = rc;
         memset(error, 0, sizeof(*error));
         error->status = ADAPT_ERROR_IO;
         return ADAPT_ERROR_IO;
     }
+    /* The library counts the file length; a concurrently shortened source
+     * still occupies the original reservation until this buffer is freed. */
+    limits.max_memory -= capacity - whole_len;
     status = adapt_decode_threads(whole, whole_len, limits, threads, write, write_context, stats, error);
     free(whole);
     return status;
@@ -2219,7 +2354,7 @@ static int decode_command(int argc, char **argv) {
     uint64_t threads;
     adapt_sizes sizes;
     replay ahead;
-    restorer restore = {NULL, NULL, 0, NULL, NULL, NULL, NULL};
+    restorer restore = {0};
     adapt_metadata metadata;
     int has_metadata;
     adapt_archive_unpacker *unpacker = NULL;
@@ -2321,6 +2456,7 @@ static int decode_command(int argc, char **argv) {
             return rc;
         }
         restore.root = stage.path;
+        restore.max_output = limits.max_output;
         sink.context = &restore;
         sink.directory = restore_directory;
         sink.file_open = restore_file_open;
@@ -2360,6 +2496,18 @@ static int decode_command(int argc, char **argv) {
             (void)restore_fail(&restore, "root", rc, "cannot restore directory metadata");
             status = ADAPT_ERROR_IO;
         }
+#ifndef _WIN32
+        if (status == ADAPT_OK && !has_metadata) {
+            /* Old archives have no root metadata. Publish their usual
+             * umask-derived mode only after the private staging work. */
+            mode_t mask = umask(0);
+            umask(mask);
+            if (chmod(stage.path, 0777 & ~mask) != 0) {
+                (void)restore_fail(&restore, "root", errno, "cannot restore directory mode");
+                status = ADAPT_ERROR_IO;
+            }
+        }
+#endif
         if (status != ADAPT_OK) {
             char message[400];
             uint64_t at = 0;

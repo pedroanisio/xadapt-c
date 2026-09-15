@@ -105,8 +105,13 @@ more. A decoder holds the same model and window; `decode` allocates whatever
 the container's header names — the container alone decodes (`FMT-6` in
 [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)) — and `--max-memory` is the one
 memory cap that can refuse a valid container; the format also bounds table
-and window sizes. `--max-output`
-(default 1 GiB) caps the bytes `decode` writes. Folder encoding additionally
+and window sizes. Threaded decoding also counts the buffered container:
+regular files are buffered only when the input and a decoder fit together;
+larger inputs and pipes use one streaming decoder. `--max-output`
+(default 1 GiB) caps the decoded stream's bytes and, for a folder, also the
+combined logical sizes of restored files. Sparse holes and each hard-link
+alias count toward that folder limit; a refusal discards the staged output.
+Folder encoding additionally
 retains an entry/path inventory, and restoration retains pending directory
 metadata; this CLI bookkeeping is outside the codec's working-memory bound.
 
@@ -158,7 +163,8 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   enwik8 proxy under `--max`: 1,778,553 bytes against 1,716,715 whole) and
   is never the default. With `--verify`, each thread proves its own
   segment before it is written. A pipe is segmented the same way, its
-  segments read ahead into memory.
+  segments read ahead into memory during encoding. Decoding a pipe uses
+  one streaming decoder, including when `--threads` is requested.
 - An `<input>` that is a folder is walked into one archive stream and coded
   as one container (the header carries an archive flag; `info` reports
   "holds a folder"). `decode` restores it under the output name — every
@@ -294,7 +300,12 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
 
 - **Fuzzing**: [fuzz/fuzz_decode.c](adpat/c/fuzz/fuzz_decode.c) feeds
   arbitrary bytes to both decoders under libFuzzer and aborts if they
-  disagree; its header holds the build line.
+  disagree. It admits models with a decoding memory bound up to 128 MiB,
+  plus 32 KiB for output. `make -C adpat/c fuzz-smoke` builds with clang and
+  processes 1,000 inputs using copies of the committed vectors in the build
+  directory (`FUZZ_RUNS` changes the count). The normal test and coverage
+  gates also prove that the actual harness accepts modeled normal, fast,
+  and max fixtures, honors its output cap, and refuses oversized models.
 
 ## Licence, security, support, provenance
 

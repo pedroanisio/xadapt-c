@@ -257,6 +257,12 @@ is standard output (encode) or standard input (decode).
 .B \-\-force
 Overwrite an existing output.
 .TP
+.BI \-\-max\-output " bytes"
+On decode, cap the decoded stream at this many bytes (default 1073741824).
+For folders, also cap the combined logical sizes of restored files,
+including sparse holes and each hard-link alias. A refused entry discards
+the staging directory and leaves the existing destination intact.
+.TP
 .BR \-\-verify ", " \-\-no\-verify
 .B encode
 skips round-trip verification by default.
