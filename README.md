@@ -22,10 +22,11 @@ refused. The CLI uses native filesystem APIs to
 restore metadata.
 
 The [experimental implementation report](research/causal-byte-implementation.md)
-specifies the new algorithms, format versions, limits and measurement protocol.
-The [current-source results](research/current-baseline.md) record a 1.42%
-enwik8 improvement at the default max-profile budget with `--allocation context`,
-plus the measured limits of the predictor and BMP experiments.
+specifies the adaptive algorithms, their format versions, limits and
+measurement protocol; the other dated notes are indexed in
+[research/README.md](research/README.md). The numbers that stand are the
+locked floors in [tools/ratio_floor.json](tools/ratio_floor.json), each
+with the decision that moved it in [LOCKS.md](LOCKS.md).
 
 The code began as an integer-for-integer port of a Rust crate and keeps that
 crate's layout and names; since format 13 it defines its own format and
@@ -136,13 +137,12 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
 - `--allocation context` spends the budget on the context table before growing
   the recall window. `--allocation window` is the unchanged default. Both use
   existing header fields and compose with the profiles and candidate search.
-  Under `--max`, a budget that would stop the table at 2^22 blocks or fewer,
+  Under `--max`, a tier that would stop the table at 2^22 blocks or fewer,
   short of the input's target, buys a table twice the size with compact side
   tables (versions 53/56) and, while the table stays at that size, a lean
-  context set (54/57): on enwik8, 19,657,760 bytes in 128 MiB. What the
-  budget still holds past the window goes to the table an eighth of its
-  next doubling at a time (versions 58/61): on enwik8, 18,780,150 bytes
-  in 512 MiB against 18,831,629 with the table stopped at 256 MiB.
+  context set (54/57); what the tier still holds past the window goes to
+  the table an eighth of its next doubling at a time (versions 58/61). The
+  measurements behind each rule are in the LOCKS.md entries that made it.
   Either allocation can produce a larger file; choose from measured complete
   containers. More of the allowed memory can be used by the context policy.
 - `--adaptive rates|sparse|retained` selects experimental causal predictors:
@@ -168,11 +168,11 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   sides have seen written out three times becomes, from then on, a code
   of one to three bytes the model reads as one symbol; each side builds
   the same bounded book as the file is coded, nothing is sent ahead and
-  nothing is built in, and every other byte passes as it is. Measured on
-  enwik8 at 128 MiB with `--max --allocation context`: 19,657,760 →
-  18,971,412 bytes in fewer seconds. Below 8 MiB it costs, which is what
-  the length rule is for; a pipe's length is unknown, so a pipe gets it
-  only when asked.
+  nothing is built in, and every other byte passes as it is. On enwik8 it
+  took about 3.5 % off the container and a quarter off the time at every
+  tier (the LOCKS.md entry has the runs; the floors below carry what stands).
+  Below 8 MiB it costs, which is what the length rule is for; a pipe's
+  length is unknown, so a pipe gets it only when asked.
 - `--threads <n>` with `n ≥ 2` cuts the input into segments of
   `--segment-bytes` (default 16 MiB, whole 256 KiB blocks) that each start
   the model afresh, and codes them at once, on as many of the `n` threads
@@ -436,7 +436,13 @@ under `bench/`; they have not been deleted.
 The codec-specific ratio and throughput regression gates remain here:
 `make gate`, `make ratio-floor` and `make corpus-floor` use
 `tools/check_ratio_floor.py` with the canonical `tools/ratio_floor.json`
-and the two corpus floor files. Their thresholds and verification behavior
+and the two corpus floor files, rendered here by
+`tools/render_floors.py` (`make check` fails when this block is stale):
+
+<!-- floors:start -->
+<!-- floors:end -->
+
+Their thresholds and verification behavior
 are unchanged. The old copies in `bench/` are historical snapshots; update the
 canonical files in `tools/` for any separately approved floor change. Allocation,
 adaptive-search and filesystem-restoration correctness stay in the codec tests.

@@ -8,7 +8,7 @@ BUILD ?= build
 CODEC_BUILD = $(if $(filter /%,$(BUILD)),$(BUILD),adpat/c/$(BUILD))
 GATE_ARGS ?=
 FLOOR_ARGS ?=
-.PHONY: all test check check-parts clean bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor
+.PHONY: all test check check-parts clean bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor ltcb
 
 all test clean:
 	$(MAKE) -C adpat/c $@
@@ -63,6 +63,15 @@ manifest: all
 
 reproduce:
 	$(PYTHON) -B tools/provenance.py reproduce
+
+# The LTCB renderings research/ltcb-tables.md links (ignored by git): the
+# dashboard, the phase chart, the analysis and the interactive page, from
+# the tracked CSVs. Plotting needs the packages in bench/requirements.txt.
+ltcb:
+	$(PYTHON) -B tools/ltcb/plot_ltcb_tables.py --local research/ltcb-local-entries.csv --output research/ltcb-dashboard.svg
+	$(PYTHON) -B tools/ltcb/plot_ltcb_phases.py --local research/ltcb-local-entries.csv --output research/ltcb-phases.svg
+	$(PYTHON) -B tools/ltcb/analyze_ltcb.py --local research/ltcb-local-entries.csv --output research/ltcb-analysis.json
+	$(PYTHON) -B tools/ltcb/build_ltcb_interactive.py
 
 # Benchmarks are owned by the standalone codecbench tool, using an external
 # cadapt command adapter. These compatibility targets report the migration.

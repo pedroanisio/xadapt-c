@@ -6,11 +6,19 @@ __pycache__/
 .repo/
 adpat/c/build-cov/
 static/corpus/text8
-research/self-contained-experiment-spec.md
-research/self-contained-source-audit.json
 adpat/cadatp-hash
 adpat/cadatp-fc8d2
-research/
+# research/: the notes and CSVs are tracked; the renderings `make ltcb` builds are not
+research/ltcb-dashboard.*
+research/ltcb-phases.svg
+research/ltcb-phases.png
+research/ltcb-phases.csv
+research/ltcb-analysis.*
+research/ltcb-interactive.html
 _tmp/
 static/corpus/mixed/*
 !static/corpus/mixed/manifest.json
+docs/doc-hygiene-report-2026-09-15.md
+docs/doc-quarantine/doc-quarantine.sh
+docs/doc-quarantine/quarantine-manifest.json
+docs/doc-quarantine/quarantine-summaries.md

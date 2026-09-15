@@ -11,7 +11,7 @@ Two CSV snapshots of Matt Mahoney's Large Text Compression Benchmark (LTCB),
 transcribed from the published HTML so the numbers can be joined against this
 repository's own measurements. The values are the published ones, unmodified
 except for removing thousands separators. Nothing here was measured by this
-repository; see [current-baseline.md](current-baseline.md) for local results.
+repository; see [baseline-2026-09-14.md](baseline-2026-09-14.md) for the local results of that day.
 
 | File | Source page | Page "Last update" | Rows |
 | --- | --- | --- | ---: |
@@ -24,8 +24,9 @@ entries and this note are in git. The tooling that reads them lives in
 (`python3 -B -m unittest discover -s tools/ltcb -p 'test_*.py'`). The
 renderings it writes into this directory — `ltcb-dashboard.{svg,png}`,
 `ltcb-phases.{svg,png,csv}`, `ltcb-analysis.{json,md}`,
-`ltcb-interactive.html` — are ignored by git and regenerated with the commands
-below; nothing quotes a number from them that the CSVs do not carry.
+`ltcb-interactive.html` — are ignored by git; `make ltcb` at the repository
+root builds all of them, and each section below gives its own command;
+nothing quotes a number from them that the CSVs do not carry.
 
 Both pages were fetched on 2026-09-14 (text.html at 20:04 UTC, SHA-256
 `a504ea64cfbe1117bc7bbb7c64777eb427c9d9fcf0bb039e3711bf1c42e0b84f`;

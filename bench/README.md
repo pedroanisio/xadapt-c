@@ -31,8 +31,9 @@ under `bench/results/`. Full-corpus runs may take several minutes per profile.
 No benchmark runs during `make` or `make check`.
 
 ```sh
-# Repeat all three profiles on the full corpus.
-make bench BENCH_ARGS='--repeats 3'
+# Repeat all three profiles on the full corpus (`make bench` no longer runs
+# this collector: it prints the codecbench migration notice and exits 1).
+python3 -B bench/telemetry.py run --repeats 3
 
 # Compare budgets and segment configurations, preserving every repetition.
 python3 -B bench/telemetry.py run --repeats 2 --memory 64MiB 128MiB --threads 1 2

@@ -298,6 +298,46 @@ model leaves no slack, so the fraction is 0 and the entry below stands.
 (header parsing and its failure paths, the sizer's choices at 160 and 256
 MiB, sized round trips of the full, compact and lean models through both
 instruction-set paths, a named sized container with metadata).
+## 2026-09-15 — Size floors re-locked: the recall index grows from the budget the table and the window leave
+
+**Decision.** The sizing capped the recall index at 2^20 entries whatever
+the budget; enwik8 has a hundred positions per entry at that size. Both
+sizing paths now grow it last, to 2^22, from whatever the budget has left
+once the table and the window have all they can use, never displacing
+either; the index is capped at the input's positions. The header carries
+the index size, so the format is unchanged, and the size floors move to
+what the sizing now writes:
+
+| Input | Was | Now |
+|---|---:|---:|
+| enwik8, `--max --allocation context`, 674 MiB | 18,564,510 B | **18,529,513 B** |
+| enwik8, first 16 MiB | 3,340,447 B | **3,337,011 B** |
+| enwik8, first 8 MiB (the CI proxy) | 1,716,715 B | **1,715,521 B** |
+
+At 128 MiB nothing is left after the compact tables and the window, the
+index stays at 2^20 and the container is unchanged (19,657,760 B). The
+enwik9 floor (155,906,798 B) stands unmeasured; the throughput floors are
+unchanged (this container: 476 s for the enwik8 encode, within its noise
+of the previous codec's 462 s).
+
+**Why, measured.** On the 16 MiB enwik8 prefix at the default budget, a
+2^22 index codes 3,330,164 B against 3,333,487 with 2^20 (−0.10 %) and 2^24,
+which enwik8's budget cannot hold, 3,329,340; at 128 MiB an index that
+displaced the window cost 0.01 to 0.2 %, which is why it takes only what is
+left. Also measured on the same prefix and rejected as within noise or
+worse: a lower mixer update threshold (0 and 2), estimation rate 1/64,
+estimation shares 4/8 and 7/8, mixer rate floor 4 and ceiling 256, decay 48
+and 192, map count limits 127 and 1023, a third estimation stage keyed by
+the recall state, dual-rate state maps (rates 1/8, 1/16, 1/32), a 16-bit
+coder probability (0.006 %), seven alternative contexts in the weakest
+slot, and aligned arbiter rows (no speed change on the hand-written dot
+product). A first-layer starting weight of 1/32 instead of 1/4 measured
+0.21 % smaller at the default budget and 0.18 % at 128 MiB, but changes
+every file's bytes and so waits for a format version.
+
+**Status.** Implemented 2026-09-15; `make gate` passes with the round trip
+verified.
+
 ## 2026-09-15 — Lean context set for compact tables of 2^22 blocks or fewer (versions 54/57)
 
 **Decision.** A compact model whose context table is at most 2^22 blocks
@@ -378,46 +418,6 @@ budgets whose table already passes 2^22 keep the full set.
 **Status.** Landed 2026-09-15 with `adapt_sizes.compact`, versions
 53/56, decoder support for both, C and CLI tests (a compact round trip,
 the version-byte checks, the sizing boundaries) and the gate runs above.
-
-## 2026-09-15 — Size floors re-locked: the recall index grows from the budget the table and the window leave
-
-**Decision.** The sizing capped the recall index at 2^20 entries whatever
-the budget; enwik8 has a hundred positions per entry at that size. Both
-sizing paths now grow it last, to 2^22, from whatever the budget has left
-once the table and the window have all they can use, never displacing
-either; the index is capped at the input's positions. The header carries
-the index size, so the format is unchanged, and the size floors move to
-what the sizing now writes:
-
-| Input | Was | Now |
-|---|---:|---:|
-| enwik8, `--max --allocation context`, 674 MiB | 18,564,510 B | **18,529,513 B** |
-| enwik8, first 16 MiB | 3,340,447 B | **3,337,011 B** |
-| enwik8, first 8 MiB (the CI proxy) | 1,716,715 B | **1,715,521 B** |
-
-At 128 MiB nothing is left after the compact tables and the window, the
-index stays at 2^20 and the container is unchanged (19,657,760 B). The
-enwik9 floor (155,906,798 B) stands unmeasured; the throughput floors are
-unchanged (this container: 476 s for the enwik8 encode, within its noise
-of the previous codec's 462 s).
-
-**Why, measured.** On the 16 MiB enwik8 prefix at the default budget, a
-2^22 index codes 3,330,164 B against 3,333,487 with 2^20 (−0.10 %) and 2^24,
-which enwik8's budget cannot hold, 3,329,340; at 128 MiB an index that
-displaced the window cost 0.01 to 0.2 %, which is why it takes only what is
-left. Also measured on the same prefix and rejected as within noise or
-worse: a lower mixer update threshold (0 and 2), estimation rate 1/64,
-estimation shares 4/8 and 7/8, mixer rate floor 4 and ceiling 256, decay 48
-and 192, map count limits 127 and 1023, a third estimation stage keyed by
-the recall state, dual-rate state maps (rates 1/8, 1/16, 1/32), a 16-bit
-coder probability (0.006 %), seven alternative contexts in the weakest
-slot, and aligned arbiter rows (no speed change on the hand-written dot
-product). A first-layer starting weight of 1/32 instead of 1/4 measured
-0.21 % smaller at the default budget and 0.18 % at 128 MiB, but changes
-every file's bytes and so waits for a format version.
-
-**Status.** Implemented 2026-09-15; `make gate` passes with the round trip
-verified.
 
 ## 2026-09-14 — benchmark independence and regression-file ownership
 
@@ -519,7 +519,7 @@ enwik9-plus-decompressor ranking, #20 of 215 on the enwik8 column
 - Raising a floor is a new entry here, with the run that justifies it.
 
 **Status.** Locked 2026-09-14. The enwik8 container was decoded byte-exact by
-the frozen baseline decoder (`research/current-baseline.md`); the enwik9
+the frozen baseline decoder (`research/baseline-2026-09-14.md`, then named current-baseline.md); the enwik9
 container's decode verification was in progress when this entry was written
 and its result is recorded in `research/ltcb-local-entries.csv`.
 

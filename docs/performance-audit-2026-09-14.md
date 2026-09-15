@@ -1,5 +1,13 @@
 # Performance audit — cadapt (format 13–15), 2026-09-14
 
+> **Status, 2026-09-15.** A dated record at format 13–15. Landed since: the
+> per-bit path (499075c: the byte-boundary prefetch of item 2 and the fused
+> loop's measured form, bytes identical, the throughput floors raised in
+> ec78195), threaded segments (item 1, 510aa16 / PR #1), parallel segment
+> decoding (item 8, the same commit). The follow-up rankings are
+> `docs/performance-opportunities-2026-09-14.md` (throughput at 085dff0) and
+> `docs/performance-audit-128mib-2026-09-15.md` (ratio at small budgets).
+
 <!-- Authored with Claude Opus 5 (Claude Code). Every number below is from a
 run on the host named in Baseline; corpus citations name the doc-ray document
 and sentence ordinal they were read from. -->

@@ -18,7 +18,7 @@ learned corpus table, dictionary, tokenizer or sidecar. See the
 [constraints](../docs/CONSTRAINTS.md).
 
 The implementation is integrated into `main`. The frozen experiment branch
-`research/causal-current` is based on source snapshot `6eb6e41`. The [baseline protocol](current-baseline.md) records capture and
+`research/causal-current` is based on source snapshot `6eb6e41`. The [baseline protocol](baseline-2026-09-14.md) records capture and
 comparison settings. The original 64 MiB normal-profile results remain in
 `research/causal-byte-adaptation`; they are historical, not the comparator here.
 
@@ -226,7 +226,7 @@ evidence.
 
 ## Current-source measurements and allocation
 
-The [current-source result report](current-baseline.md) records the full
+The [baseline report of 2026-09-14](baseline-2026-09-14.md) records the full
 enwik8, controlled fixtures and natural holdouts against snapshot `6eb6e41`.
 At matched max/1 GiB settings, all three added predictors slightly increase
 enwik8 size, so automatic selection returns the baseline. The BMP transform

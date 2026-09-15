@@ -1,5 +1,13 @@
 # Performance opportunities — cadapt at HEAD `085dff0`, 2026-09-14
 
+> **Status, 2026-09-15.** Landed since: item 1 (segments on threads, 510aa16),
+> item 14 (parallel segment decoding, the same commit). Measured and rejected:
+> item 2 (branch-free run and recall lanes: bytes identical, branch misses
+> −8.6 %, instructions +3.9 %, no cycle win in interleaved runs). Since then
+> the text transform (e72f3e8) cut the bytes the model codes on text by about
+> 38 %, which moved every time floor (`tools/ratio_floor.json`); the
+> per-bit numbers below are the state of 085dff0.
+
 <!-- Authored with Claude Opus 5 (Claude Code), the LTCB session. Every
 number is from a run on the host in Baseline unless it names the earlier audit
 (docs/performance-audit-2026-09-14.md); corpus citations name the doc-ray

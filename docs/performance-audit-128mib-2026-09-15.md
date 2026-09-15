@@ -1,5 +1,19 @@
 # Performance audit — cadapt `--max` within 128 MiB, toward 17 MB on enwik8
 
+> **Status, 2026-09-15 (kept current by whoever lands or rejects an item).**
+> Landed: items 1 and 2 as the compact side tables, versions 53/56 (f9300d6,
+> `LOCKS.md`), followed by the lean context set (195efae) and the sized table
+> (e71fc23, versions 58/61); item 20's family as the online text transform
+> (e72f3e8, versions 62–71: the book is built during coding, not ahead of
+> it, which the operator's rule requires); the recall index grown from spare
+> budget (a1ed995). Measured and rejected: item 11 (order-hit mixer key,
+> +0.17 % at 128 MiB), item 12 (two forms, worse), item 10 (neutral/worse),
+> item 14 (worse), rate sweeps (worse), item 5 (50/50 neutral, 75/25 +0.9 %),
+> item 6 (bytes identical, fewer misses, more instructions, no cycle win).
+> Since 15d0cbe the budgets are tiers (`-6` is 94 MiB, `-7` 186 MiB); the
+> Baseline table below is the state of 2026-09-14 and the current floors are
+> in `tools/ratio_floor.json`.
+
 <!-- Authored with Claude Opus 5 (Claude Code), 2026-09-15 local, against
 HEAD 510aa16 (the per-bit path of 085dff0, threaded segments of 510aa16). Every
 number is from a run on the host in Baseline unless it names its source; corpus
