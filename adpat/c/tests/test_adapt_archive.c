@@ -127,6 +127,10 @@ static int rec_attribute(void *context, const char *path, uint8_t kind, const ch
     return note(context, line);
 }
 
+static int rec_root_attribute(void *context, const char *name, const uint8_t *value, size_t len) {
+    return rec_attribute(context, "<root>", ADAPT_ARCHIVE_DIRECTORY, name, value, len);
+}
+
 static adapt_archive_sink sink_of(record *r) {
     adapt_archive_sink s;
     s.context = r;
@@ -149,6 +153,7 @@ static int feed(const uint8_t *stream, size_t len, size_t piece, record *r, adap
     size_t at = 0;
     int rc = 0;
     CHECK(u != NULL);
+    adapt_archive_set_root_attribute_callback(u, rec_root_attribute);
     while (at < len && rc == 0) {
         size_t n = piece < len - at ? piece : len - at;
         rc = adapt_archive_unpack(u, stream + at, n);
@@ -847,6 +852,81 @@ static void test_full_malformed(void) {
     }
 }
 
+static void test_root_attributes(void) {
+    build b;
+    size_t piece, root_end, cut;
+    record r;
+    adapt_archive_unpacker *u;
+    adapt_error error;
+    CHECK(strcmp(ADAPT_ARCHIVE_ROOT_MAGIC, "ADPTARC4") == 0);
+    adapt_archive_set_root_attribute_callback(NULL, NULL);
+    b.len = 0;
+    put(&b, "ADPTARC4", 8);
+    put_attrs(&b, 2);
+    put_attr(&b, "user.a", "root");
+    put_attr(&b, "user.b", "");
+    root_end = b.len;
+    put_full(&b, ADAPT_ARCHIVE_DIRECTORY, "child", 0, NULL, NULL, 0);
+    put_attrs(&b, 1);
+    put_attr(&b, "user.child", "value");
+    end(&b);
+    for (piece = 1; piece <= b.len; piece++) {
+        memset(&r, 0, sizeof(r));
+        CHECK(feed(b.bytes, b.len, piece, &r, &u) == 0);
+        CHECK(adapt_archive_finish(u, &error) == ADAPT_OK);
+        CHECK(adapt_archive_entries(u) == 1);
+        CHECK(strcmp(r.log, "attr <root> 1 user.a=root\nattr <root> 1 user.b=\n"
+                            "dir child\nattr child 1 user.child=value\n") == 0);
+        adapt_archive_unpacker_free(u);
+    }
+    /* Every incomplete root prefix must be refused on finish. */
+    for (cut = 0; cut <= root_end; cut++) {
+        memset(&r, 0, sizeof(r));
+        CHECK(feed(b.bytes, cut, 1, &r, &u) == 0);
+        CHECK(adapt_archive_finish(u, &error) == ADAPT_ERROR_BAD_ARCHIVE);
+        CHECK(adapt_archive_entries(u) == 0);
+        adapt_archive_unpacker_free(u);
+    }
+    /* Callers must explicitly support root attributes, never drop them. */
+    memset(&r, 0, sizeof(r));
+    u = adapt_archive_unpacker_new(sink_of(&r));
+    CHECK(adapt_archive_unpack(u, b.bytes, b.len) == ADAPT_ARCHIVE_MALFORMED);
+    CHECK(strstr(adapt_archive_problem(u, NULL), "root attribute callback") != NULL);
+    CHECK(adapt_archive_finish(u, NULL) == ADAPT_ERROR_BAD_ARCHIVE);
+    adapt_archive_unpacker_free(u);
+    for (r.fail_on = 1; r.fail_on <= 2; r.fail_on++) {
+        int call = r.fail_on;
+        memset(&r, 0, sizeof(r));
+        r.fail_on = call;
+        CHECK(feed(b.bytes, b.len, 1, &r, &u) == 77);
+        CHECK(adapt_archive_unpack(u, b.bytes, b.len) == 77);
+        CHECK(adapt_archive_finish(u, &error) == ADAPT_ERROR_BAD_ARCHIVE);
+        CHECK(adapt_archive_entries(u) == 0);
+        adapt_archive_unpacker_free(u);
+    }
+    /* An empty root attribute list needs no additional callback. */
+    memset(&r, 0, sizeof(r));
+    u = adapt_archive_unpacker_new(sink_of(&r));
+    CHECK(adapt_archive_unpack(u, (const uint8_t *)"ADPTARC4\0\0\0", 11) == 0);
+    CHECK(adapt_archive_finish(u, &error) == ADAPT_OK);
+    CHECK(r.calls == 0 && adapt_archive_entries(u) == 0);
+    adapt_archive_unpacker_free(u);
+    /* The root uses the existing ordering, uniqueness and length rules. */
+    for (piece = 1; piece <= 9; piece++) {
+        b.len = 0;
+        put(&b, "ADPTARC4", 8);
+        put_attrs(&b, 2);
+        put_attr(&b, "user.a", "1");
+        put_attr(&b, "user.a", "2");
+        refuse(&b, b.len - 1, "repeated", piece);
+        b.len = 0;
+        put(&b, "ADPTARC4", 8);
+        put_attrs(&b, 1);
+        put(&b, "\0\0", 2);
+        refuse(&b, b.len - 1, "name is empty", piece);
+    }
+}
+
 int main(void) {
     test_paths_and_entries();
     test_well_formed();
@@ -855,6 +935,7 @@ int main(void) {
     test_full_writers();
     test_full_well_formed();
     test_full_malformed();
+    test_root_attributes();
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);
         return 1;

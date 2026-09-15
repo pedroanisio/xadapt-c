@@ -1381,6 +1381,13 @@ static void test_threads(void) {
     memcpy(copy, built, sizeof(built));
     copy[8 + 10 + 1] = 5; /* a table where the second segment's block is */
     CHECK_STATUS(decode_threads(copy, sizeof(built), limits, 3, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    /* Worker errors must also return a status when the caller declines
+     * the optional diagnostic object. Exercise both the first worker
+     * and a later worker, without changing the valid segment table. */
+    CHECK_STATUS(decode_threads(copy, sizeof(built), limits, 3, &s, NULL, NULL), ADAPT_ERROR_BAD_BLOCK);
+    memcpy(copy, built, sizeof(built));
+    copy[8] = 99;
+    CHECK(decode_threads(copy, sizeof(built), limits, 3, &s, NULL, NULL) != ADAPT_OK);
     memcpy(copy, built, sizeof(built));
     copy[8 + 10 + 1] = 3; /* a trailer there */
     CHECK_STATUS(decode_threads(copy, sizeof(built), limits, 3, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);

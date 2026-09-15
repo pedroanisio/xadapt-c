@@ -210,7 +210,7 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   run on POSIX; Windows behavior has not been validated.
 - A folder's **hard links, holes and extended attributes** travel too
   (`FMT-7` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md); archive version
-  3, which `info` still reports as "a folder"). The portability rules:
+  4, which `info` still reports as "a folder"). The portability rules:
   - *Hard links.* Names that share one inode inside the folder are packed
     once, the first name (in the archive's byte order) carrying the bytes,
     every later name a link to it, and are restored as hard links. A name
@@ -225,7 +225,7 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
     zeros.
   - *Extended attributes and ACLs.* On Linux, `user.*` attributes and the
     two POSIX ACL attributes (`system.posix_acl_access`,
-    `system.posix_acl_default`) are packed for every entry and restored by
+    `system.posix_acl_default`) are packed for the root directory and every entry and restored by
     name, each read back after it is set; a filesystem that cannot hold an
     attribute fails restoration rather than dropping it. `security.*` and
     `trusted.*` belong to the kernel and to root and are left alone. A
@@ -420,8 +420,10 @@ Versions 22, 23 and 24 use the same predictors as 19–21 and append a
 | 4 | CRC-32 of the entire header through the preceding metadata fields |
 
 For folders, the extension holds the root metadata. The decoded archive
-stream starts with `ADPTARC3`, carrying metadata and extended attributes,
-hard links and sparse extents. Earlier `ADPTARC1` and `ADPTARC2` archive streams
+stream starts with `ADPTARC4`, carrying root attributes before the version-3
+entries with metadata, extended attributes, hard links and sparse extents.
+See [the archive format](adpat/c/ARCHIVE.md) for the prefix and SDK callback.
+Earlier `ADPTARC1`, `ADPTARC2` and `ADPTARC3` archive streams
 remain readable. Entry metadata is covered by the outer payload CRC-32. Older codec releases do not read
 versions 22–24. The byte-oriented library encoders still emit versions
 19–21; `adapt_header_add_metadata()` adds the extension and

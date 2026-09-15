@@ -973,7 +973,9 @@ static adapt_status decode_job_emit(decode_job *j, adapt_write_fn write, void *w
                                     uint32_t *crc, uint64_t *written, adapt_error *error) {
     int rc;
     if (j->status != ADAPT_OK) {
-        *error = j->error;
+        if (error != NULL) {
+            *error = j->error;
+        }
         return j->status;
     }
     *crc = crc32_update(t, *crc, j->output, j->produced);

@@ -303,7 +303,7 @@ typedef enum stage {
 struct adapt_archive_unpacker {
     adapt_archive_sink sink;
     stage stage;
-    /* 1, 2 or 3, from the magic's last byte */
+    /* 1 through 4, from the magic's last byte */
     int version;
     /* bytes taken so far, the offset of the next one */
     uint64_t offset;
@@ -335,6 +335,8 @@ struct adapt_archive_unpacker {
     uint8_t metadata_bytes[ADAPT_METADATA_BYTES];
     adapt_metadata metadata;
     adapt_archive_metadata_fn metadata_callback;
+    int root_attributes; /* parsing the version-4 prefix, not an entry */
+    adapt_archive_root_attribute_fn root_attribute_callback;
 };
 
 adapt_archive_unpacker *adapt_archive_unpacker_new(adapt_archive_sink sink) {
@@ -357,6 +359,12 @@ adapt_archive_unpacker *adapt_archive_unpacker_new(adapt_archive_sink sink) {
 void adapt_archive_set_metadata_callback(adapt_archive_unpacker *u, adapt_archive_metadata_fn callback) {
     if (u != NULL) {
         u->metadata_callback = callback;
+    }
+}
+
+void adapt_archive_set_root_attribute_callback(adapt_archive_unpacker *u, adapt_archive_root_attribute_fn callback) {
+    if (u != NULL) {
+        u->root_attribute_callback = callback;
     }
 }
 
@@ -402,6 +410,10 @@ static int entry_has_metadata(const adapt_archive_unpacker *u) {
 static int entry_done(adapt_archive_unpacker *u) {
     int rc;
     u->stage = STAGE_KIND;
+    if (u->root_attributes) {
+        u->root_attributes = 0;
+        return 0;
+    }
     if (u->has_metadata && u->metadata_callback != NULL) {
         rc = u->metadata_callback(u->sink.context, u->path, u->kind, &u->metadata);
         if (rc != 0) {
@@ -525,7 +537,14 @@ static int attribute_ready(adapt_archive_unpacker *u, uint64_t at) {
     if (u->attr_index > 0 && strcmp(u->name, u->previous_name) <= 0) {
         return refuse(u, "attributes out of byte order or repeated", at);
     }
-    rc = u->sink.attribute(u->sink.context, u->path, u->kind, u->name, u->value, u->value_len);
+    if (u->root_attributes) {
+        if (u->root_attribute_callback == NULL) {
+            return refuse(u, "root attribute callback is not set", at);
+        }
+        rc = u->root_attribute_callback(u->sink.context, u->name, u->value, u->value_len);
+    } else {
+        rc = u->sink.attribute(u->sink.context, u->path, u->kind, u->name, u->value, u->value_len);
+    }
     if (rc != 0) {
         return sink_failed(u, rc);
     }
@@ -554,14 +573,15 @@ int adapt_archive_unpack(void *unpacker, const uint8_t *buf, size_t len) {
         int rc;
         switch (u->stage) {
             case STAGE_MAGIC:
-                if (u->field == ADAPT_ARCHIVE_MAGIC_BYTES - 1 && (b == '1' || b == '2' || b == '3')) {
+                if (u->field == ADAPT_ARCHIVE_MAGIC_BYTES - 1 && (b >= '1' && b <= '4')) {
                     u->version = b - '0';
                 } else if (b != (uint8_t)ADAPT_ARCHIVE_MAGIC[u->field]) {
                     return refuse(u, "signature is not an adapt archive's", at);
                 }
                 if (++u->field == ADAPT_ARCHIVE_MAGIC_BYTES) {
                     u->field = 0;
-                    u->stage = STAGE_KIND;
+                    u->root_attributes = u->version == 4;
+                    u->stage = u->root_attributes ? STAGE_ATTR_COUNT : STAGE_KIND;
                 }
                 i++;
                 break;

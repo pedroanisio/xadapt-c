@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zlib
 from pathlib import Path
@@ -81,6 +82,129 @@ class SafetyTest(unittest.TestCase):
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=60,
             preexec_fn=constrain if memory_limit is not None else None,
         )
+
+    @unittest.skipIf(os.name == "nt", "POSIX staging permissions")
+    def test_private_file_stays_private_until_publication(self):
+        raw = b"private decoded bytes\n" * 512
+        header = b"ADPT" + bytes((22, 10, 10, 16))
+        header += struct.pack("<IqIqI", 0o600, 1700000000, 0, 1700000000, 0)
+        header += struct.pack("<I", zlib.crc32(header))
+        for corrupt in (False, True):
+            with self.subTest(corrupt=corrupt):
+                output = self.root / f"private-{corrupt}"
+                with subprocess.Popen(
+                    [str(CADAPT), "decode", "-", "-o", str(output)],
+                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE, umask=0o022,
+                ) as process:
+                    try:
+                        process.stdin.write(header + struct.pack("<BII", 2, len(raw), len(raw)) + raw)
+                        process.stdin.flush()
+                        deadline = time.monotonic() + 10
+                        while time.monotonic() < deadline:
+                            staged = list(self.root.glob(f".cadapt-{process.pid}-*.part"))
+                            if staged and staged[0].stat().st_size >= 4096:
+                                break
+                            self.assertIsNone(process.poll(), "decoder exited before trailer")
+                            time.sleep(0.01)
+                        else:
+                            self.fail("decoder did not stage the data block")
+                        self.assertEqual(staged[0].stat().st_mode & 0o777, 0o600)
+                        self.assertFalse(output.exists())
+                        process.stdin.write(struct.pack("<BQI", 3, len(raw), zlib.crc32(raw) ^ corrupt))
+                        process.stdin.close()
+                        process.wait(timeout=10)
+                        self.assertEqual(process.returncode, int(corrupt), process.stderr.read())
+                    finally:
+                        if process.poll() is None:
+                            process.stdin.close()
+                            process.wait(timeout=10)
+                if not corrupt:
+                    self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(output.read_bytes(), raw)
+                else:
+                    self.assertFalse(output.exists())
+                self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux root xattrs and ACLs")
+    def test_folder_root_attributes_and_acls_survive_verified_roundtrip(self):
+        folder = self.root / "source"
+        folder.mkdir()
+        (folder / "child").write_bytes(b"child bytes")
+        (folder / "sub").mkdir()
+        # Linux POSIX ACL xattr version 2: owner, named user, group, mask, other.
+        acl = struct.pack("<I", 2) + b"".join(
+            struct.pack("<HHI", tag, permissions, uid)
+            # The current uid is also mapped inside restricted user namespaces.
+            for tag, permissions, uid in ((1, 7, 0xffffffff), (2, 5, os.getuid()),
+                                          (4, 0, 0xffffffff), (16, 5, 0xffffffff),
+                                          (32, 0, 0xffffffff))
+        )
+        attributes = {"user.review": b"root\x00value", "user.empty": b"",
+                      "system.posix_acl_access": acl, "system.posix_acl_default": acl}
+        for name, value in attributes.items():
+            os.setxattr(folder, name, value)
+        os.setxattr(folder / "child", "user.child", b"unchanged")
+        os.setxattr(folder / "sub", "user.directory", b"nested")
+        os.utime(folder, ns=(1700000000123456789, 1700000000987654321))
+        expected = folder.stat()
+        encoded = subprocess.run([str(CADAPT), "encode", str(folder), "--fast", "-3", "--verify",
+                                  "-o", str(self.root / "folder.adpt")], capture_output=True, timeout=30)
+        self.assertEqual(encoded.returncode, 0, encoded.stderr)
+        restored = self.root / "restored"
+        decoded = self.decode(self.root / "folder.adpt", None, "-o", restored)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        actual = restored.stat()
+        self.assertEqual((actual.st_mode, actual.st_atime_ns, actual.st_mtime_ns),
+                         (expected.st_mode, expected.st_atime_ns, expected.st_mtime_ns))
+        for name, value in attributes.items():
+            self.assertEqual(os.getxattr(restored, name), value, name)
+        self.assertEqual(os.getxattr(restored / "child", "user.child"), b"unchanged")
+        self.assertEqual(os.getxattr(restored / "sub", "user.directory"), b"nested")
+        # Applying the root default ACL before children would add permissions
+        # which those children never had in the source tree.
+        self.assertEqual(os.listxattr(restored / "child"), os.listxattr(folder / "child"))
+        self.assertEqual(os.listxattr(restored / "sub"), os.listxattr(folder / "sub"))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux root attributes")
+    def test_root_attributes_on_empty_and_segmented_folders(self):
+        folder = self.root / "source"
+        folder.mkdir()
+        os.setxattr(folder, "user.root", b"preserved")
+        for segmented in (False, True):
+            with self.subTest(segmented=segmented):
+                if segmented:
+                    (folder / "data").write_bytes(bytes(range(256)) * 2048)
+                output = self.root / f"folder-{segmented}.adpt"
+                args = [str(CADAPT), "encode", str(folder), "--fast", "-5", "--verify", "-o", str(output)]
+                if segmented:
+                    args += ["--threads", "2", "--segment-bytes", str(256 << 10)]
+                encoded = subprocess.run(args, capture_output=True, timeout=30)
+                self.assertEqual(encoded.returncode, 0, encoded.stderr)
+                restored = self.root / f"restored-{segmented}"
+                decoded = self.decode(output, None, "-o", restored, "--threads", "2")
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                self.assertEqual(os.getxattr(restored, "user.root"), b"preserved")
+                self.assertEqual(sorted(p.name for p in restored.iterdir()), ["data"] if segmented else [])
+                if segmented:
+                    self.assertEqual((restored / "data").read_bytes(), (folder / "data").read_bytes())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux attribute refusal")
+    def test_root_attribute_failure_discards_staging(self):
+        for corrupt, attr_name in ((True, b"user.root"), (False, b"invalid.root")):
+            with self.subTest(corrupt=corrupt, attribute=attr_name):
+                attribute = struct.pack("<H", len(attr_name)) + attr_name + struct.pack("<I", 1) + b"x"
+                raw = b"ADPTARC4\x01\x00" + attribute + b"\x00"
+                header = HEADER[:5] + bytes((HEADER[5] | 128,)) + HEADER[6:]
+                data = (header + struct.pack("<BII", 2, len(raw), len(raw)) + raw
+                        + struct.pack("<BQI", 3, len(raw), zlib.crc32(raw) ^ corrupt))
+                output = self.root / "existing"
+                output.write_bytes(b"keep this file")
+                decoded = self.decode("-", data, "-o", output, "--force")
+                self.assertEqual(decoded.returncode, 1, decoded.stderr)
+                self.assertIn(b"checksum" if corrupt else b"cannot restore root extended attribute", decoded.stderr)
+                self.assertEqual(output.read_bytes(), b"keep this file")
+                self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
 
     @unittest.skipIf(os.name == "nt", "POSIX symlinks and hard links")
     def test_archive_refuses_symlink_parents_for_every_entry_kind(self):

@@ -1434,7 +1434,9 @@ static adapt_status segment_job_emit(segment_job *j, adapt_write_fn write, void 
     int rc;
     adapt_status status;
     if (j->status != ADAPT_OK) {
-        *error = j->error;
+        if (error != NULL) {
+            *error = j->error;
+        }
         return j->status;
     }
     if (j->index > 0) {

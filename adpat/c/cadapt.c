@@ -192,6 +192,30 @@ static void attrs_free(attrs *a) {
     a->count = 0;
 }
 
+/* Retain an attribute until its directory can be finalized. */
+static int attrs_append(attrs *a, const char *name, const uint8_t *value, size_t len) {
+    uint32_t n = a->count;
+    char **names = realloc(a->names, (n + 1) * sizeof(*names));
+    uint8_t **values = names == NULL ? NULL : realloc(a->values, (n + 1) * sizeof(*values));
+    size_t *lens = values == NULL ? NULL : realloc(a->lens, (n + 1) * sizeof(*lens));
+    if (names != NULL) a->names = names;
+    if (values != NULL) a->values = values;
+    if (lens != NULL) a->lens = lens;
+    if (names == NULL || values == NULL || lens == NULL) return ENOMEM;
+    a->names[n] = malloc(strlen(name) + 1);
+    a->values[n] = malloc(len + 1);
+    if (a->names[n] == NULL || a->values[n] == NULL) {
+        free(a->names[n]);
+        free(a->values[n]);
+        return ENOMEM;
+    }
+    strcpy(a->names[n], name);
+    memcpy(a->values[n], value, len);
+    a->lens[n] = len;
+    a->count = n + 1;
+    return 0;
+}
+
 /* The bytes an entry's attribute trailer takes in the archive. */
 static uint64_t attrs_bytes(const attrs *a) {
     uint64_t n = 2;
@@ -750,6 +774,7 @@ static void binary_stdio(void) {
 typedef struct staged {
     char *path;
     FILE *file;
+    unsigned mode; /* final mode for a file without recorded metadata */
 } staged;
 
 static int file_exists(const char *path) {
@@ -781,6 +806,13 @@ static int staged_open(staged *s, const char *target, int force) {
     int attempt;
     s->path = NULL;
     s->file = NULL;
+#ifndef _WIN32
+    {
+        mode_t mask = umask(0);
+        umask(mask);
+        s->mode = (unsigned)(0666 & ~mask);
+    }
+#endif
     if (!force && file_exists(target)) {
         fprintf(stderr, "error: %s exists; pass --force to overwrite\n", target);
         return EXIT_OTHER;
@@ -810,14 +842,13 @@ static int staged_open(staged *s, const char *target, int force) {
         memcpy(path + dir_len, name, (size_t)n + 1);
         /* Exclusive creation rejects every existing entry, including a
          * dangling symlink. Only a file we created may be written or
-         * discarded; probing first cannot establish that ownership. The
-         * mode is a new file's, 0666 less the umask, since the staged
-         * file becomes the target by name and keeps the mode it was
-         * created with. */
+         * discarded; probing first cannot establish that ownership.
+         * Keep incomplete plaintext private. The final recorded or
+         * umask-derived mode is applied only after decoding succeeds. */
 #ifdef _WIN32
         fd = _open(path, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
 #else
-        fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
+        fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
 #endif
         if (fd < 0) {
             int e = errno;
@@ -827,6 +858,17 @@ static int staged_open(staged *s, const char *target, int force) {
             }
             return other_error(target, strerror(e));
         }
+#ifndef _WIN32
+        /* A restrictive umask or inherited ACL must not prevent the
+         * owner from reopening the private file for verification. */
+        if (fchmod(fd, 0600) != 0) {
+            int e = errno;
+            close(fd);
+            remove(path);
+            free(path);
+            return other_error(target, strerror(e));
+        }
+#endif
 #ifdef _WIN32
         s->file = _fdopen(fd, "wb");
 #else
@@ -866,6 +908,11 @@ static int staged_publish(staged *s, const char *target, int force, const adapt_
         return other_error(target, message);
     }
 #ifndef _WIN32
+    if (metadata == NULL && chmod(s->path, (mode_t)s->mode) != 0) {
+        int e = errno;
+        staged_discard(s);
+        return other_error(target, strerror(e));
+    }
     if (!force) {
         /* Linking a complete file is atomic and refuses every existing
          * directory entry, including one created after the initial check. */
@@ -1123,6 +1170,7 @@ typedef struct seen_inode {
 
 typedef struct folder {
     const char *root;
+    attrs root_attrs;
     entry *items;
     size_t count, cap;
     seen_inode *inodes;
@@ -1141,6 +1189,7 @@ static void folder_free(folder *f) {
     }
     free(f->items);
     free(f->inodes);
+    attrs_free(&f->root_attrs);
     f->items = NULL;
     f->inodes = NULL;
     f->count = f->cap = f->inode_count = f->inode_cap = 0;
@@ -1353,9 +1402,12 @@ static int walk(folder *f, const char *rel, char **culprit) {
 
 /* Collect a folder's entries and the length of its stream. */
 static int folder_collect(folder *f, const char *root, char **culprit) {
+    int rc;
     memset(f, 0, sizeof(*f));
     f->root = root;
-    f->stream_bytes = ADAPT_ARCHIVE_MAGIC_BYTES + 1;
+    rc = attrs_read(root, &f->root_attrs);
+    if (rc != 0) return rc;
+    f->stream_bytes = ADAPT_ARCHIVE_MAGIC_BYTES + attrs_bytes(&f->root_attrs) + 1;
     return walk(f, "", culprit);
 }
 
@@ -1368,7 +1420,7 @@ typedef struct packer {
     /* the header, an extent's offset and length and the end go out
      * through `head`, the attribute trailer through `trailer`; a file's
      * or an extent's bytes are read straight from the file */
-    enum { PACK_MAGIC, PACK_HEADER, PACK_EXTENT, PACK_DATA, PACK_ATTRS, PACK_END, PACK_DONE } stage;
+    enum { PACK_MAGIC, PACK_ROOT_ATTRS, PACK_HEADER, PACK_EXTENT, PACK_DATA, PACK_ATTRS, PACK_END, PACK_DONE } stage;
     uint8_t head[ADAPT_ARCHIVE_MAGIC_BYTES + 1 + 2 + ADAPT_ARCHIVE_PATH_MAX + 2 + ADAPT_ARCHIVE_PATH_MAX + 12 +
                  ADAPT_METADATA_BYTES];
     size_t head_len, head_at;
@@ -1390,7 +1442,7 @@ static void packer_reset(packer *p, folder *f) {
     memset(p, 0, sizeof(*p));
     p->f = f;
     p->stage = PACK_MAGIC;
-    memcpy(p->head, ADAPT_ARCHIVE_FULL_MAGIC, ADAPT_ARCHIVE_MAGIC_BYTES);
+    memcpy(p->head, ADAPT_ARCHIVE_ROOT_MAGIC, ADAPT_ARCHIVE_MAGIC_BYTES);
     p->head_len = ADAPT_ARCHIVE_MAGIC_BYTES;
 }
 
@@ -1424,18 +1476,17 @@ static void packer_next(packer *p) {
 
 /* The entry's attribute trailer, built once and sent from `trailer`.
  * Returns 0 or an errno. */
-static int packer_attrs(packer *p) {
-    const entry *e = &p->f->items[p->index];
-    size_t n = (size_t)attrs_bytes(&e->attrs), at;
+static int packer_attrs(packer *p, const attrs *a) {
+    size_t n = (size_t)attrs_bytes(a), at;
     uint32_t i;
     uint8_t *t = malloc(n);
     if (t == NULL) {
         p->error = ENOMEM;
         return ENOMEM;
     }
-    at = adapt_archive_attributes(e->attrs.count, t, n);
-    for (i = 0; i < e->attrs.count; i++) {
-        at += adapt_archive_attribute(e->attrs.names[i], e->attrs.values[i], e->attrs.lens[i], t + at, n - at);
+    at = adapt_archive_attributes(a->count, t, n);
+    for (i = 0; i < a->count; i++) {
+        at += adapt_archive_attribute(a->names[i], a->values[i], a->lens[i], t + at, n - at);
     }
     free(p->trailer);
     p->trailer = t;
@@ -1487,7 +1538,7 @@ static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
         if (p->stage == PACK_DONE) {
             break;
         }
-        if (p->stage == PACK_ATTRS) {
+        if (p->stage == PACK_ATTRS || p->stage == PACK_ROOT_ATTRS) {
             size_t n = p->trailer_len - p->trailer_at;
             if (n > len - at) {
                 n = len - at;
@@ -1499,7 +1550,7 @@ static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
                 break;
             }
             packer_close(p);
-            p->index++;
+            if (p->stage == PACK_ATTRS) p->index++;
             packer_next(p);
             continue;
         }
@@ -1519,7 +1570,8 @@ static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
             if (p->stage == PACK_END) {
                 p->stage = PACK_DONE;
             } else if (p->stage == PACK_MAGIC) {
-                packer_next(p);
+                rc = packer_attrs(p, &p->f->root_attrs);
+                p->stage = PACK_ROOT_ATTRS;
             } else if (p->stage == PACK_EXTENT) {
                 p->stage = PACK_DATA;
             } else if (e->kind == KIND_FILE) {
@@ -1529,13 +1581,13 @@ static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
             } else if (e->kind == KIND_SPARSE) {
                 rc = packer_open(p);
                 if (rc == 0) {
-                    rc = e->extent_count == 0 ? packer_attrs(p) : packer_extent(p);
+                    rc = e->extent_count == 0 ? packer_attrs(p, &e->attrs) : packer_extent(p);
                 }
             } else if (e->kind == KIND_HARDLINK) {
                 p->index++;
                 packer_next(p);
             } else {
-                rc = packer_attrs(p);
+                rc = packer_attrs(p, &e->attrs);
             }
             if (rc != 0) {
                 return rc;
@@ -1581,7 +1633,7 @@ static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
                     p->changed = 1;
                     return EIO;
                 }
-                rc = packer_attrs(p);
+                rc = packer_attrs(p, &e->attrs);
                 if (rc != 0) {
                     return rc;
                 }
@@ -1620,6 +1672,7 @@ typedef struct deferred_metadata {
 
 typedef struct restorer {
     const char *root;
+    attrs root_attrs;
     FILE *file;
     uint64_t restored_size, max_output;
     int error; /* errno of the failure */
@@ -1946,8 +1999,6 @@ static int restore_attribute(void *context, const char *path, uint8_t kind, cons
     int rc;
     if (kind == ADAPT_ARCHIVE_DIRECTORY) {
         deferred_metadata *d = r->pending;
-        attrs *a;
-        uint32_t n;
         if (d == NULL) {
             char *full = join(r->root, path);
             d = full == NULL ? NULL : calloc(1, sizeof(*d));
@@ -1958,37 +2009,8 @@ static int restore_attribute(void *context, const char *path, uint8_t kind, cons
             d->path = full;
             r->pending = d;
         }
-        a = &d->attrs;
-        n = a->count;
-        {
-            char **names = realloc(a->names, (n + 1) * sizeof(*names));
-            uint8_t **values = names == NULL ? NULL : realloc(a->values, (n + 1) * sizeof(*values));
-            size_t *lens = values == NULL ? NULL : realloc(a->lens, (n + 1) * sizeof(*lens));
-            if (names != NULL) {
-                a->names = names;
-            }
-            if (values != NULL) {
-                a->values = values;
-            }
-            if (lens != NULL) {
-                a->lens = lens;
-            }
-            if (names == NULL || values == NULL || lens == NULL) {
-                return restore_fail(r, path, ENOMEM, NULL);
-            }
-        }
-        a->names[n] = malloc(strlen(name) + 1);
-        a->values[n] = malloc(len + 1);
-        if (a->names[n] == NULL || a->values[n] == NULL) {
-            free(a->names[n]);
-            free(a->values[n]);
-            return restore_fail(r, path, ENOMEM, NULL);
-        }
-        strcpy(a->names[n], name);
-        memcpy(a->values[n], value, len);
-        a->lens[n] = len;
-        a->count = n + 1;
-        return 0;
+        rc = attrs_append(&d->attrs, name, value, len);
+        return rc != 0 ? restore_fail(r, path, rc, NULL) : 0;
     }
     {
         char *full = join(r->root, path);
@@ -1999,6 +2021,13 @@ static int restore_attribute(void *context, const char *path, uint8_t kind, cons
         free(full);
     }
     return rc != 0 ? restore_fail(r, path, rc, "cannot restore extended attribute") : 0;
+}
+
+/* Root attributes precede the children on the wire but take effect last. */
+static int restore_root_attribute(void *context, const char *name, const uint8_t *value, size_t len) {
+    restorer *r = context;
+    int rc = attrs_append(&r->root_attrs, name, value, len);
+    return rc != 0 ? restore_fail(r, "root", rc, NULL) : 0;
 }
 
 static int restore_metadata(void *context, const char *path, uint8_t kind, const adapt_metadata *metadata) {
@@ -2065,6 +2094,14 @@ static int finish_directory_metadata(restorer *r, int apply) {
         free(item->path);
         free(item);
     }
+    if (apply && rc == 0) {
+        uint32_t i;
+        for (i = 0; i < r->root_attrs.count && rc == 0; i++) {
+            int e = attr_apply(r->root, r->root_attrs.names[i], r->root_attrs.values[i], r->root_attrs.lens[i]);
+            if (e != 0) rc = restore_fail(r, "root", e, "cannot restore root extended attribute");
+        }
+    }
+    attrs_free(&r->root_attrs);
     return rc;
 }
 
@@ -2351,7 +2388,7 @@ static int decode_command(int argc, char **argv) {
     int force, rc;
     adapt_limits limits = adapt_default_limits();
     stream in = {NULL, 0}, out = {NULL, 0};
-    staged stage = {NULL, NULL};
+    staged stage = {0};
     adapt_stats stats;
     /* FMT-6: the container alone decodes. Its header names the model, and
      * the model is allocated as named; --max-memory and --max-output below
@@ -2490,6 +2527,7 @@ static int decode_command(int argc, char **argv) {
             return rc;
         }
         adapt_archive_set_metadata_callback(unpacker, restore_metadata);
+        adapt_archive_set_root_attribute_callback(unpacker, restore_root_attribute);
         status = decode_input(&ahead, threads, sizes, limits, adapt_archive_unpack, unpacker, &stats, &error);
         if (status == ADAPT_OK) {
             status = adapt_archive_finish(unpacker, &error);
@@ -2770,7 +2808,7 @@ static int encode_command(int argc, char **argv) {
     char segments[96];
     adapt_sizes sizes;
     stream in = {NULL, 0}, out = {NULL, 0};
-    staged stage = {NULL, NULL};
+    staged stage = {0};
     adapt_stats stats;
     adapt_error error;
     adapt_status status;

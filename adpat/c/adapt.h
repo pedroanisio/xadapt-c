@@ -623,7 +623,7 @@ void adapt_free(uint8_t *bytes);
  * the workers are as many of `threads` as `limits.max_memory` holds
  * (adapt_decode_workers), and with fewer than two, or a file of one
  * segment, adapt_decode_stream() runs over the memory. Built without
- * ADAPT_THREADS, one worker always. */
+ * ADAPT_THREADS, one worker always. `stats` and `error` may be NULL. */
 adapt_status adapt_decode_threads(const uint8_t *file, size_t file_len, adapt_limits limits, uint64_t threads,
                                   adapt_write_fn write, void *write_context, adapt_stats *stats, adapt_error *error);
 uint64_t adapt_parallel_decode_memory_bound(adapt_sizes sizes, uint64_t workers, uint64_t segment_raw_max,
@@ -673,7 +673,8 @@ adapt_status adapt_encode_stream_verified(adapt_read_fn read, void *read_context
  * `threads` as `max_memory` holds (adapt_encode_workers), and with fewer
  * than two the in-order encoder runs, proven alongside when `verify` is
  * set, which then needs adapt_verified_memory_bound. `stats->workers`
- * says how many ran. Built without ADAPT_THREADS, one worker always. */
+ * says how many ran. Built without ADAPT_THREADS, one worker always.
+ * `stats` and `error` may be NULL. */
 adapt_status adapt_encode_stream_threads(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
                                          adapt_sizes sizes, uint64_t max_memory, uint64_t segment_bytes, uint64_t threads,
                                          int verify, adapt_stats *stats, adapt_error *error);
@@ -717,7 +718,8 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len);
  * A folder is coded as a container flagged ADAPT_ARCHIVE_FLAG whose
  * decoded bytes are an adapt archive: ADAPT_ARCHIVE_MAGIC (version 1),
  * ADAPT_ARCHIVE_METADATA_MAGIC (version 2) or ADAPT_ARCHIVE_FULL_MAGIC
- * (version 3, what the encoder writes), then entries, then one
+ * (version 3), or ADAPT_ARCHIVE_ROOT_MAGIC (version 4, what the CLI
+ * encoder writes), then entries, then one
  * ADAPT_ARCHIVE_END byte. An entry is a kind byte, a path (its length as
  * a little-endian u16, then its bytes: components joined by '/', relative
  * to the folder, none empty, none '.' or '..', no NUL) and, for a file,
@@ -745,6 +747,13 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len);
  *     byte order, none twice. POSIX ACLs travel here as the attributes
  *     the platform stores them in (system.posix_acl_access and
  *     system.posix_acl_default on Linux).
+ * Version 4 adds the root directory's attribute list immediately after
+ * the magic, in the same count/name/value layout as an entry's trailer.
+ * Entry layouts remain those of version 3. The root is not an entry and
+ * is not counted by adapt_archive_entries(); its mode and timestamps
+ * still live in the outer container header. A root-attribute callback
+ * must be registered to consume a nonempty list; otherwise unpack fails.
+ *
  * Entries come depth first, siblings in byte order of their names, a
  * directory before what it holds, so identical contents, metadata,
  * links, holes and attributes give identical archive bytes. An empty
@@ -760,6 +769,7 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len);
 #define ADAPT_ARCHIVE_MAGIC "ADPTARC1"
 #define ADAPT_ARCHIVE_METADATA_MAGIC "ADPTARC2"
 #define ADAPT_ARCHIVE_FULL_MAGIC "ADPTARC3"
+#define ADAPT_ARCHIVE_ROOT_MAGIC "ADPTARC4"
 #define ADAPT_ARCHIVE_MAGIC_BYTES 8u
 #define ADAPT_ARCHIVE_END 0u
 #define ADAPT_ARCHIVE_DIRECTORY 1u
@@ -841,9 +851,18 @@ typedef struct adapt_archive_unpacker adapt_archive_unpacker;
  * Directory metadata must be applied after their children are restored. */
 typedef int (*adapt_archive_metadata_fn)(void *context, const char *path, uint8_t kind, const adapt_metadata *metadata);
 
+/* Version-4 root attributes arrive before entries. A filesystem sink must
+ * defer applying them until all children have been restored, then apply
+ * the root mode/timestamps from the outer header. The callback uses the
+ * sink's context and returns 0 or an I/O status, like entry callbacks. */
+typedef int (*adapt_archive_root_attribute_fn)(void *context, const char *name, const uint8_t *value, size_t len);
+
 /* An unpacker for one archive, or NULL when memory is short. */
 adapt_archive_unpacker *adapt_archive_unpacker_new(adapt_archive_sink sink);
 void adapt_archive_set_metadata_callback(adapt_archive_unpacker *u, adapt_archive_metadata_fn callback);
+/* NULL is allowed only when the archive has no root attributes. Versions
+ * 1--3 do not invoke this callback. Missing support never drops attributes. */
+void adapt_archive_set_root_attribute_callback(adapt_archive_unpacker *u, adapt_archive_root_attribute_fn callback);
 void adapt_archive_unpacker_free(adapt_archive_unpacker *u);
 
 /* Feed the next bytes of the archive, in order, in any pieces: an

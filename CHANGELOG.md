@@ -15,6 +15,13 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Security
 
+- Keep POSIX output staging files at mode `0600` during processing and
+  verification; apply recorded or umask-derived permissions only after success.
+- Return worker failures safely when threaded codec callers pass `error=NULL`.
+- Preserve folder-root extended attributes and Linux access/default ACLs in
+  `ADPTARC4`. Restore root attributes after children; reject restoration failures
+  and SDK readers without a root-attribute callback. Existing archive versions
+  remain readable; older decoders reject the new archive magic.
 - Enforce `decode --max-output` on the combined logical sizes of restored
   files, including sparse holes and each hard-link alias. Refuse an entry
   before creating or extending it when the remaining budget is too small,
