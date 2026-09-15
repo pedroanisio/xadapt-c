@@ -2,6 +2,37 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — Size and throughput floors re-locked on the merged text-transform binary
+
+**Decision.** The floors of `tools/ratio_floor.json` move to what the
+merged binary (a1ed995: the text transform, the recall index grown from
+spare budget, the memory tiers) measures with the locked command
+`encode --max --allocation context`, `tools/check_ratio_floor.py
+--verify`, on the reference host (AMD Ryzen 5 5600X, load average about
+3), every round trip verified byte for byte:
+
+| Fixture | Size floor | Time floor | Was |
+|---|---:|---:|---|
+| enwik8-8MiB | 1,713,845 B | 13.3 s | 1,715,521 B, 17.9 s |
+| enwik8-16MiB | 3,320,094 B | 24.4 s | 3,337,011 B, 33.8 s |
+| enwik8 | 18,207,203 B | 130.5 s | 18,529,513 B, 189.4 s |
+| enwik9 | measured on this binary next, in a following entry | | 155,906,798 B, 3,123 s |
+
+**Why.** The operator's rule: the floors are only ever improved from. The
+transform made every fixture smaller and faster at once (the model codes
+about 62 % of the bytes), so both axes move; a time floor left at the
+old rate would let the transform's speed be given back unnoticed. The
+10 % tolerance stays: wall time on a shared host is noisy.
+
+**Consequences.**
+- `make gate` guards 1,713,845 B and at least 567,650 B/s on the 8 MiB
+  proxy (630,722 B/s less the tolerance).
+- A change that turns the transform off for the proxy — a stricter length
+  rule, a stricter detector — now fails the gate unless it pays otherwise.
+
+**Status.** Locked 2026-09-15; the operator asked for this lock ahead of
+every other session's work.
+
 ## 2026-09-15 — The memory tier is encode's only memory setting; `-10`/`-11`; decode's caps apply only when given
 
 **Decision.** (Operator's, 2026-09-15.) `encode` chooses its memory by tier
