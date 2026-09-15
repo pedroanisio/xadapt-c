@@ -318,6 +318,10 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   benchmark on one binary, are in
   [research/scripts-measurement.md](research/scripts-measurement.md); the
   model is byte-level throughout, so a script is never decoded, only seen.
+- `make check` is held to **120 s** of wall time (`CHECK_SECONDS` in the
+  root Makefile; it runs under `timeout` and fails when exceeded — LOCKS.md,
+  2026-09-15). Every suite runs at once under `make -j`; the CLI suite's
+  megabyte cases run only in `make check-long` (`ADAPT_LONG_TESTS=1`).
 - `make check` adds the Python tests — the CLI command by command
   (`tests/test_cadapt.py`), the coverage gate's own tests
   (`tests/test_check_gcov.py`), and the allocation SDK probe

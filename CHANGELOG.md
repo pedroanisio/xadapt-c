@@ -116,6 +116,25 @@ The binary reports `0.12.0`; the tag is pending.
   transform off.
 
 ### Changed
+- `make check` is held to 120 s of wall time: it runs under `timeout`
+  (`CHECK_SECONDS`, root Makefile) and fails when exceeded, with the
+  codec's check and the tools' tests at once. The coverage pass runs every suite at
+  once under `make -j`, each process writing its gcov counts under its own
+  `GCOV_PREFIX` and `gcov-tool` merging them (the instrumented binary is
+  5–9 times slower per byte); the two large C suites take a shard `k/n`
+  and the CLI suite runs class by class; `make test` runs the C suites
+  the same way. The coverage build is `-O1` (same bytes, 1.6× faster).
+  The CLI suite's megabyte cases — a 4 MiB named input's sizes, the 8 MiB
+  text policy, the tiers above xz on a pipe — run only under
+  `ADAPT_LONG_TESTS=1` (`make check-long`); the structural C tests
+  (segments, threads, streams, the proof alongside, the transforms across
+  segments) use the fast profile, since the model is not what they test.
+  Measured on a host with load average 10: `make coverage` 830 s → 115 s
+  with identical branch counts (library 82.5 %, CLI 72.3 %), `make test`
+  74 s → 21 s; `make check` end to end 105 s. `make gate`, the CI
+  proxy, is unchanged at about 25 s.
+
+### Changed
 - The memory tier is encode's only memory setting. `-10` and `-11` are new,
   1 and 2 GiB, the tiers above xz's ladder that the max profile's largest
   tables and a 1 GB input's window need; `-9` stays the default and the

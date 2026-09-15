@@ -2,6 +2,40 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — `make check` is held to 120 s of wall time
+
+**Decision.** (Operator's, 2026-09-15.) The gate every landing runs,
+`make check`, completes within 120 s of wall time or fails: the root
+Makefile runs it under `timeout $(CHECK_SECONDS)` (default 120) and
+reports the overrun as a failure. Work that needs longer — the CLI
+suite's megabyte cases, the sanitizers, the corpus floors, the full
+enwik8 floors — lives behind `make check-long`, `make sanitize`,
+`make corpus-floor` and `make ratio-floor`, run once per merge, never
+per push. The coverage floors (80 % library, 60 % CLI) stay in `make
+check`, measured on the fast suites.
+
+**Why.** The gate had drifted to 14–17 minutes: the coverage pass ran
+every suite in order on an instrumented binary 5–9 times slower per
+byte, and the suites had accumulated multi-megabyte encodes. A gate that
+slow is not run, and a gate that is not run gates nothing. Measured on
+this host after the change: `make check` 105 s wall (load average 4,
+another job's corpus encode sharing the host), `make coverage` alone
+115 s at load average 10 against 830 s before, branch counts identical.
+
+**Consequences.**
+- Every suite runs at once under `make -j` (the two large C suites as
+  shards `k/n`, the CLI suite class by class), each process with its own
+  gcov counts merged by `gcov-tool`; the coverage build is `-O1`.
+- A new test that needs megabytes of input goes behind
+  `ADAPT_LONG_TESTS=1`, or pins its contract on one block; a pipe's sizes
+  do not depend on its length, and the C tests hold the sizer at any
+  budget in milliseconds.
+- Raising `CHECK_SECONDS` is a new entry here with the reason, not a
+  quiet edit.
+
+**Status.** Landed 2026-09-15 with the parallel `check`, `test` and
+`coverage` targets, the shards, `check-long`, and this budget.
+
 ## 2026-09-15 — Levers are accepted on the mixed corpus; enwik8 is one row (DLV-3)
 
 **Decision.** (Operator's, 2026-09-15: "enwik8 and enwik9 are benchmarks,

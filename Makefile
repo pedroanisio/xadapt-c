@@ -8,16 +8,25 @@ BUILD ?= build
 CODEC_BUILD = $(if $(filter /%,$(BUILD)),$(BUILD),adpat/c/$(BUILD))
 GATE_ARGS ?=
 FLOOR_ARGS ?=
-.PHONY: all test check clean bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor
+.PHONY: all test check check-parts clean bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor
 
 all test clean:
 	$(MAKE) -C adpat/c $@
 
+# The gate is held to CHECK_SECONDS of wall time (LOCKS.md, 2026-09-15):
+# it runs under `timeout`, so a suite that grows past the budget fails the
+# gate rather than stretching it. The codec's check and the tools' tests
+# run at once under make -j; each writes its own log, printed on failure.
+CHECK_SECONDS ?= 120
 check:
-	$(MAKE) -C adpat/c check
-	$(PYTHON) -B tools/test_provenance.py
-	$(PYTHON) -B -m unittest discover -s tools -p 'test_check_ratio_floor.py'
-	$(PYTHON) -B -m unittest discover -s tools -p 'test_fetch_corpus.py'
+	rm -rf _tmp/check && mkdir -p _tmp/check
+	timeout $(CHECK_SECONDS) $(MAKE) -j check-parts || { echo "make check exceeded $(CHECK_SECONDS) s or failed (see _tmp/check/*.log)"; exit 1; }
+	@for p in codec provenance floor-tool fetch-corpus; do grep -hE "^ok |^OK$$|checks passed$$" _tmp/check/$$p.log | tail -3; done
+check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus
+_tmp/check/codec: ; @$(MAKE) -C adpat/c check > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+_tmp/check/provenance: ; @$(PYTHON) -B tools/test_provenance.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+_tmp/check/floor-tool: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_check_ratio_floor.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+_tmp/check/fetch-corpus: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_fetch_corpus.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
 # Locked floors (LOCKS.md, 2026-09-14). gate: the CI proxy, the first 8 MiB of
 # enwik8 cut from the tracked zip, encode + decode, well under 120 s.

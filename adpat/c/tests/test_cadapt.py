@@ -22,6 +22,13 @@ LOW_MEMORY = str(32 << 20)  # decode caps only; encode uses the preset -3 (32 Mi
 # Seconds one codec run may take: a bound against a hang, wide enough for
 # the coverage gate's unoptimised build on a slow host.
 TIMEOUT = 600
+# The cases that encode megabytes under --max (the sizer's choices for a
+# named input of 4 MiB, the text policy's 8 MiB, the tiers above xz on a
+# pipe) run only with ADAPT_LONG_TESTS=1 (`make check-long`): under the
+# coverage build's instrumentation each costs a minute, and the fast
+# suite pins the same formats and policies on one block. The library's C
+# tests hold the sizer's rules at every budget in milliseconds.
+LONG = unittest.skipUnless(os.environ.get("ADAPT_LONG_TESTS") == "1", "a long case: ADAPT_LONG_TESTS=1 (make check-long)")
 SOURCE = b"optional verification\n" * 128
 
 
@@ -109,23 +116,23 @@ class AllocationTest(CodecTest):
         # --allocation context writes version 54 (57 with metadata), the
         # same reader decodes it, and the default budget still writes
         # version 21 for this input. A pipe's length is unknown, so its
-        # target is the largest table and -7 (186 MiB, which the sizer
-        # shares with the proof it may be asked for) stops at 2^21 blocks
-        # with no slack for a fraction.
-        big = self.root / "big.bin"
-        big.write_bytes((SOURCE * ((4 << 20) // len(SOURCE) + 1))[: 4 << 20])
-        compact = self.run_codec("encode", "-", "--max", "--allocation", "context", "-7", data=big.read_bytes())
+        # sizes are the tier's alone, whatever it holds: one block of the
+        # text is enough, and -7 (186 MiB, which the sizer shares with the
+        # proof it may be asked for) stops at 2^21 blocks with no slack for
+        # a fraction.
+        block = (SOURCE * ((1 << 18) // len(SOURCE) + 1))[: 1 << 18]
+        compact = self.run_codec("encode", "-", "--max", "--allocation", "context", "-7", data=block)
         self.assertEqual(compact.returncode, 0, compact.stderr)
         self.assertEqual(compact.stdout[4], 54)
         back = self.run_codec("decode", "-", data=compact.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
-        self.assertEqual(back.stdout, big.read_bytes())
+        self.assertEqual(back.stdout, block)
         # A budget with slack past the power of two the table reaches sizes
         # the table in eighths: the pipe at -5 (94 MiB) takes the compact
         # tables, the lean set and a fraction, written as version 58 (61
         # with metadata) whose sizing byte names all three, and the
         # container decodes through both instruction-set paths.
-        sized = self.run_codec("encode", "-", "--max", "--allocation", "context", "-5", data=big.read_bytes())
+        sized = self.run_codec("encode", "-", "--max", "--allocation", "context", "-5", data=block)
         self.assertEqual(sized.returncode, 0, sized.stderr)
         self.assertEqual(sized.stdout[4], 58)
         self.assertEqual(sized.stdout[8] & 3, 3, "the compact tables and the lean set were not both taken at -5")
@@ -133,17 +140,40 @@ class AllocationTest(CodecTest):
         self.assertLess(len(sized.stdout), len(compact.stdout) + 64)
         back = self.run_codec("decode", "-", data=sized.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
-        self.assertEqual(back.stdout, big.read_bytes())
+        self.assertEqual(back.stdout, block)
         env = dict(os.environ)
         env["ADAPT_ISA"] = "baseline"
         back = subprocess.run([str(CADAPT), "decode", "-"], input=sized.stdout, capture_output=True, timeout=120, env=env)
         self.assertEqual(back.returncode, 0, back.stderr)
-        self.assertEqual(back.stdout, big.read_bytes())
+        self.assertEqual(back.stdout, block)
+        full = self.run_codec("encode", "-", "--max", "--allocation", "context", data=block)
+        self.assertEqual(full.returncode, 0, full.stderr)
+        self.assertEqual(full.stdout[4], 21)
+        auto = self.run_codec("encode", self.source, "-o", "-", "--max", "--allocation", "context", "--adaptive", "auto", "--verify")
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(len(auto.stdout), min(sizes))
+        folder = self.root / "folder"
+        (folder / "empty").mkdir(parents=True)
+        (folder / "file").write_bytes(SOURCE)
+        archive, restored = self.root / "folder.adpt", self.root / "restored"
+        run = self.run_codec("encode", folder, "-o", archive, "--allocation", "context", "--threads", "2", "--verify")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        run = self.run_codec("decode", archive, "-o", restored)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual((restored / "file").read_bytes(), SOURCE)
+        self.assertTrue((restored / "empty").is_dir())
+
+    @LONG
+    def test_named_input_sizes_stop_at_its_target_and_spend_the_slack(self):
         # The named file's length is known, so its table stops at the input's
-        # target (2^21 from -5 up, no fraction: the version-57 file below);
-        # at -4 (48 MiB, raised to the max profile's floor) the table is
-        # short of it and the slack past the 4 MiB window is spent in
-        # eighths, version 61 with metadata.
+        # target (2^21 from -5 up, no fraction: version 57, compact and
+        # lean with metadata); at -4 (48 MiB, raised to the max profile's
+        # floor) the table is short of it and the slack past the 4 MiB
+        # window is spent in eighths, version 61 with metadata, which info
+        # names and which decodes. 4 MiB is the shortest input whose target
+        # is 2^21.
+        big = self.root / "big.bin"
+        big.write_bytes((SOURCE * ((4 << 20) // len(SOURCE) + 1))[: 4 << 20])
         named_sized = self.root / "big-sized.adpt"
         run = self.run_codec("encode", big, "-o", named_sized, "--max", "--allocation", "context", "-4")
         self.assertEqual(run.returncode, 0, run.stderr)
@@ -163,26 +193,6 @@ class AllocationTest(CodecTest):
         run = self.run_codec("encode", big, "-o", named, "--max", "--allocation", "context", "-5")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(named.read_bytes()[4], 57)
-        restored = self.root / "big.restored"
-        run = self.run_codec("decode", named, "-o", restored)
-        self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(restored.read_bytes(), big.read_bytes())
-        full = self.run_codec("encode", "-", "--max", "--allocation", "context", data=big.read_bytes())
-        self.assertEqual(full.returncode, 0, full.stderr)
-        self.assertEqual(full.stdout[4], 21)
-        auto = self.run_codec("encode", self.source, "-o", "-", "--max", "--allocation", "context", "--adaptive", "auto", "--verify")
-        self.assertEqual(auto.returncode, 0, auto.stderr)
-        self.assertEqual(len(auto.stdout), min(sizes))
-        folder = self.root / "folder"
-        (folder / "empty").mkdir(parents=True)
-        (folder / "file").write_bytes(SOURCE)
-        archive, restored = self.root / "folder.adpt", self.root / "restored"
-        run = self.run_codec("encode", folder, "-o", archive, "--allocation", "context", "--threads", "2", "--verify")
-        self.assertEqual(run.returncode, 0, run.stderr)
-        run = self.run_codec("decode", archive, "-o", restored)
-        self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual((restored / "file").read_bytes(), SOURCE)
-        self.assertTrue((restored / "empty").is_dir())
 
     def test_invalid_policy_and_explicit_default(self):
         bad = self.run_codec("encode", self.source, "-o", "-", "--allocation", "unknown")
@@ -197,15 +207,13 @@ class AllocationTest(CodecTest):
 
 
 class AdaptiveTest(CodecTest):
-    def test_text_transform_is_taken_for_long_text_asked_for_or_refused(self):
+    @LONG
+    def test_text_transform_is_taken_for_long_text_by_itself_or_refused(self):
         # A long text (8 MiB of the vector's prose, repeated) is coded under
         # the text transform by itself: the fast profile's text version 63
         # (68 with metadata), decoded to the bytes (what it saves is measured
         # on enwik8, not on a repetition the recall model already owns);
-        # --transform none keeps the plain version, and so does a pipe, whose
-        # length is unknown, unless asked; --transform text takes it for a
-        # short file too, where the policy would not, and info
-        # names it; it composes with neither --adaptive nor the BMP transform.
+        # --transform none keeps the plain version.
         prose = (VECTORS / "text.bin").read_bytes()
         long_text = (prose * ((8 << 20) // len(prose) + 1))[: 8 << 20]
         big = self.root / "long.txt"
@@ -219,15 +227,23 @@ class AdaptiveTest(CodecTest):
         back = self.run_codec("decode", "-", data=auto.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual(back.stdout, long_text)
-        piped = self.run_codec("encode", "-", "--fast", data=long_text)
+
+    def test_text_transform_on_a_pipe_asked_for_named_and_refused(self):
+        # A pipe's length is unknown, so it keeps the plain version unless
+        # asked; --transform text takes the transform for a short file too,
+        # where the policy would not, and info names it; it composes with
+        # neither --adaptive nor the BMP transform; a damaged text stream
+        # is refused as such.
+        prose = (VECTORS / "text.bin").read_bytes()
+        piped = self.run_codec("encode", "-", "--fast", data=prose)
         self.assertEqual(piped.returncode, 0, piped.stderr)
         self.assertEqual(piped.stdout[4], 20) # a pipe's length is unknown: not by itself
-        piped = self.run_codec("encode", "-", "--fast", "--transform", "text", data=long_text)
+        piped = self.run_codec("encode", "-", "--fast", "--transform", "text", data=prose)
         self.assertEqual(piped.returncode, 0, piped.stderr)
         self.assertEqual(piped.stdout[4], 63)
         back = self.run_codec("decode", "-", data=piped.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
-        self.assertEqual(back.stdout, long_text)
+        self.assertEqual(back.stdout, prose)
         short = self.run_codec("encode", self.source, "-o", "-")
         self.assertEqual(short.returncode, 0, short.stderr)
         self.assertEqual(short.stdout[4], 22)
@@ -254,7 +270,7 @@ class AdaptiveTest(CodecTest):
         self.assertEqual(run.stdout, b"")
 
     def test_bmp_transform_preserves_padding_headers_and_partial_pixels(self):
-        width, height = 509, 193
+        width, height = 125, 49
         stride = (width * 3 + 3) & ~3
         pixels = bytearray(random.Random(917).randbytes(stride * height))
         for y in range(height):
@@ -949,7 +965,7 @@ class PresetTest(unittest.TestCase):
         self.source = self.root / "source.txt"
         # text with enough variety that the table size shows in the bytes
         rng = random.Random(7)
-        words = [f"w{rng.randrange(3000)}" for _ in range(60000)]
+        words = [f"w{rng.randrange(3000)}" for _ in range(40000)]
         self.source.write_bytes(" ".join(words).encode())
 
     def run_codec(self, *args, data=None):
@@ -975,9 +991,7 @@ class PresetTest(unittest.TestCase):
     def test_tiers_above_xz_are_accepted_and_change_nothing_a_small_input_cannot_use(self) -> None:
         # A named input's table stops at its target, which -9 already
         # reaches for this one: -10 and -11 are accepted and write the same
-        # bytes. A pipe's length is unknown, so its target is the largest
-        # table, and the two tiers buy a bigger model than -9: the max
-        # profile at -9 holds 2^24 blocks, at -10 and -11 more.
+        # bytes; --help names them.
         nine = self.root / "nine.adpt"
         r = self.run_codec("encode", self.source, "-o", nine, "--no-verify", "-9")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -986,6 +1000,14 @@ class PresetTest(unittest.TestCase):
             r = self.run_codec("encode", self.source, "-o", out, "--no-verify", preset)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(payload_stream(out.read_bytes()), payload_stream(nine.read_bytes()))
+        help_run = self.run_codec("--help")
+        self.assertIn(b"-10 and -11 are\n1 and 2 GiB", help_run.stdout + help_run.stderr)
+
+    @LONG
+    def test_tiers_above_xz_grow_a_pipes_model(self) -> None:
+        # A pipe's length is unknown, so its target is the largest table,
+        # and the two tiers buy a bigger model than -9: the max profile at
+        # -9 holds 2^24 blocks, at -10 and -11 more.
         blocks = {}
         for preset in ("-9", "-10", "-11"):
             r = self.run_codec("encode", "-", "--max", "--allocation", "context", preset, data=self.source.read_bytes())
@@ -1001,8 +1023,6 @@ class PresetTest(unittest.TestCase):
             self.assertEqual(decoded.stdout, self.source.read_bytes())
         self.assertLess(blocks["-9"], blocks["-10"])
         self.assertLess(blocks["-10"], blocks["-11"])
-        help_run = self.run_codec("--help")
-        self.assertIn(b"-10 and -11 are\n1 and 2 GiB", help_run.stdout + help_run.stderr)
 
     @staticmethod
     def blocks_of(line: str) -> int:

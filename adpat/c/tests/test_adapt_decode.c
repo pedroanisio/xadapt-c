@@ -1499,36 +1499,53 @@ static void test_text_stream(void) {
     adapt_free(out);
 }
 
+
+/* The shard this process runs (see main): test number `ordinal` runs when
+ * ordinal % shard_n == shard_k. */
+static int shard_k = 0, shard_n = 1, ordinal = 0;
+#define SHARD(call)                                   \
+    do {                                              \
+        if (ordinal++ % shard_n == shard_k) { call; } \
+    } while (0)
+
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: test_adapt_decode <vectors-dir>\n");
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "usage: test_adapt_decode <vectors-dir> [k/n]\n");
         return 2;
     }
     vectors_dir = argv[1];
-    test_crc32();
-    test_metadata_headers();
-    test_vector("empty.adpt", "empty.bin");
-    test_vector("hello.adpt", "hello.bin");
-    test_vector("abc.adpt", "abc.bin");
-    test_vector("abc-fast.adpt", "abc.bin");
-    test_vector("abc-max.adpt", "abc.bin");
-    test_vector("text.adpt", "text.bin");
-    test_vector("text-fast.adpt", "text.bin");
-    test_vector("text-max.adpt", "text.bin");
-    test_vector("text-compact.adpt", "text.bin");
-    test_vector("text-lean.adpt", "text.bin");
-    test_vector("records.adpt", "records.bin");
-    test_vector("segmented.adpt", "segmented.bin");
-    test_vector("cyrillic.adpt", "cyrillic.bin");
-    test_vector("cjk.adpt", "cjk.bin");
-    test_stream_failures();
-    test_framing();
-    test_segmented_framing();
-    test_threads();
-    test_limits();
-    test_x86_flag();
-    test_text_stream();
-    test_arguments_and_messages();
+    /* An optional shard k/n runs every n-th test from the k-th, so the
+     * suite's independent tests can run on several processes at once (the
+     * coverage build's instrumentation makes it slow); the tests share no
+     * state, and each shard's report is its own. */
+    if (argc == 3 && (sscanf(argv[2], "%d/%d", &shard_k, &shard_n) != 2 || shard_n < 1 || shard_k < 0 || shard_k >= shard_n)) {
+        fprintf(stderr, "usage: test_adapt_decode <vectors-dir> [k/n]\n");
+        return 2;
+    }
+    SHARD(test_crc32());
+    SHARD(test_metadata_headers());
+    SHARD(test_vector("empty.adpt", "empty.bin"));
+    SHARD(test_vector("hello.adpt", "hello.bin"));
+    SHARD(test_vector("abc.adpt", "abc.bin"));
+    SHARD(test_vector("abc-fast.adpt", "abc.bin"));
+    SHARD(test_vector("abc-max.adpt", "abc.bin"));
+    SHARD(test_vector("text.adpt", "text.bin"));
+    SHARD(test_vector("text-fast.adpt", "text.bin"));
+    SHARD(test_vector("text-max.adpt", "text.bin"));
+    SHARD(test_vector("text-compact.adpt", "text.bin"));
+    SHARD(test_vector("text-lean.adpt", "text.bin"));
+    SHARD(test_vector("records.adpt", "records.bin"));
+    SHARD(test_vector("segmented.adpt", "segmented.bin"));
+    SHARD(test_vector("cyrillic.adpt", "cyrillic.bin"));
+    SHARD(test_vector("cjk.adpt", "cjk.bin"));
+    SHARD(test_stream_failures());
+    SHARD(test_framing());
+    SHARD(test_segmented_framing());
+    SHARD(test_threads());
+    SHARD(test_limits());
+    SHARD(test_x86_flag());
+    SHARD(test_text_stream());
+    SHARD(test_arguments_and_messages());
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);
         return 1;

@@ -357,7 +357,7 @@ static void roundtrip(const uint8_t *data, size_t n, uint8_t expect_method, int 
 }
 
 static void test_roundtrips(void) {
-    size_t n = 3 * ADAPT_BLOCK_BYTES + 777;
+    size_t n = 2 * ADAPT_BLOCK_BYTES + 777;
     uint8_t *buf = malloc(n);
     size_t i;
     /* nothing, one byte, a short text: stored, observed */
@@ -756,8 +756,14 @@ static void test_streams(void) {
     for (i = 0; i < n; i++) {
         data[i] = "streams are the same code over slices; "[i % 39];
     }
-    CHECK_STATUS(adapt_encode(data, n, adapt_default_limits(), &reference, &reference_len, &error), ADAPT_OK);
     CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error), ADAPT_OK);
+    /* the fast profile: what is under test is the slicing, not the model;
+     * the reference is the stream encoder's own whole read */
+    sizes = adapt_sizes_fast(sizes);
+    reference = malloc(n + 64);
+    reset(&r, data, n, n, &w, reference, n + 64);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
+    reference_len = w.len;
     /* every chunk size a pipe might deliver, proven and not */
     for (chunk = 1; chunk <= n + 1; chunk = chunk < 7 ? chunk + 1 : chunk * 5) {
         reset(&r, data, n, chunk, &w, file, n + 64);
@@ -864,7 +870,7 @@ static void test_streams(void) {
                  ADAPT_ERROR_INVALID_ARGUMENT);
     CHECK_STATUS(adapt_verify_stream(NULL, &r, reader_read, &r, ADAPT_DEFAULT_MAX_MEMORY, NULL, NULL),
                  ADAPT_ERROR_INVALID_ARGUMENT);
-    adapt_free(reference);
+    free(reference);
     free(data);
     free(file);
 }
@@ -890,6 +896,8 @@ static void test_verified_blocks(void) {
     }
     uint64_t budget;
     CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error), ADAPT_OK);
+    /* the fast profile: what is under test is the proof, not the model */
+    sizes = adapt_sizes_fast(sizes);
     /* an input this long needs more than the default budget for two models */
     budget = adapt_verified_memory_bound(sizes);
     reset(&r, data, n, 65536, &w, reference, n + 64);
@@ -993,6 +1001,10 @@ static void test_segments(void) {
     }
     CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error), ADAPT_OK);
     CHECK(sizes.segmented == 0);
+    /* the fast profile: what is under test is the segments and the
+     * threads, not the model, and a fast model codes the megabyte in a
+     * third of the time */
+    sizes = adapt_sizes_fast(sizes);
     sizes.segmented = 1;
     /* a segment length must be whole blocks */
     reset(&r, data, n, 4096, &w, coded, n + 256);
@@ -1004,7 +1016,7 @@ static void test_segments(void) {
                                               2 * ADAPT_BLOCK_BYTES, &stats, &error),
                  ADAPT_OK);
     CHECK(stats.segments == 3 && stats.output_bytes == w.len && stats.input_bytes == n);
-    CHECK(coded[4] == ADAPT_FORMAT_VERSION && (coded[7] & ADAPT_SEGMENT_FLAG) != 0);
+    CHECK(coded[4] == ADAPT_FAST_VERSION && (coded[7] & ADAPT_SEGMENT_FLAG) != 0);
     CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
     CHECK(read.segmented == 1 && read.window_log == sizes.window_log);
     /* the table before the trailer: three segments of the lengths cut */
@@ -1305,6 +1317,7 @@ static void test_edges(void) {
     CHECK(coded[4] == ADAPT_FAST_VERSION && w.len < n / 8);
     /* a write that fails at the marker, and one at the table */
     CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error), ADAPT_OK);
+    sizes = adapt_sizes_fast(sizes);
     sizes.segmented = 1;
     reset(&r, text, n, 65536, &w, coded, n + 4096);
     w.fail_after = 2; /* the header, the first block, then the marker */
@@ -1571,6 +1584,8 @@ static void test_text_transform(void) {
         uint8_t *big = malloc(n), *c1 = malloc(n + 4096), *c2 = malloc(n + 4096);
         for (i = 0; i < n; i++) big[i] = data[(i * 7919) % len];
         CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+        /* the fast profile: the book across segments is what is under test */
+        s = adapt_sizes_fast(s);
         s.segmented = 1;
         s.text = ADAPT_TEXT_ON;
         reset(&r, big, n, 4096, &w, c1, n + 4096);
@@ -1578,7 +1593,7 @@ static void test_text_transform(void) {
                                                   &error),
                      ADAPT_OK);
         k = w.len;
-        CHECK(c1[4] == ADAPT_TEXT_VERSION && stats.input_bytes == n && stats.segments >= 2);
+        CHECK(c1[4] == ADAPT_TEXT_FAST_VERSION && stats.input_bytes == n && stats.segments >= 2);
         CHECK_STATUS(adapt_decode(c1, k, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == n && memcmp(back, big, n) == 0);
         adapt_free(back);
@@ -1660,6 +1675,7 @@ static void test_x86_transform(void) {
     CHECK(out_len == at && memcmp(out, coded, at) == 0);
     adapt_free(out);
     CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error), ADAPT_OK);
+    sizes = adapt_sizes_fast(sizes); /* the transform across segments is what is under test */
     sizes.segmented = 1;
     reset(&r, data, n, 5000, &w, coded, n + 256);
     CHECK_STATUS(adapt_encode_stream_segments(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY,
@@ -1849,44 +1865,61 @@ static void test_in_memory(void) {
     free(data);
 }
 
+
+/* The shard this process runs (see main): test number `ordinal` runs when
+ * ordinal % shard_n == shard_k. */
+static int shard_k = 0, shard_n = 1, ordinal = 0;
+#define SHARD(call)                                   \
+    do {                                              \
+        if (ordinal++ % shard_n == shard_k) { call; } \
+    } while (0)
+
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: test_adapt_encode <vectors-dir>\n");
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "usage: test_adapt_encode <vectors-dir> [k/n]\n");
         return 2;
     }
     vectors_dir = argv[1];
-    test_vector("empty.adpt", "empty.bin");
-    test_vector("hello.adpt", "hello.bin");
-    test_vector("abc.adpt", "abc.bin");
-    test_vector("text.adpt", "text.bin");
-    test_vector("records.adpt", "records.bin");
-    test_vector_profile("text.adpt", "text.bin", 0);
-    test_vector_profile("text-fast.adpt", "text.bin", 1);
-    test_vector_profile("text-max.adpt", "text.bin", 2);
-    test_vector_profile("records.adpt", "records.bin", 0);
-    test_vector_segments("segmented.adpt", "segmented.bin", 2, ADAPT_BLOCK_BYTES);
+    /* An optional shard k/n runs every n-th test from the k-th, so the
+     * suite's independent tests can run on several processes at once (the
+     * coverage build's instrumentation makes it slow); the tests share no
+     * state, and each shard's report is its own. */
+    if (argc == 3 && (sscanf(argv[2], "%d/%d", &shard_k, &shard_n) != 2 || shard_n < 1 || shard_k < 0 || shard_k >= shard_n)) {
+        fprintf(stderr, "usage: test_adapt_encode <vectors-dir> [k/n]\n");
+        return 2;
+    }
+    SHARD(test_vector("empty.adpt", "empty.bin"));
+    SHARD(test_vector("hello.adpt", "hello.bin"));
+    SHARD(test_vector("abc.adpt", "abc.bin"));
+    SHARD(test_vector("text.adpt", "text.bin"));
+    SHARD(test_vector("records.adpt", "records.bin"));
+    SHARD(test_vector_profile("text.adpt", "text.bin", 0));
+    SHARD(test_vector_profile("text-fast.adpt", "text.bin", 1));
+    SHARD(test_vector_profile("text-max.adpt", "text.bin", 2));
+    SHARD(test_vector_profile("records.adpt", "records.bin", 0));
+    SHARD(test_vector_segments("segmented.adpt", "segmented.bin", 2, ADAPT_BLOCK_BYTES));
     /* FMT-8: two scripts that are three and two bytes a character, pinned
      * like the Latin text */
-    test_vector("cyrillic.adpt", "cyrillic.bin");
-    test_vector("cjk.adpt", "cjk.bin");
-    test_vector_profile("cyrillic.adpt", "cyrillic.bin", 0);
-    test_vector_profile("cjk.adpt", "cjk.bin", 0);
-    test_sizes();
-    test_context_allocation();
-    test_compact_side_tables();
-    test_fast_fits_where_normal_fits();
-    test_roundtrips();
-    test_streams();
-    test_verified_blocks();
-    test_segments();
-    test_fast_profile();
-    test_max_profile();
-    test_edges();
-    test_record_period();
-    test_x86_transform();
-    test_text_transform();
-    test_archive_flag();
-    test_in_memory();
+    SHARD(test_vector("cyrillic.adpt", "cyrillic.bin"));
+    SHARD(test_vector("cjk.adpt", "cjk.bin"));
+    SHARD(test_vector_profile("cyrillic.adpt", "cyrillic.bin", 0));
+    SHARD(test_vector_profile("cjk.adpt", "cjk.bin", 0));
+    SHARD(test_sizes());
+    SHARD(test_context_allocation());
+    SHARD(test_compact_side_tables());
+    SHARD(test_fast_fits_where_normal_fits());
+    SHARD(test_roundtrips());
+    SHARD(test_streams());
+    SHARD(test_verified_blocks());
+    SHARD(test_segments());
+    SHARD(test_fast_profile());
+    SHARD(test_max_profile());
+    SHARD(test_edges());
+    SHARD(test_record_period());
+    SHARD(test_x86_transform());
+    SHARD(test_text_transform());
+    SHARD(test_archive_flag());
+    SHARD(test_in_memory());
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);
         return 1;

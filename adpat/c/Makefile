@@ -7,7 +7,9 @@
 #   make coverage   an instrumented build, every suite on it, and the gcov
 #                   branch gate: 80 % for the library, 60 % for the CLI
 #   make check      build the library and CLI, then run C and Python tests
-#                   and the coverage gate
+#                   and the coverage gate — the fast suite, bounded for CI
+#   make check-long the CLI suite's long cases too (megabytes under --max:
+#                   ADAPT_LONG_TESTS=1), for a landing, not every push
 #   make sanitize   the C suites under AddressSanitizer and
 #                   UndefinedBehaviorSanitizer, every fault fatal
 #   make clean
@@ -91,46 +93,92 @@ $(BUILD)/test_fuzz_decode: tests/test_fuzz_decode.c fuzz/fuzz_decode.c fuzz/fuzz
 $(BUILD)/test_adapt_text: tests/test_adapt_text.c adapt.h adapt_text.h | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ tests/test_adapt_text.c $(LDFLAGS)
 
-test: $(TESTS)
-	$(BUILD)/test_adapt_adaptive
-	$(BUILD)/test_adapt_decode tests/vectors
-	$(BUILD)/test_adapt_encode tests/vectors
-	$(BUILD)/test_adapt_archive
-	$(BUILD)/test_decode_budget tests/vectors
-	$(BUILD)/test_fuzz_decode tests/vectors
-	$(BUILD)/test_adapt_text tests/vectors
+# The two large C suites run as shards, k/n (see their mains).
+ENCODE_SHARDS = 0 1 2 3
+DECODE_SHARDS = 0 1 2
 
-check: all test
-	$(PYTHON) -B tests/test_check_gcov.py
-	$(PYTHON) -B tests/test_cadapt.py "$(BIN)"
-	ADAPT_TEST_THREADS=$(TEST_THREADS) $(PYTHON) -B tests/test_cadapt_safety.py "$(BIN)"
-	$(PYTHON) -B tests/test_allocation_probe.py "$(BIN)"
-	$(MAKE) coverage
+# The suites at once, under make -j: each run's report goes to its own
+# log, printed when it fails, and the summary lines afterwards. A run is
+# a file touched on success, never phony: a pattern rule does not apply
+# to a phony target.
+test: $(TESTS)
+	rm -f $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r) $(BUILD)/runs/$(r).log) && mkdir -p $(BUILD)/runs
+	$(MAKE) -j $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r))
+	@for r in $(TESTRUNS); do tail -1 $(BUILD)/runs/$$r.log; done
+TESTRUNS = adaptive $(foreach k,$(DECODE_SHARDS),decode-$(k)) $(foreach k,$(ENCODE_SHARDS),encode-$(k)) archive budget fuzz text
+$(BUILD)/runs/adaptive: ; @$(BUILD)/test_adapt_adaptive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/decode-%: ; @$(BUILD)/test_adapt_decode tests/vectors $*/$(words $(DECODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/encode-%: ; @$(BUILD)/test_adapt_encode tests/vectors $*/$(words $(ENCODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/archive: ; @$(BUILD)/test_adapt_archive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/budget: ; @$(BUILD)/test_decode_budget tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/fuzz: ; @$(BUILD)/test_fuzz_decode tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/text: ; @$(BUILD)/test_adapt_text tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+
+# The plain suites and the coverage pass run at once: they build into
+# different directories and share nothing.
+check: all
+	$(MAKE) -j check-parts
+check-parts: test coverage $(BUILD)/runs/gcov-tests $(BUILD)/runs/safety $(BUILD)/runs/probe
+$(BUILD)/runs/gcov-tests: | $(BUILD)/runs ; @$(PYTHON) -B tests/test_check_gcov.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/safety: all | $(BUILD)/runs ; @ADAPT_TEST_THREADS=$(TEST_THREADS) $(PYTHON) -B tests/test_cadapt_safety.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/probe: all | $(BUILD)/runs ; @$(PYTHON) -B tests/test_allocation_probe.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs: ; mkdir -p $@
+
+# The CLI suite's long cases on the ordinary build, after the fast check.
+check-long: check
+	ADAPT_LONG_TESTS=1 $(PYTHON) -B tests/test_cadapt.py "$(BIN)"
 
 # The instrumented build lives beside the ordinary one and starts afresh
 # each time, so counts never accumulate across runs. One instantiation of
 # the per-bit path (ADAPT_NO_MULTIVERSION): the instruction-set clones the
 # machine does not run would count as branches never taken.
 COV = $(BUILD)-cov
-COVFLAGS = -std=c99 -O0 --coverage -DADAPT_NO_MULTIVERSION -Wall -Wextra -Wpedantic -Werror $(THREADS)
+# -O1: the instrumented per-bit path runs 1.6 times faster than at -O0 and
+# writes the same bytes; the branches gcov counts are the source's either way.
+COVFLAGS = -std=c99 -O1 --coverage -DADAPT_NO_MULTIVERSION -Wall -Wextra -Wpedantic -Werror $(THREADS)
 COVUNITS = adapt_decode adapt_encode adapt_archive cadapt
+
+# The suites run at once, each process writing its counts under its own
+# GCOV_PREFIX (GCOV_PREFIX_STRIP drops the object directory's path, so the
+# counts land at gcda/<run>/<unit>.gcda); gcov-tool merges the trees and
+# gcov reads the sum. The two large C suites run as shards (k/n, see their
+# mains) and the CLI suite as its classes; no test shares state with
+# another. The instrumented path is 5 to 9 times slower per byte, so this
+# is what keeps `make check` within a few minutes.
+COVDIR = $(abspath $(COV))
+COVSTRIP = $(words $(subst /, ,$(COVDIR)))
+COVRUN = GCOV_PREFIX_STRIP=$(COVSTRIP) GCOV_PREFIX=$(COVDIR)/gcda
+CLI_CLASSES = AllocationTest AdaptiveTest VerificationTest MetadataTest MemoryContractTest InstructionSetTest FolderTest \
+              PresetTest SurfaceTest CommandTest
 
 coverage:
 	rm -rf $(COV)
 	$(MAKE) BUILD=$(COV) CFLAGS="$(COVFLAGS)" LDFLAGS="--coverage" all $(COV)/test_adapt_decode \
 	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive $(COV)/test_adapt_adaptive $(COV)/test_decode_budget $(COV)/test_fuzz_decode \
 	    $(COV)/test_adapt_text
-	$(COV)/test_adapt_decode tests/vectors
-	$(COV)/test_adapt_encode tests/vectors
-	$(COV)/test_adapt_archive
-	$(COV)/test_adapt_adaptive
-	$(COV)/test_decode_budget tests/vectors
-	$(COV)/test_fuzz_decode tests/vectors
-	$(COV)/test_adapt_text tests/vectors
-	$(PYTHON) -B tests/test_cadapt.py "$(abspath $(COV))/cadapt"
-	ADAPT_TEST_THREADS=$(if $(findstring -DADAPT_THREADS,$(COVFLAGS)),1,0) $(PYTHON) -B tests/test_cadapt_safety.py "$(abspath $(COV))/cadapt"
+	mkdir -p $(COV)/gcda
+	$(MAKE) -j $(COV)/gcda/done
 	cd $(COV) && for u in $(COVUNITS); do gcov -b -c --json-format -o . $$u.o > /dev/null && gunzip -f $$u.gcov.json.gz; done
 	$(PYTHON) -B check-gcov.py $(foreach u,$(COVUNITS),$(COV)/$(u).gcov.json)
+
+# One run per line, in parallel under make -j; each leaves its counts in
+# its own directory and its report in its own log, printed when it fails.
+COVRUNS = $(foreach k,$(ENCODE_SHARDS),encode-$(k)) $(foreach k,$(DECODE_SHARDS),decode-$(k)) archive adaptive budget fuzz text \
+          safety $(foreach c,$(CLI_CLASSES),cli-$(c))
+$(COV)/gcda/encode-%: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_encode tests/vectors $*/$(words $(ENCODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/decode-%: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_decode tests/vectors $*/$(words $(DECODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/archive: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_archive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/adaptive: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_adaptive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/budget: ; @$(COVRUN)/$(@F) $(COV)/test_decode_budget tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/fuzz: ; @$(COVRUN)/$(@F) $(COV)/test_fuzz_decode tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/text: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_text tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/safety: ; @ADAPT_TEST_THREADS=$(if $(findstring -DADAPT_THREADS,$(COVFLAGS)),1,0) $(COVRUN)/$(@F) \
+	    $(PYTHON) -B tests/test_cadapt_safety.py "$(COVDIR)/cadapt" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/cli-%: ; @$(COVRUN)/$(@F) $(PYTHON) -B tests/test_cadapt.py "$(COVDIR)/cadapt" $* > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/done: $(foreach r,$(COVRUNS),$(COV)/gcda/$(r))
+	@set -e; cd $(COV)/gcda; merged=$(word 1,$(COVRUNS)); for r in $(wordlist 2,$(words $(COVRUNS)),$(COVRUNS)); do \
+	    gcov-tool merge -o merged.next $$merged $$r > /dev/null; rm -rf merged; mv merged.next merged; merged=merged; done; \
+	    cp merged/*.gcda $(COVDIR)/ && touch done
 
 # The sanitized build, likewise beside the ordinary one: the C suites under
 # AddressSanitizer (leaks included) and UndefinedBehaviorSanitizer, with
@@ -163,4 +211,4 @@ fuzz-smoke: fuzz
 clean:
 	rm -rf $(BUILD) $(COV) $(SANITIZE_BUILD)
 
-.PHONY: all test coverage sanitize fuzz fuzz-smoke check clean
+.PHONY: all test coverage sanitize fuzz fuzz-smoke check check-parts check-long clean
