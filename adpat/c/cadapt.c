@@ -69,6 +69,7 @@
 #include <io.h>
 #include <process.h>
 #include <sys/utime.h>
+#include <windows.h>
 #define cadapt_getpid _getpid
 #define cadapt_fseek _fseeki64
 #define cadapt_ftell _ftelli64
@@ -604,8 +605,9 @@ static void print_usage(FILE *stream) {
             "of --segment-bytes (default %llu, whole blocks of %llu) that start the\n"
             "model afresh, the file the crate's threads write, and codes them at once on\n"
             "as many of the n threads as the budget holds a model, a segment and a block's\n"
-            "workspace for; decode --threads <n> decodes a file's segments the same way.\n"
-            "The report says how many threads ran.\n",
+            "workspace for, and never more than the CPUs online (the sizes stay fitted\n"
+            "to n, so the bytes are the same on every machine); decode --threads <n>\n"
+            "decodes a file's segments the same way. The report says how many threads ran.\n",
             (unsigned long long)minimum_error.detail, (unsigned long long)minimum_max_error.detail,
             (unsigned long long)ADAPT_SEGMENT_BYTES, (unsigned long long)ADAPT_BLOCK_BYTES);
 }
@@ -785,6 +787,34 @@ static uint64_t thread_count(const args *a) {
     return n;
 }
 
+/* The CPUs online, at least one. */
+static uint64_t online_cpus(void) {
+#ifdef _WIN32
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    return info.dwNumberOfProcessors >= 1 ? info.dwNumberOfProcessors : 1;
+#else
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n >= 1 ? (uint64_t)n : 1;
+#endif
+}
+
+/* The workers that run at once for --threads n: n, or the CPUs online
+ * when n is more — the coder's per-bit path is pure CPU, and a worker
+ * past the cores only takes turns with another and evicts its tables.
+ * The sizes stay fitted to the n asked for, so the bytes are the same on
+ * every machine (RUN-5); the report names the workers that ran. */
+static uint64_t running_threads(uint64_t threads) {
+    uint64_t cpus = online_cpus();
+    if (threads > cpus) {
+        fprintf(stderr, "--threads %llu: %llu online CPU%s, so %llu run at once; the sizes are fitted to %llu models as asked\n",
+                (unsigned long long)threads, (unsigned long long)cpus, cpus == 1 ? "" : "s", (unsigned long long)cpus,
+                (unsigned long long)threads);
+        return cpus;
+    }
+    return threads;
+}
+
 /* ------------------------------------------------------------------------
  * Streams: standard input or a file in, standard output or a staged file out.
  * --------------------------------------------------------------------- */
@@ -792,6 +822,11 @@ static uint64_t thread_count(const args *a) {
 typedef struct stream {
     FILE *file;
     int error; /* errno of the last failure, for the message */
+    /* How the sink takes bytes, found at the first write: 1 a regular
+     * file, which takes a whole block in one write; 2 anything else — a
+     * pipe, a socket, a terminal — which can block, and takes PIPE_BUF at
+     * a time between cancellation checks. 0 until then. */
+    int sink;
 } stream;
 
 static int read_stream(void *context, uint8_t *buf, size_t len, size_t *got) {
@@ -827,10 +862,17 @@ static int write_stream(void *context, const uint8_t *buf, size_t len) {
     stream *s = context;
 #ifndef _WIN32
     size_t at = 0;
+    if (s->sink == 0) {
+        struct stat st;
+        s->sink = fstat(fileno(s->file), &st) == 0 && S_ISREG(st.st_mode) ? 1 : 2;
+    }
     while (at < len) {
         /* A pipe reported writable can accept PIPE_BUF bytes without
-         * blocking. Recheck cancellation before each further chunk. */
-        size_t take = len - at < PIPE_BUF ? len - at : PIPE_BUF;
+         * blocking. Recheck cancellation before each further chunk. A
+         * regular file never blocks that way and takes the block whole:
+         * chunking it was four system calls per 4 KiB, a seventh of the
+         * wall time of a stored-block decode. */
+        size_t take = s->sink == 1 || len - at < PIPE_BUF ? len - at : PIPE_BUF;
         ssize_t n;
         int rc = wait_stream(fileno(s->file), POLLOUT);
         if (rc != 0) return s->error = rc;
@@ -1279,7 +1321,9 @@ typedef struct entry {
     attrs attrs;
 } entry;
 
-/* An inode seen with more than one name: the entry that carries it. */
+/* An inode seen with more than one name, and the entry that carries it —
+ * a slot of the walker's inode table, the entry's position plus one so
+ * that 0 marks an empty slot. */
 typedef struct seen_inode {
     identity id;
     size_t index;
@@ -1312,29 +1356,60 @@ static void folder_free(folder *f) {
     f->count = f->cap = f->inode_count = f->inode_cap = 0;
 }
 
+/* The inode table is a hash table — open addressing over (device, inode),
+ * a power of two of slots never more than half full — so a snapshot tree
+ * of a million hard-linked names costs a million lookups, not a million
+ * scans of everything seen so far (the flat list it replaced was measured
+ * quadratic: 0.3 s over 30,000 inodes, 6.3 s over 100,000). */
+static size_t inode_slot(const identity *id, size_t mask) {
+    uint64_t h = id->inode ^ (id->device * 0x9E3779B97F4A7C15ull);
+    h ^= h >> 31;
+    h *= 0xBF58476D1CE4E5B9ull;
+    h ^= h >> 29;
+    return (size_t)h & mask;
+}
+
 /* The entry an inode already has, or -1. */
 static long folder_inode(const folder *f, const identity *id) {
-    size_t i;
-    for (i = 0; i < f->inode_count; i++) {
+    size_t mask, i;
+    if (f->inode_cap == 0) {
+        return -1;
+    }
+    mask = f->inode_cap - 1;
+    for (i = inode_slot(id, mask); f->inodes[i].index != 0; i = (i + 1) & mask) {
         if (f->inodes[i].id.device == id->device && f->inodes[i].id.inode == id->inode) {
-            return (long)f->inodes[i].index;
+            return (long)(f->inodes[i].index - 1);
         }
     }
     return -1;
 }
 
+static void inode_insert(seen_inode *slots, size_t mask, const identity *id, size_t index) {
+    size_t i = inode_slot(id, mask);
+    while (slots[i].index != 0) {
+        i = (i + 1) & mask;
+    }
+    slots[i].id = *id;
+    slots[i].index = index + 1;
+}
+
 static int folder_remember_inode(folder *f, const identity *id, size_t index) {
-    if (f->inode_count == f->inode_cap) {
-        size_t grown = f->inode_cap == 0 ? 16 : f->inode_cap * 2;
-        seen_inode *bigger = realloc(f->inodes, grown * sizeof(*bigger));
+    if (2 * (f->inode_count + 1) > f->inode_cap) {
+        size_t grown = f->inode_cap == 0 ? 64 : f->inode_cap * 2, i;
+        seen_inode *bigger = calloc(grown, sizeof(*bigger));
         if (bigger == NULL) {
             return ENOMEM;
         }
+        for (i = 0; i < f->inode_cap; i++) {
+            if (f->inodes[i].index != 0) {
+                inode_insert(bigger, grown - 1, &f->inodes[i].id, f->inodes[i].index - 1);
+            }
+        }
+        free(f->inodes);
         f->inodes = bigger;
         f->inode_cap = grown;
     }
-    f->inodes[f->inode_count].id = *id;
-    f->inodes[f->inode_count].index = index;
+    inode_insert(f->inodes, f->inode_cap - 1, id, index);
     f->inode_count++;
     return 0;
 }
@@ -2529,7 +2604,7 @@ static int decode_command(int argc, char **argv) {
     char *output = NULL;
     int force, rc;
     adapt_limits limits = adapt_default_limits();
-    stream in = {NULL, 0}, out = {NULL, 0};
+    stream in = {NULL, 0, 0}, out = {NULL, 0, 0};
     staged stage = {0};
     adapt_stats stats;
     /* FMT-6: the container alone decodes. Its header names the model, and
@@ -2564,6 +2639,9 @@ static int decode_command(int argc, char **argv) {
     threads = thread_count(&a);
     if (threads == 0) {
         return usage_error("--threads: not a count of one or more: %s", value_of(&a, "--threads"));
+    }
+    if (threads >= 2) {
+        threads = running_threads(threads);
     }
     o = value_of(&a, "-o");
     if (o != NULL) {
@@ -2837,7 +2915,7 @@ static adapt_status encode_search(adapt_read_fn read, void *context, stream *out
                                   int known_length, uint64_t length, uint64_t memory,
                                   uint64_t threads, uint64_t segment_bytes, int verify, int context_first,
                                   adapt_stats *stats, adapt_error *error) {
-    stream source = {NULL, 0}, candidate = {NULL, 0}, best = {NULL, 0};
+    stream source = {NULL, 0, 0}, candidate = {NULL, 0, 0}, best = {NULL, 0, 0};
     uint8_t buffer[16384];
     size_t got;
     uint64_t best_bytes = UINT64_MAX;
@@ -2882,6 +2960,7 @@ static adapt_status encode_search(adapt_read_fn read, void *context, stream *out
         if (fseek(source.file, 0, SEEK_SET) != 0) goto io_failure;
         candidate.file = tmpfile();
         candidate.error = 0;
+        candidate.sink = 0;
         if (candidate.file == NULL) goto io_failure;
         writer.out = &candidate;
         writer.metadata = metadata;
@@ -2946,10 +3025,10 @@ static int encode_command(int argc, char **argv) {
     int text_transform = ADAPT_TEXT_AUTO;
     uint64_t profile_memory;
     uint64_t max_memory = ADAPT_DEFAULT_MAX_MEMORY, length = 0, hundredths, threads, segment_bytes = ADAPT_SEGMENT_BYTES;
-    uint64_t workers = 1;
+    uint64_t workers = 1, running = 1;
     char segments[96];
     adapt_sizes sizes;
-    stream in = {NULL, 0}, out = {NULL, 0};
+    stream in = {NULL, 0, 0}, out = {NULL, 0, 0};
     staged stage = {0};
     adapt_stats stats;
     adapt_error error;
@@ -3179,7 +3258,8 @@ static int encode_command(int argc, char **argv) {
     /* Segments go on threads when the budget holds a model, a segment
      * and a block's workspace for two or more of them; the workers then
      * prove their own segments, so the proof needs no second budget. */
-    workers = threads >= 2 && adaptive != 4 ? adapt_encode_workers(sizes, max_memory, segment_bytes, threads) : 1;
+    running = threads >= 2 && adaptive != 4 ? running_threads(threads) : threads;
+    workers = threads >= 2 && adaptive != 4 ? adapt_encode_workers(sizes, max_memory, segment_bytes, running) : 1;
     alongside = verify && adaptive != 4 && (workers >= 2 || adapt_verified_memory_bound(sizes) <= max_memory);
     if (verify && adaptive != 4 && !alongside && (in.file == stdin || !known_length || strcmp(output, "-") == 0)) {
         snprintf(message, sizeof(message),
@@ -3219,7 +3299,7 @@ static int encode_command(int argc, char **argv) {
                                    known_length, length, max_memory, threads, segment_bytes, verify, context_first, &stats, &error);
         } else if (workers >= 2) {
             status = adapt_encode_stream_threads(source, source_context, write_metadata_stream, &metadata_output, sizes,
-                                                 max_memory, segment_bytes, threads, verify, &stats, &error);
+                                                 max_memory, segment_bytes, running, verify, &stats, &error);
         } else if (alongside) {
             status = adapt_encode_stream_verified_segments(source, source_context, write_metadata_stream, &metadata_output, sizes, max_memory,
                                                            segment_bytes, &stats, &error);
@@ -3258,7 +3338,7 @@ static int encode_command(int argc, char **argv) {
          * again, which needs both to be files that can be read back — a
          * folder is walked again, and must hold the same bytes. */
         if ((is_folder || in.file != stdin) && known_length && stage.file != NULL) {
-            stream again = {NULL, 0}, coded = {NULL, 0};
+            stream again = {NULL, 0, 0}, coded = {NULL, 0, 0};
             if (in.file != NULL) {
                 fclose(in.file);
                 in.file = NULL;

@@ -51,6 +51,40 @@ The binary reports `0.12.0`; the tag is pending.
   decoding. The library counts retained input when it falls back to one
   worker as well as when it decodes in parallel.
 
+### Fixed
+- The folder walker's hard-link table is a hash table over (device,
+  inode). It was a flat list scanned for every name of a shared inode,
+  quadratic in the hard-linked inodes: 0.3 s over 30,000 and 6.3 s over
+  100,000 on the reference host, so a snapshot tree of a million would
+  have spent minutes scanning. 100,000 hard-linked pairs now walk in
+  3.5 s, less than the same number of plain files.
+- A regular-file output takes each block in one `write`. Every sink was
+  chunked at `PIPE_BUF` with a cancellation check either side of each
+  chunk — four system calls per 4 KiB, a seventh of the wall time of a
+  stored-block decode (68,694 calls and 0.09 s of kernel time for 64 MiB,
+  now 4,183 and 0.03 s). Pipes and terminals, which can block, are still
+  chunked.
+
+### Changed
+- `--threads n` runs no more workers than the host has CPUs online and
+  notes a request past them; the sizes stay fitted to `n`, so the bytes
+  do not change with the host (RUN-5).
+- The throughput floors are checked in CPU seconds (`cpu_seconds` in
+  `tools/ratio_floor.json`, at the figures the wall floors had — CPU time
+  is never more than wall time, so the floors are equal or stricter;
+  `wall_seconds` floors stay valid and are what the corpus floor files
+  still use). `tools/check_ratio_floor.py --runs N` encodes a fixture N
+  times for the median, holds every run to the same bytes, and with
+  `--baseline-binary` runs the two binaries turn and turn about, so a
+  neighbour's load weighs on both. The gate had compared one wall-clock
+  run against floors locked beside other jobs, a verdict one hiccup could
+  turn; the re-lock runs showed what CPU time does and does not fix — no
+  runqueue wait at load 3–4 on 12 hardware threads (CPU time equalled wall
+  time run for run), but a 17 % slowdown from two other encodes sharing
+  the cache, which only a quiet host or the interleaved relative gate
+  answers. `make gate` runs the proxy three times; `make check` prints
+  its wall time and the load average beside its budget.
+
 ### Added
 - `make ltcb-release` (`tools/ltcb_release.sh`) builds the assets of a
   Large Text Compression Benchmark entry from the committed HEAD into

@@ -272,10 +272,10 @@ a change may only improve on these:
 l r r r.
 fixture	input	container floor	time floor
 _
-enwik8-8MiB	8,388,608	1,713,845	13.3 s
-enwik8-16MiB	16,777,216	3,320,094	24.4 s
-enwik8	100,000,000	18,207,203	130.5 s
-enwik9	1,000,000,000	150,063,628	1,385.4 s
+enwik8-8MiB	8,388,608	1,713,845	13.3 CPU s
+enwik8-16MiB	16,777,216	3,320,094	24.4 CPU s
+enwik8	100,000,000	18,207,203	130.5 CPU s
+enwik9	1,000,000,000	150,063,628	1,385.4 CPU s
 .TE
 .\" floors:end
 .TP
@@ -358,9 +358,14 @@ cuts the input into segments of
 afresh, and codes them at once on as many of the
 .I n
 threads as the budget holds a model, a segment and a block's workspace
-for;
+for, and never more than the CPUs online;
 .B decode \-\-threads
 decodes a segmented file the same way.
+The sizes stay fitted to the
+.I n
+asked for, so the bytes are the same on every machine; the host only
+decides how many workers code them at once, and a request past its CPUs
+is noted.
 Each restart costs ratio (about +4 % on enwik8 with 16 MiB segments), and
 each worker needs a whole model, so within a small budget one thread is the
 better answer.

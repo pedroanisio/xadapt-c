@@ -8,11 +8,27 @@ current binary and fails when the container is larger by even one byte.
 
 Throughput is gated in one of three explicit ways. On the reference host named
 in the floor file it is compared with the locked figure, minus the recorded
-tolerance (wall time is noisy). With --baseline-binary the baseline encodes the
-same fixture in the same run and the current binary must be at least as fast,
-minus the tolerance: this works on any host and is what a CI runner should use.
-Otherwise throughput is printed and marked "not gated on this host"; size is
-still gated. `--verify` also decodes the container and compares byte for byte.
+tolerance. With --baseline-binary the baseline encodes the same fixture in the
+same run and the current binary must be at least as fast, minus the tolerance:
+this works on any host and is what a CI runner should use. Otherwise throughput
+is printed and marked "not gated on this host"; size is still gated. `--verify`
+also decodes the container and compares byte for byte.
+
+Each floor names its measure: `cpu_seconds` is the CPU time the encode used
+(user and system, as the kernel accounts it to the child), `wall_seconds` the
+clock time it took. The coder is one thread of pure CPU: its CPU time is what
+a host with more runnable threads than CPUs adds runqueue wait to in wall time
+but not in CPU time, so the locked floors use it. It is not immune to a
+neighbour: another compressor's tables sharing the cache and the memory bus
+slow the coder itself — on the reference host (12 hardware threads) the same
+binary took 13.1 s alone and 15.3 s of both CPU and wall time beside two
+other encodes — which is why `--runs N` encodes N times and takes the median
+(one hiccup is not the verdict), why with `--baseline-binary` the two
+binaries take turns run by run (a neighbour that comes and goes weighs on
+both alike — the relative gate to use on a shared host), and why a floor is
+locked on a quiet host. Every run is held to the same bytes (RUN-5). Wall
+floors remain for floors locked that way and for a platform without child
+CPU accounting, where a CPU floor is compared against wall time and says so.
 
 Exit status: 0 every requested floor holds; 1 a floor is broken or the round
 trip differs; 2 the check could not run (wrong input, bad floor file, timeout).
@@ -24,6 +40,7 @@ import argparse
 import hashlib
 import json
 import re
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -31,11 +48,17 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    import resource
+except ImportError:  # not a POSIX platform: no child CPU accounting
+    resource = None
+
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "cadapt.ratio-floor.v1"
 TOP_KEYS = {"schema", "locked_on", "host", "arguments", "throughput_tolerance", "floors"}
-FLOOR_KEYS = {"fixture", "input_bytes", "input_md5", "max_container_bytes", "wall_seconds",
-              "min_bytes_per_second", "measured_with"}
+FLOOR_KEYS = {"fixture", "input_bytes", "input_md5", "max_container_bytes", "min_bytes_per_second", "measured_with"}
+# a floor's seconds are in exactly one of these measures
+MEASURE_KEYS = {"cpu_seconds": "cpu", "wall_seconds": "wall"}
 
 
 class FloorError(ValueError):
@@ -48,7 +71,8 @@ class Floor:
     input_bytes: int
     input_md5: str
     max_container_bytes: int
-    wall_seconds: float
+    seconds: float
+    measure: str  # "cpu" or "wall": what `seconds` and `min_bytes_per_second` were taken in
     min_bytes_per_second: float
     measured_with: str
 
@@ -93,16 +117,20 @@ def load_floor(path: Path) -> Locked:
         raise FloorError(f"{path}: floors must be a non-empty list")
     floors = []
     for item in data["floors"]:
-        if not isinstance(item, dict) or set(item) != FLOOR_KEYS:
-            raise FloorError(f"{path}: each floor needs exactly the keys {sorted(FLOOR_KEYS)}")
+        measures = set(item) & set(MEASURE_KEYS) if isinstance(item, dict) else set()
+        if not isinstance(item, dict) or len(measures) != 1 or set(item) - measures != FLOOR_KEYS:
+            raise FloorError(f"{path}: each floor needs exactly the keys {sorted(FLOOR_KEYS)} "
+                             f"and one of {sorted(MEASURE_KEYS)}")
         if not re.fullmatch(r"[0-9a-f]{32}", str(item["input_md5"])):
             raise FloorError(f"{path}: {item.get('fixture')}: input_md5 is not an MD5 digest")
+        (seconds_key,) = measures
         floors.append(Floor(
             fixture=str(item["fixture"]),
             input_bytes=_positive_int(item["input_bytes"], "input_bytes"),
             input_md5=item["input_md5"],
             max_container_bytes=_positive_int(item["max_container_bytes"], "max_container_bytes"),
-            wall_seconds=_positive_float(item["wall_seconds"], "wall_seconds"),
+            seconds=_positive_float(item[seconds_key], seconds_key),
+            measure=MEASURE_KEYS[seconds_key],
             min_bytes_per_second=_positive_float(item["min_bytes_per_second"], "min_bytes_per_second"),
             measured_with=str(item["measured_with"]),
         ))
@@ -146,7 +174,29 @@ class SetupError(RuntimeError):
     """The check could not be carried out; nothing is known about the floor."""
 
 
-def _run(command: list[str], timeout: float) -> float:
+@dataclass(frozen=True)
+class Timed:
+    """One command's clock time and, where the platform accounts it, the CPU
+    time (user and system) the kernel charged to it and its children."""
+    wall: float
+    cpu: float | None
+
+    def seconds(self, measure: str) -> float:
+        return self.wall if measure == "wall" or self.cpu is None else self.cpu
+
+
+def _children_cpu() -> float | None:
+    if resource is None:
+        return None
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
+
+
+def _run(command: list[str], timeout: float) -> Timed:
+    """Run the command to completion; its clock and CPU times. The CPU time
+    is the change in what the kernel has charged this process's waited-for
+    children, which after subprocess.run is exactly this child."""
+    cpu_before = _children_cpu()
     started = time.monotonic()
     try:
         result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True,
@@ -155,13 +205,55 @@ def _run(command: list[str], timeout: float) -> float:
         raise SetupError(f"{command[1]} timed out after {timeout:g} s") from error
     except OSError as error:
         raise SetupError(f"cannot run {command[0]}: {error}") from error
+    wall = time.monotonic() - started
     if result.returncode != 0:
         raise SetupError(f"{command[1]} exited {result.returncode}: {result.stderr.strip()[:400]}")
-    return time.monotonic() - started
+    cpu_after = _children_cpu()
+    return Timed(wall, None if cpu_before is None else cpu_after - cpu_before)
+
+
+@dataclass(frozen=True)
+class Measured:
+    """`runs` encodes of one fixture: the container of the first, whether
+    every later run wrote the same bytes, and each run's time."""
+    container: Path
+    consistent: bool
+    times: list[Timed]
+
+    def seconds(self, measure: str) -> float:
+        return statistics.median(t.seconds(measure) for t in self.times)
+
+    def describe(self, measure: str) -> str:
+        """The verdict's seconds, then every run in both measures — a wall
+        time well above the CPU time is the host's load showing."""
+        other = "wall" if measure == "cpu" else "cpu"
+        each = ", ".join(f"{t.seconds(measure):,.1f}" for t in self.times)
+        others = ", ".join("-" if t.cpu is None else f"{t.seconds(other):,.1f}" for t in self.times)
+        if len(self.times) == 1:
+            return f"{each} {measure} s ({others} {other} s)"
+        return f"{self.seconds(measure):,.1f} {measure} s (median of {len(self.times)} runs: {each} s; {others} {other} s)"
+
+
+def _encode(binaries: list[tuple[Path, Path]], arguments: list[str], fixture: Path, timeout: float,
+            runs: int) -> list[Measured]:
+    """Encode the fixture `runs` times with each binary, the binaries taking
+    turns (candidate, baseline, candidate, ...), so that a neighbour's load
+    that comes and goes weighs on both alike. Each binary's first run is
+    kept as its container; its later runs must match it byte for byte."""
+    times = [[] for _ in binaries]
+    consistent = [True] * len(binaries)
+    for run in range(runs):
+        for k, (binary, container) in enumerate(binaries):
+            out = container if run == 0 else container.with_name(f"{container.name}.run{run + 1}")
+            times[k].append(_run([str(binary), *arguments, str(fixture), "-o", str(out)], timeout))
+            if run > 0:
+                consistent[k] &= _same_bytes(container, out)
+                out.unlink()
+    return [Measured(container, consistent[k], times[k]) for k, (_, container) in enumerate(binaries)]
 
 
 def check(locked: Locked, floor: Floor, binary: Path, fixture: Path, out_dir: Path, timeout: float,
-          verify: bool, baseline: Path | None = None, host: str | None = None) -> tuple[bool, list[str]]:
+          verify: bool, baseline: Path | None = None, host: str | None = None, runs: int = 1) -> tuple[bool, list[str]]:
     """Encode one fixture and compare it with its floor; returns (holds, report lines)."""
     host = host_model() if host is None else host
     lines = []
@@ -173,7 +265,15 @@ def check(locked: Locked, floor: Floor, binary: Path, fixture: Path, out_dir: Pa
                          f"locked input ({floor.input_bytes:,} B, md5 {floor.input_md5})")
     container = out_dir / f"{floor.fixture}.adpt"
     container.parent.mkdir(parents=True, exist_ok=True)  # a corpus fixture is named corpus/file
-    seconds = _run([str(binary), *locked.arguments, str(fixture), "-o", str(container)], timeout)
+    measure = floor.measure
+    if measure == "cpu" and resource is None:
+        lines.append(f"WARN {floor.fixture}: this platform does not account a child's CPU time; the CPU floor "
+                     f"is compared against wall time, which a busy host stretches")
+        measure = "wall"
+    reference = out_dir / f"{floor.fixture}.baseline.adpt"
+    binaries = [(binary, container)] + ([(baseline, reference)] if baseline is not None else [])
+    measured, *rest = _encode(binaries, locked.arguments, fixture, timeout, runs)
+    seconds = measured.seconds(measure)
     produced = container.stat().st_size
     rate = floor.input_bytes / seconds if seconds > 0 else float("inf")
     holds = True
@@ -182,28 +282,33 @@ def check(locked: Locked, floor: Floor, binary: Path, fixture: Path, out_dir: Pa
     holds &= delta <= 0
     lines.append(f"{verdict} {floor.fixture} size: {produced:,} B vs floor {floor.max_container_bytes:,} B "
                  f"({delta:+,} B, {100 * delta / floor.max_container_bytes:+.4f} %)")
+    if not measured.consistent:
+        holds = False
+        lines.append(f"FAIL {floor.fixture}: the {runs} runs' containers differ; the same command must write "
+                     f"the same bytes (RUN-5)")
     tolerance = 1 - locked.throughput_tolerance
     if baseline is not None:
-        reference = out_dir / f"{floor.fixture}.baseline.adpt"
-        base_seconds = _run([str(baseline), *locked.arguments, str(fixture), "-o", str(reference)], timeout)
+        (base,) = rest
+        base_seconds = base.seconds(measure)
         base_rate = floor.input_bytes / base_seconds if base_seconds > 0 else float("inf")
         allowed = base_rate * tolerance
         verdict = "PASS" if rate >= allowed else "FAIL"
         holds &= rate >= allowed
-        lines.append(f"{verdict} {floor.fixture} throughput: {rate:,.0f} B/s in {seconds:,.1f} s vs baseline "
-                     f"binary {base_rate:,.0f} B/s in {base_seconds:,.1f} s on this host, tolerance "
+        lines.append(f"{verdict} {floor.fixture} throughput: {rate:,.0f} B/s in {measured.describe(measure)} vs "
+                     f"baseline binary {base_rate:,.0f} B/s in {base.describe(measure)} on this host, tolerance "
                      f"{100 * locked.throughput_tolerance:.0f} % → at least {allowed:,.0f} B/s")
     elif host == locked.host:
         allowed = floor.min_bytes_per_second * tolerance
         verdict = "PASS" if rate >= allowed else "FAIL"
         holds &= rate >= allowed
-        lines.append(f"{verdict} {floor.fixture} throughput: {rate:,.0f} B/s in {seconds:,.1f} s vs floor "
-                     f"{floor.min_bytes_per_second:,.0f} B/s ({floor.wall_seconds:,.0f} s on {locked.host}), "
-                     f"tolerance {100 * locked.throughput_tolerance:.0f} % → at least {allowed:,.0f} B/s")
+        lines.append(f"{verdict} {floor.fixture} throughput: {rate:,.0f} B/s in {measured.describe(measure)} vs "
+                     f"floor {floor.min_bytes_per_second:,.0f} B/s ({floor.seconds:,.0f} {floor.measure} s on "
+                     f"{locked.host}), tolerance {100 * locked.throughput_tolerance:.0f} % → at least "
+                     f"{allowed:,.0f} B/s")
     else:
-        lines.append(f"INFO {floor.fixture} throughput: {rate:,.0f} B/s in {seconds:,.1f} s; not gated on this "
-                     f"host ({host or 'unknown CPU'} is not {locked.host}); pass --baseline-binary to gate "
-                     f"relative to a baseline build")
+        lines.append(f"INFO {floor.fixture} throughput: {rate:,.0f} B/s in {measured.describe(measure)}; not gated "
+                     f"on this host ({host or 'unknown CPU'} is not {locked.host}); pass --baseline-binary to "
+                     f"gate relative to a baseline build")
     if verify:
         restored = out_dir / f"{floor.fixture}.restored"
         _run([str(binary), "decode", str(container), "-o", str(restored)], timeout)
@@ -228,8 +333,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline-binary", type=Path,
                         help="a build of the locked commit; gates throughput relative to it on any host")
     parser.add_argument("--timeout", type=float, default=7200.0, help="seconds per command")
+    parser.add_argument("--runs", type=int, default=1,
+                        help="encode each fixture this many times and take the median time (default 1); "
+                             "every run must write the same bytes")
     parser.add_argument("--output-dir", type=Path, help="where containers go (default: a temporary directory)")
     args = parser.parse_args(argv)
+    if args.runs < 1:
+        parser.error("--runs must be one or more")
     try:
         locked = load_floor(args.floor)
     except FloorError as error:
@@ -253,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
         for floor, path in requested:
             try:
                 holds, lines = check(locked, floor, args.binary, path, out_dir, args.timeout, args.verify,
-                                     baseline=args.baseline_binary)
+                                     baseline=args.baseline_binary, runs=args.runs)
             except SetupError as error:
                 print(f"ERROR {error}", file=sys.stderr)
                 return 2

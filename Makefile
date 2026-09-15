@@ -17,10 +17,19 @@ all test clean:
 # it runs under `timeout`, so a suite that grows past the budget fails the
 # gate rather than stretching it. The codec's check and the tools' tests
 # run at once under make -j; each writes its own log, printed on failure.
+# The suite is parallel, so its wall time is what a loaded host stretches
+# (105 s at load 4 on the reference host, 115 s at load 10): the check
+# prints its wall time and the load average, so a budget failure can be
+# told from a code failure, and CHECK_SECONDS may be raised for the run.
 CHECK_SECONDS ?= 120
 check:
 	rm -rf _tmp/check && mkdir -p _tmp/check
-	timeout $(CHECK_SECONDS) $(MAKE) -j check-parts || { echo "make check exceeded $(CHECK_SECONDS) s or failed (see _tmp/check/*.log)"; exit 1; }
+	@start=$$(date +%s); \
+	if timeout $(CHECK_SECONDS) $(MAKE) -j check-parts; then \
+	    echo "make check: $$(( $$(date +%s) - start )) s of the $(CHECK_SECONDS) s wall budget, load average$$(uptime | sed 's/.*load average//')"; \
+	else \
+	    echo "make check exceeded $(CHECK_SECONDS) s or failed after $$(( $$(date +%s) - start )) s at load average$$(uptime | sed 's/.*load average//') (see _tmp/check/*.log)"; exit 1; \
+	fi
 	@for p in codec provenance floor-tool fetch-corpus docs; do grep -hE "^ok |^OK$$|checks passed$$" _tmp/check/$$p.log | tail -3; done
 check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus _tmp/check/docs
 _tmp/check/codec: ; @$(MAKE) -C adpat/c check > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
@@ -31,13 +40,15 @@ _tmp/check/fetch-corpus: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_
 _tmp/check/docs: _tmp/check/codec ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_docs.py' > $@.log 2>&1 && $(PYTHON) -B tools/render_floors.py check >> $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
 # Locked floors (LOCKS.md, 2026-09-14). gate: the CI proxy, the first 8 MiB of
-# enwik8 cut from the tracked zip, encode + decode, well under 120 s.
-# ratio-floor: the full enwik8 floor (static/corpus/enwik8 must be unzipped);
-# add FLOOR_ARGS='--fixture enwik9=/path/to/enwik9' for the enwik9 floor.
+# enwik8 cut from the tracked zip, encoded three times for the median of
+# their CPU seconds (the floor's measure) and decoded once, well under
+# 120 s. ratio-floor: the full enwik8 floor (static/corpus/enwik8 must be
+# unzipped); add FLOOR_ARGS='--fixture enwik9=/path/to/enwik9' for the
+# enwik9 floor, and --runs 3 for a re-lock.
 gate: all
 	unzip -p static/corpus/enwik8.zip enwik8 | head -c 8388608 > "$(CODEC_BUILD)/enwik8-8MiB"
 	$(PYTHON) -B tools/check_ratio_floor.py --binary "$(abspath $(CODEC_BUILD))/cadapt" \
-	    --fixture enwik8-8MiB="$(abspath $(CODEC_BUILD))/enwik8-8MiB" --verify --timeout 120 $(GATE_ARGS)
+	    --fixture enwik8-8MiB="$(abspath $(CODEC_BUILD))/enwik8-8MiB" --verify --runs 3 --timeout 120 $(GATE_ARGS)
 
 ratio-floor: all
 	$(PYTHON) -B tools/check_ratio_floor.py --binary "$(abspath $(CODEC_BUILD))/cadapt" --verify $(FLOOR_ARGS)

@@ -2,6 +2,57 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — Throughput floors are CPU seconds, checked as the median of runs; a shared host gates relatively
+
+**Decision.** The floors of `tools/ratio_floor.json` are seconds of CPU
+time (user and system, as the kernel charges the encode) at the figures
+the wall-clock floors held — 13.3 s, 24.4 s, 130.5 s and 1,385.4 s — and
+`tools/check_ratio_floor.py` reads the measure from each floor
+(`cpu_seconds` or `wall_seconds`, exactly one). `make gate` encodes the
+8 MiB proxy three times (`--runs 3`) and takes the median, every run
+held to the same bytes (RUN-5). With `--baseline-binary` the two binaries
+take turns run by run. The 10 % tolerance stays. A floor is locked from
+runs on a quiet host; a run beside other jobs never re-locks it.
+
+**Why.** The corpus audit of 2026-09-15 (Systems Performance 2e, ord.
+7797, 7812; C++ High Performance 2e, ord. 872, 994) found the gate taking
+its verdict from a single wall-clock run, against floors locked beside
+other agents' jobs: one hiccup could fail a sound build, and a floor
+locked slow could pass a slower one. The re-lock runs that followed
+measured what a CPU floor does and does not fix. It removes runqueue
+wait — but at load 3–4 on this host's 12 hardware threads there was none:
+CPU time equalled wall time in every run. It does not remove a
+neighbour's cache: the same binary took 13.1 s alone (median of three,
+10:21) and 15.3 s of both CPU and wall time beside two other encodes
+(10:34; 26.1 s for 16 MiB, 137.2 s for enwik8), a 17 % cost the
+scheduler cannot see. That is why the contended runs did not re-lock the
+floors — a floor is only ever improved from — and why the relative gate
+interleaves. Relabelling the wall figures as CPU floors can only tighten
+them, since CPU time never exceeds wall time. Rejected: `perf stat`
+cycles or instructions as the measure (frequency-invariant, but `perf`
+and its permissions are not on every runner; the operator may still use
+them by hand, as the audits do); a CPU budget for `make check` (a
+parallel suite: 887 CPU seconds for 105 wall seconds on 12 CPUs).
+
+**Consequences.**
+- A build must reach 567,650 B/s of CPU time on the 8 MiB proxy in
+  `make gate` (13.3 s less the tolerance), and the full floors' rates
+  in `make ratio-floor`; a CPU floor on a platform without child CPU
+  accounting is compared against wall time and the report says so.
+- Re-locking is `tools/check_ratio_floor.py --runs 3 --verify` on the
+  reference host with nothing else running; the report shows every run in
+  both measures, so a re-lock taken beside another job is visible.
+- The corpus floor files stay in wall seconds at their 25 % tolerance
+  until they are re-locked the same way.
+- `make check` keeps its 120 s wall budget (the entry below) and now
+  prints the seconds it took and the load average, so a budget failure on
+  a busy host is told from a code failure; `CHECK_SECONDS` widens it for
+  that run, not in the Makefile.
+
+**Status.** Landed 2026-09-15 with the corpus audit's other three fixes
+(CHANGELOG: the hard-link table, whole-block writes, workers capped at
+the CPUs online).
+
 ## 2026-09-15 — `make check` is held to 120 s of wall time
 
 **Decision.** (Operator's, 2026-09-15.) The gate every landing runs,

@@ -42,10 +42,22 @@ def load() -> dict:
     if not isinstance(data, dict) or not isinstance(data.get("floors"), list) or not data["floors"]:
         raise RenderError(f"{FLOOR}: no floors")
     for floor in data["floors"]:
-        for key in ("fixture", "input_bytes", "max_container_bytes", "wall_seconds"):
+        for key in ("fixture", "input_bytes", "max_container_bytes"):
             if key not in floor:
                 raise RenderError(f"{FLOOR}: floor without {key!r}")
+        if len(set(floor) & set(MEASURES)) != 1:
+            raise RenderError(f"{FLOOR}: floor without exactly one of {sorted(MEASURES)}")
     return data
+
+
+# a floor's seconds are in one of these measures; the block names which
+MEASURES = {"cpu_seconds": "CPU s", "wall_seconds": "wall s"}
+
+
+def time_floor(floor: dict) -> str:
+    """The floor's seconds with the measure they were taken in."""
+    (key,) = set(floor) & set(MEASURES)
+    return f"{floor[key]:,.1f} {MEASURES[key]}"
 
 
 def markdown(data: dict) -> str:
@@ -60,7 +72,7 @@ def markdown(data: dict) -> str:
     for floor in data["floors"]:
         lines.append(
             f"| {floor['fixture']} | {floor['input_bytes']:,} B | {floor['max_container_bytes']:,} B | "
-            f"{floor['wall_seconds']:,.1f} s |"
+            f"{time_floor(floor)} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -78,7 +90,7 @@ def troff(data: dict) -> str:
     ]
     for floor in data["floors"]:
         lines.append(
-            f"{floor['fixture']}\t{floor['input_bytes']:,}\t{floor['max_container_bytes']:,}\t{floor['wall_seconds']:,.1f} s"
+            f"{floor['fixture']}\t{floor['input_bytes']:,}\t{floor['max_container_bytes']:,}\t{time_floor(floor)}"
         )
     lines.append(".TE")
     return "\n".join(lines) + "\n"

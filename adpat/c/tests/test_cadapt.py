@@ -962,6 +962,48 @@ class FolderTest(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual((self.root / "again.adpt").read_bytes(), first)
 
+    @unittest.skipIf(os.name == "nt", "hard links are a POSIX thing here")
+    def test_folder_with_thousands_of_hard_links_keeps_every_inode(self) -> None:
+        """FMT-7 at the scale of a snapshot tree: the walker's inode table
+        is a hash table, so it must find every earlier name through its
+        growth (past the first 64 slots to thousands) and its probing —
+        3,000 inodes with two names each and 500 with three, across
+        directories, every group restored as one inode with the right
+        link count, the container the same bytes for the same folder."""
+        folder = self.folder
+        groups = []
+        for i in range(3000):
+            first = folder / "sub" / f"two-{i}"
+            first.write_bytes(b"two %d\n" % i)
+            os.link(first, folder / "sub" / "deep" / f"two-{i}-again")
+            groups.append((first, folder / "sub" / "deep" / f"two-{i}-again"))
+        for i in range(500):
+            first = folder / f"three-{i}"
+            first.write_bytes(b"three %d\n" % i)
+            os.link(first, folder / "sub" / f"three-{i}-b")
+            os.link(first, folder / "empty" / f"three-{i}-c")
+            groups.append((first, folder / "sub" / f"three-{i}-b", folder / "empty" / f"three-{i}-c"))
+        container = self.root / "tree.adpt"
+        stamps = [(path, path.lstat()) for path in (folder, *folder.rglob("*"))]
+        encoded = self.run_codec("encode", folder, "-o", container, "--no-verify")
+        self.assertEqual(encoded.returncode, 0, encoded.stderr)
+        restored = self.root / "back"
+        decoded = self.run_codec("decode", container, "-o", restored)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        self.assertEqual(snapshot(restored), snapshot(folder))
+        inodes = set()
+        for group in groups:
+            stats = [(restored / path.relative_to(folder)).stat() for path in group]
+            self.assertEqual({st.st_ino for st in stats}, {stats[0].st_ino}, group[0].name)
+            self.assertEqual(stats[0].st_nlink, len(group), group[0].name)
+            inodes.add(stats[0].st_ino)
+        self.assertEqual(len(inodes), len(groups))
+        for path, st in stamps:
+            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns), follow_symlinks=False)
+        second = self.run_codec("encode", folder, "-o", self.root / "again.adpt", "--no-verify")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual((self.root / "again.adpt").read_bytes(), container.read_bytes())
+
     @unittest.skipIf(os.name == "nt", "a fifo is a POSIX thing")
     def test_an_entry_of_another_kind_refuses_the_folder(self) -> None:
         os.mkfifo(self.folder / "pipe")
@@ -1135,6 +1177,39 @@ class SurfaceTest(unittest.TestCase):
                 self.assertIn(expect, r.stderr)
                 self.assertEqual(r.stdout, b"")
 
+    @unittest.skipIf(os.name == "nt", "a pipe's chunking and strace are POSIX things")
+    def test_a_file_sink_takes_a_block_per_write_and_a_pipe_takes_chunks(self) -> None:
+        """A regular file takes each recovered block in one write; a pipe,
+        which can block, takes PIPE_BUF at a time between cancellation
+        checks — and gets the same bytes. Chunking a file at 4 KiB was four
+        system calls per chunk, a seventh of the wall time of a
+        stored-block decode."""
+        data = bytes(random.Random(7).getrandbits(8) for _ in range(1 << 20))  # incompressible: stored blocks
+        source = self.root / "noise.bin"
+        source.write_bytes(data)
+        container = self.root / "noise.adpt"
+        r = self.run_codec("encode", "--fast", source, "-o", container, "--no-verify")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # a pipe sink: standard output captured is a pipe
+        r = self.run_codec("decode", container, "-o", "-")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, data)
+        # a file sink: strace, where it is installed, counts the writes
+        strace = shutil.which("strace")
+        if strace is None:
+            self.skipTest("strace is not installed: the write count is not observable here")
+        out = self.root / "noise.out"
+        log = self.root / "writes.log"
+        # LeakSanitizer cannot run under ptrace: a sanitized binary keeps its other checks
+        env = {**os.environ, "ASAN_OPTIONS": "detect_leaks=0"}
+        r = subprocess.run([strace, "-f", "-e", "trace=write", "-o", str(log), str(CADAPT), "decode", str(container),
+                            "-o", str(out)], capture_output=True, timeout=TIMEOUT, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(out.read_bytes(), data)
+        writes = [line for line in log.read_text().splitlines() if "write(" in line]
+        # four 256 KiB blocks and the report lines: far fewer than the 256 four-KiB chunks
+        self.assertLess(len(writes), 32, "\n".join(writes[:8]))
+
     def test_missing_and_damaged_inputs(self) -> None:
         r = self.run_codec("encode", self.root / "absent")
         self.assertEqual(r.returncode, 1)
@@ -1170,6 +1245,38 @@ class SurfaceTest(unittest.TestCase):
         r = self.run_codec("decode", container, "-o", "-", "--max-memory", "1000")
         self.assertEqual(r.returncode, 1)
         self.assertIn(b"memory budget", r.stderr)
+
+    def test_threads_past_the_online_cpus_run_as_many_as_there_are(self) -> None:
+        """--threads n fits the sizes to n models, as asked, so the bytes are
+        the same on every machine (RUN-5); but only as many workers as the
+        host has online CPUs run at once, and the report says which. A
+        request past the CPUs is noted with both counts."""
+        cpus = os.cpu_count() or 1
+        if cpus >= 64:
+            self.skipTest("the host has as many CPUs as the codec has workers")
+        source = VECTORS / "segmented.bin"
+        asked = cpus + 1  # one past the host, within the 2 GiB preset's room for that many models
+        out = self.root / "seg.adpt"
+        r = self.run_codec("encode", source, "-o", out, "-11", "--threads", str(asked), "--segment-bytes", "262144", "--no-verify")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        note = f"--threads {asked}: {cpus} online CPU".encode()
+        self.assertIn(note, r.stderr)
+        ran = int(re.search(rb"segments on (\d+) thread", r.stderr).group(1))
+        self.assertLessEqual(ran, cpus)
+        # the same request on the same host: the same bytes, and the sizes are the request's
+        again = self.run_codec("encode", source, "-o", self.root / "again.adpt", "-11", "--threads", str(asked),
+                               "--segment-bytes", "262144", "--no-verify")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual((self.root / "again.adpt").read_bytes(), out.read_bytes())
+        r = self.run_codec("decode", out, "-o", "-", "--threads", str(asked))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(note, r.stderr)
+        self.assertLessEqual(int(re.search(rb"segments on (\d+) thread", r.stderr).group(1)), cpus)
+        self.assertEqual(r.stdout, source.read_bytes())
+        # a request within the CPUs is not noted
+        r = self.run_codec("decode", out, "-o", "-", "--threads", "1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn(b"online CPU", r.stderr)
 
     def test_names_pipes_threads_and_info(self) -> None:
         container = self.root / "source.bin.adpt"

@@ -180,12 +180,16 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   `--segment-bytes` (default 16 MiB, whole 256 KiB blocks) that each start
   the model afresh, and codes them at once, on as many of the `n` threads
   as the memory budget holds a model, a segment and a block's workspace
-  for (the report says how many); `decode --threads <n>` of a file reads
-  its segment table and decodes the segments the same way. The bytes are
-  those the segments coded in order produce; a segment's model starts
-  afresh, so segmenting costs ratio (two 4 MiB segments of the 8 MiB
-  enwik8 proxy under `--max`: 1,778,553 bytes against 1,716,715 whole) and
-  is never the default. With `--verify`, each thread proves its own
+  for, and never more than the host has CPUs online (the report says how
+  many ran, and notes a request past the CPUs); `decode --threads <n>` of
+  a file reads its segment table and decodes the segments the same way.
+  The sizes are fitted to the `n` asked for whatever the host, so the
+  bytes are the same on every machine (RUN-5): `n` chooses the container,
+  the host only how many workers code it at once. The bytes are those the
+  segments coded in order produce; a segment's model starts afresh, so
+  segmenting costs ratio (two 4 MiB segments of the 8 MiB enwik8 proxy
+  under `--max`: 1,778,553 bytes against 1,716,715 whole) and is never
+  the default. With `--verify`, each thread proves its own
   segment before it is written. A pipe is segmented the same way, its
   segments read ahead into memory during encoding. Decoding a pipe uses
   one streaming decoder, including when `--threads` is requested.
@@ -334,8 +338,12 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   model is byte-level throughout, so a script is never decoded, only seen.
 - `make check` is held to **120 s** of wall time (`CHECK_SECONDS` in the
   root Makefile; it runs under `timeout` and fails when exceeded — LOCKS.md,
-  2026-09-15). Every suite runs at once under `make -j`; the CLI suite's
-  megabyte cases run only in `make check-long` (`ADAPT_LONG_TESTS=1`).
+  2026-09-15). Every suite runs at once under `make -j`, so the budget is
+  wall time by nature; the check prints the seconds it took and the load
+  average, so a run that failed the budget on a busy host is told from a
+  code failure, and `CHECK_SECONDS=240 make check` widens it for that run.
+  The CLI suite's megabyte cases run only in `make check-long`
+  (`ADAPT_LONG_TESTS=1`).
 - `make check` adds the Python tests — the documents against the code
   (`tools/test_docs.py`: the usage block and flags against `--help`, the
   version map against `adapt.h`, the floors block, the layout table, every
@@ -456,7 +464,19 @@ The codec-specific ratio and throughput regression gates remain here:
 `make gate`, `make ratio-floor` and `make corpus-floor` use
 `tools/check_ratio_floor.py` with the canonical `tools/ratio_floor.json`
 and the two corpus floor files, rendered here by
-`tools/render_floors.py` (`make check` fails when this block is stale):
+`tools/render_floors.py` (`make check` fails when this block is stale).
+A time floor is in the measure its file names: the canonical floors are
+**CPU seconds** — the encoder is one thread of pure CPU, so a host with
+more runnable threads than CPUs adds runqueue wait to its wall time but
+not to its CPU time — and `make gate` encodes the proxy three times for
+the median (`--runs 3`), every run held to the same bytes. CPU time does
+not remove a neighbour: another compressor's tables sharing the cache
+slow the coder itself (13.1 s alone, 15.3 s of both CPU and wall time
+beside two other encodes on the reference host), so a floor is locked on
+a quiet host, and on a shared one the gate to trust is the relative one,
+`--baseline-binary`, whose two binaries take turns run by run. The
+corpus floors, locked from single wall-clock runs at a 25 % tolerance,
+stay in wall seconds until they are re-locked.
 
 <!-- floors:start -->
 Locked 2026-09-15 on AMD Ryzen 5 5600X 6-Core Processor, `cadapt encode --max --allocation context`; a change may only
@@ -464,10 +484,10 @@ improve on these (`make gate` checks the first, `make ratio-floor` the rest):
 
 | Fixture | Input | Container floor | Time floor |
 |---|---:|---:|---:|
-| enwik8-8MiB | 8,388,608 B | 1,713,845 B | 13.3 s |
-| enwik8-16MiB | 16,777,216 B | 3,320,094 B | 24.4 s |
-| enwik8 | 100,000,000 B | 18,207,203 B | 130.5 s |
-| enwik9 | 1,000,000,000 B | 150,063,628 B | 1,385.4 s |
+| enwik8-8MiB | 8,388,608 B | 1,713,845 B | 13.3 CPU s |
+| enwik8-16MiB | 16,777,216 B | 3,320,094 B | 24.4 CPU s |
+| enwik8 | 100,000,000 B | 18,207,203 B | 130.5 CPU s |
+| enwik9 | 1,000,000,000 B | 150,063,628 B | 1,385.4 CPU s |
 <!-- floors:end -->
 
 Their thresholds and verification behavior

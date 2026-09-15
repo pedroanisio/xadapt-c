@@ -20,12 +20,18 @@ FAKE = r'''#!/usr/bin/env python3
 import json, os, shutil, sys, time
 cfg = json.load(open(sys.argv[0] + ".cfg"))
 args = sys.argv[1:]
+if cfg.get("trace"):
+    with open(cfg["trace"], "a") as f:
+        f.write(os.path.basename(sys.argv[0]) + " " + args[0] + "\n")
 time.sleep(cfg.get("sleep", 0))
+end = time.process_time() + cfg.get("busy", 0)
+while time.process_time() < end:
+    pass
 if args[0] == "encode":
     src, out = args[-3], args[-1]
     shutil.copy(src, out + ".src")
     with open(out, "wb") as f:
-        f.write(b"x" * cfg["bytes"])
+        f.write((os.urandom(1) if cfg.get("vary") else b"x") * cfg["bytes"])
 elif args[0] == "decode":
     src, out = args[1], args[-1]
     shutil.copy(src + ".src", out)
@@ -65,6 +71,8 @@ class FloorCheckTest(unittest.TestCase):
                  "max_container_bytes": 1000, "wall_seconds": 100.0,
                  "min_bytes_per_second": self.fixture.stat().st_size / 100.0, "measured_with": "fake"}
         entry.update(override.pop("entry", {}))
+        if "cpu_seconds" in entry:
+            entry.pop("wall_seconds", None)
         data = {"schema": floor.SCHEMA, "locked_on": "2026-09-14", "host": floor.host_model() or "test host",
                 "throughput_tolerance": 0.10,
                 "arguments": ["encode", "--max", "--allocation", "context"], "floors": [entry]}
@@ -125,6 +133,71 @@ class FloorCheckTest(unittest.TestCase):
         self.configure(self.baseline, bytes=1, sleep=1.2)  # baseline slower: relative gate passes
         code, text = self.run_check("--baseline-binary", str(self.baseline))
         self.assertEqual(code, 0, text)
+
+    def test_a_cpu_floor_is_blind_to_waiting_and_sees_work(self):
+        """A floor in CPU seconds is what the coder does, not what the host
+        was doing meanwhile: a run that waits (as one does on a loaded
+        host) passes it where the same run fails a wall floor; a run that
+        burns the CPU fails it."""
+        size = self.fixture.stat().st_size
+        self.configure(self.binary, bytes=1, sleep=1.0)
+        self.write_floor(entry={"cpu_seconds": 0.5, "min_bytes_per_second": size / 0.5})
+        code, text = self.run_check()
+        self.assertEqual(code, 0, text)
+        self.assertIn("cpu", text)
+        self.write_floor(entry={"wall_seconds": 0.5, "min_bytes_per_second": size / 0.5})
+        code, text = self.run_check()
+        self.assertEqual(code, 1, text)
+        self.assertIn("wall", text)
+        self.configure(self.binary, bytes=1, busy=0.8)
+        self.write_floor(entry={"cpu_seconds": 0.1, "min_bytes_per_second": size / 0.1})
+        code, text = self.run_check()
+        self.assertEqual(code, 1, text)
+        self.assertIn("FAIL", text)
+        self.assertIn("throughput", text)
+
+    def test_runs_take_the_median_and_must_agree_byte_for_byte(self):
+        self.configure(self.binary, bytes=1)
+        code, text = self.run_check("--runs", "3")
+        self.assertEqual(code, 0, text)
+        self.assertIn("median of 3 runs", text)
+        self.assertRegex(text, r"runs: [0-9.]+, [0-9.]+, [0-9.]+ s")
+        # RUN-5: the same command writes the same bytes every run, or the check fails
+        self.configure(self.binary, bytes=1, vary=True)
+        code, text = self.run_check("--runs", "3")
+        self.assertEqual(code, 1, text)
+        self.assertIn("FAIL", text)
+        self.assertIn("differ", text)
+        # the baseline binary is measured the same way, the two taking turns;
+        # each spins a fixed CPU time, so on a CPU floor the two agree
+        # however busy the host is (a wall clock would not, under load)
+        trace = self.root / "trace.log"
+        size = self.fixture.stat().st_size
+        self.write_floor(entry={"cpu_seconds": 100.0, "min_bytes_per_second": size / 100.0})
+        self.configure(self.binary, bytes=1, busy=0.3, trace=str(trace))
+        self.configure(self.baseline, bytes=1, busy=0.3, trace=str(trace))
+        code, text = self.run_check("--runs", "3", "--baseline-binary", str(self.baseline))
+        self.assertEqual(code, 0, text)
+        self.assertRegex(text, r"median of 3 runs.*vs baseline binary.*median of 3 runs")
+        self.assertEqual(trace.read_text().split("\n")[:-1],
+                         ["fake-cadapt encode", "fake-baseline encode"] * 3)
+
+    def test_a_floor_names_exactly_one_measure(self):
+        self.write_floor()
+        data = json.loads(self.floor.read_text())
+        entry = data["floors"][0]
+        for keys in ({"cpu_seconds": 1.0, "wall_seconds": 1.0}, {}):
+            trial = {k: v for k, v in entry.items() if k != "wall_seconds"}
+            trial.update(keys)
+            self.floor.write_text(json.dumps({**data, "floors": [trial]}))
+            with self.assertRaises(floor.FloorError, msg=sorted(keys)):
+                floor.load_floor(self.floor)
+        for key, measure in (("cpu_seconds", "cpu"), ("wall_seconds", "wall")):
+            trial = {k: v for k, v in entry.items() if k != "wall_seconds"}
+            trial[key] = 2.5
+            self.floor.write_text(json.dumps({**data, "floors": [trial]}))
+            loaded = floor.load_floor(self.floor).floors[0]
+            self.assertEqual((loaded.measure, loaded.seconds), (measure, 2.5))
 
     def test_verify_round_trip_passes_and_corruption_fails(self):
         self.configure(self.binary, bytes=500)
@@ -222,11 +295,13 @@ class FloorCheckTest(unittest.TestCase):
         self.assertEqual(by_name["enwik8"].input_md5, "a1fa5ffddb56f4953e226637dabbb36a")
         self.assertEqual(by_name["enwik9"].input_md5, "e206c3450ac99950df65bf70ef61a12d")
         self.assertEqual(locked.arguments, ["encode", "--max", "--allocation", "context"])
-        # re-locked 2026-09-15 on the merged text-transform binary (LOCKS.md)
-        self.assertEqual(by_name["enwik8-8MiB"].wall_seconds, 13.3)
-        self.assertEqual(by_name["enwik8-16MiB"].wall_seconds, 24.4)
-        self.assertEqual(by_name["enwik8"].wall_seconds, 130.5)
-        self.assertEqual(by_name["enwik9"].wall_seconds, 1385.4)
+        # re-locked 2026-09-15 on the merged text-transform binary (LOCKS.md);
+        # the same figures as CPU seconds since the corpus audit's gate fix
+        self.assertEqual({f.measure for f in locked.floors}, {"cpu"})
+        self.assertEqual(by_name["enwik8-8MiB"].seconds, 13.3)
+        self.assertEqual(by_name["enwik8-16MiB"].seconds, 24.4)
+        self.assertEqual(by_name["enwik8"].seconds, 130.5)
+        self.assertEqual(by_name["enwik9"].seconds, 1385.4)
         self.assertAlmostEqual(by_name["enwik8-8MiB"].min_bytes_per_second, 8 * 1024 * 1024 / 13.3, places=3)
         self.assertAlmostEqual(by_name["enwik8-16MiB"].min_bytes_per_second, 16 * 1024 * 1024 / 24.4, places=3)
         self.assertAlmostEqual(by_name["enwik8"].min_bytes_per_second, 100_000_000 / 130.5, places=3)
