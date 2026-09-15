@@ -79,6 +79,12 @@ cadapt info   <file>
 cadapt --version
 ```
 
+The manual page, [`adpat/c/cadapt.1`](adpat/c/cadapt.1) (`man -l adpat/c/cadapt.1`),
+sets out the two axes every run is made of — the profile (`--fast`, default,
+`--max`: which model) and the memory budget (`-0` … `-9`, `--max-memory`: how
+much it may fill) — with the floors, ceilings and the measured bytes each
+budget buys.
+
 `<input>` or `<output>` may be `-` for standard input or output. Without
 `-o`, `encode` writes `<input>.adpt` and `decode` strips that suffix (or
 appends `.out`). An existing output is kept unless `--force` is given. Both

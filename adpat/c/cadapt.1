@@ -1,0 +1,357 @@
+.\" cadapt(1) — the adapt self-adaptive lossless codec, in C.
+.\" Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-15,
+.\" with Claude Opus 5 (Claude Code). Every figure is the binary's own
+.\" (cadapt --help, cadapt info) or a measurement named in LOCKS.md and
+.\" docs/performance-audit-128mib-2026-09-15.md. Render: man -l cadapt.1
+.TH CADAPT 1 "2026-09-15" "cadapt 0.12.0" "User Commands"
+.SH NAME
+cadapt \- compress and decompress files and folders with the adapt context-mixing codec
+.SH SYNOPSIS
+.B cadapt encode
+.I input
+.RB [ \-o
+.IR output ]
+.RB [ \-\-force ]
+.RB [ \-\-verify " | " \-\-no\-verify ]
+.RB [ \-\-fast " | " \-\-max ]
+.RB [ \-0 " .. " \-9 ]
+.RB [ \-\-max\-memory
+.IR bytes ]
+.RB [ \-\-allocation
+.BR window | context ]
+.RB [ \-\-threads
+.IR n ]
+.RB [ \-\-segment\-bytes
+.IR bytes ]
+.RB [ \-\-adaptive
+.BR rates | sparse | retained | auto ]
+.RB [ \-\-transform
+.BR bmp ]
+.br
+.B cadapt decode
+.I input
+.RB [ \-o
+.IR output ]
+.RB [ \-\-force ]
+.RB [ \-\-max\-output
+.IR bytes ]
+.RB [ \-\-max\-memory
+.IR bytes ]
+.RB [ \-\-threads
+.IR n ]
+.br
+.B cadapt info
+.I file
+.br
+.B cadapt \-\-version
+.SH DESCRIPTION
+.B cadapt
+is a lossless compressor of the context-mixing kind: every bit of the input
+is predicted by a set of adaptive context models whose predictions are
+combined by learned arbiters and refined by estimation stages, then coded
+by a binary arithmetic coder.
+Decoding runs the same model in the same order, so the decoder needs the
+same memory the encoder used.
+.PP
+Two independent choices decide what a run does, and they are easy to
+confuse:
+.TP
+.B the profile
+.RB ( \-\-fast ,
+the default, or
+.BR \-\-max )
+selects
+.I which model
+runs: how many contexts, how many inputs per context, how many arbiters and
+estimation stages.
+A bigger model writes fewer bytes and takes longer, whatever its memory.
+.TP
+.B the memory budget
+.RB ( \-0 " .. " \-9
+or
+.BR \-\-max\-memory )
+selects
+.I how much memory
+that model may fill.
+The model shrinks or grows its context table, recall table and history
+window to fit; the profile's fixed tables are the same at every budget.
+More memory buys ratio, not speed.
+.PP
+So
+.B \-9 \-\-max
+is the max model in 674 MiB (the default budget, so
+.B \-\-max
+alone means the same),
+.B \-5 \-\-max
+is the same model squeezed into 94 MiB, and
+.B \-9
+alone is the normal model in 674 MiB.
+.SH COMMANDS
+.TP
+.BI encode " input"
+Compress
+.I input
+to
+.IR input .adpt
+(or to
+.BR \-o ).
+A named file or folder is stored with its metadata (modes, timestamps;
+for folders every entry, hard links, holes, extended attributes and ACLs).
+.I input
+may be
+.B \-
+for standard input, in which case the container is a bare stream with no
+metadata.
+.TP
+.BI decode " input"
+Restore the file or folder
+.I input
+holds, to the name with
+.B .adpt
+stripped (or
+.B .out
+appended), or to
+.BR \-o .
+The model is allocated as the container's header names it, whatever the
+decoder's own settings.
+.TP
+.BI info " file"
+Print the container's format version, its declared size, the model's
+sizes (table, recall table, window, class history, contexts, profile), the
+transforms it carries, what it holds and the memory decoding it takes.
+.TP
+.B \-\-version
+Print the version and exit.
+.SH PROFILE OPTIONS
+.TP
+.B \-\-fast
+Two hashed contexts chosen per file, a direct order-1 memory, the word run,
+recall and one arbiter; a table of at most 2 MiB.
+Decodes about three times faster than the normal profile for about a
+twelfth more bytes.
+Container version 20 (23 with metadata).
+.TP
+(default)
+The normal profile: ten hashed contexts with one input each, two run
+models, four arbiters, two estimation stages.
+Version 19 (22 with metadata).
+.TP
+.B \-\-max
+Twenty hashed contexts with three inputs each, six run models, four
+arbiters, a second estimation stage four times the normal one.
+Writes fewer bytes for about 1.8 times the time in the same memory.
+Version 21 (24 with metadata).
+.TP
+.BR \-\-adaptive " " rates | sparse | retained | auto
+Experimental causal predictors layered over the normal or max profile;
+.B auto
+spools the input to temporary disk once, tries the base and the three
+adaptive profiles (and the BMP transform where it applies) and keeps the
+smallest complete container that fits the budget, using up to eight
+encodes.
+Versions 25 to 52.
+.TP
+.BR \-\-transform " " bmp
+Code a BMP24 image through reversible colour and row residuals.
+.SH MEMORY OPTIONS
+.TP
+.BR \-0 " .. " \-9
+The budget, after what
+.BR xz (1)
+takes to compress at the same preset:
+.TS
+l l l l l l l l l l l.
+preset	-0	-1	-2	-3	-4	-5	-6	-7	-8	-9
+MiB	3	9	17	32	48	94	94	186	370	674
+.TE
+.IP
+.B \-9
+is the default.
+A preset below the profile's smallest model is raised to that model.
+.TP
+.BI \-\-max\-memory " bytes"
+The budget as a byte count (default 706740224, the
+.B \-9
+figure); overrides a preset.
+Bounds the model, its window and the workspace; a folder's path and
+metadata bookkeeping is additional.
+.TP
+Floors
+The smallest model of the fast and normal profiles takes 28,178,567 bytes
+(about 27 MiB), the max profile's 73,283,719 (about 70 MiB), so
+.BR \-0 " to " \-3
+all mean the 27 MiB floor and
+.B \-\-max
+needs
+.B \-5
+or more.
+A budget below the floor fails before anything is written and reports the
+bytes needed.
+.B \-\-verify
+alongside the coder needs two models.
+.TP
+Ceilings
+The context table stops growing at 2^26 blocks (1 GiB), the recall table
+at 2^24 entries (64 MiB), the window at 2^30 bytes; the fast profile's
+table at 2 MiB.
+On enwik8 the max profile is saturated at 1 GiB (18,563,312 bytes against
+18,564,510 at 674 MiB).
+.TP
+What memory buys
+Measured on enwik8 (100 MB) with
+.BR "\-\-max \-\-allocation context" :
+.TS
+l r r r.
+budget	context table	container	vs 674 MiB
+_
+128 MiB	32 MiB	20,091,771	+8.2 %
+192 MiB	64 MiB	19,597,276	+5.6 %
+256 MiB	128 MiB	19,185,877	+3.3 %
+674 MiB	512 MiB	18,564,510	\(em
+1 GiB	1 GiB	18,563,312	\-0.01 %
+.TE
+.IP
+Speed is the same at every budget: interleaved on the first 8 MiB, the
+128 MiB and 674 MiB runs took the same user cycles.
+.TP
+.BR \-\-allocation " " window | context
+How a budget is spent once the smallest model fits:
+.B window
+(the default) grows the history window first, then the context table;
+.B context
+grows the table first.
+Either can win depending on the input; on enwik8 at 674 MiB
+.B context
+writes 18,564,510 bytes and
+.B window
+18,831,629.
+.TP
+Decoding memory
+.B decode
+allocates the model the container's header names, so a file written at
+.B \-9
+takes about 640 MB to decode on any machine (for the max profile; about
+370 MB for the normal one).
+.B \-\-max\-memory
+on
+.B decode
+only caps that: a container needing more is refused, never shrunk.
+.SH OTHER OPTIONS
+.TP
+.BI \-o " output"
+Where to write; existing files are kept unless
+.B \-\-force
+is given.
+.B \-
+is standard output (encode) or standard input (decode).
+.TP
+.B \-\-force
+Overwrite an existing output.
+.TP
+.BR \-\-verify ", " \-\-no\-verify
+.B encode
+skips round-trip verification by default.
+.B \-\-verify
+proves the output as it is written when the budget holds two models, on a
+second thread; otherwise, for a file written to a file, in a second pass
+with one model.
+.B \-\-no\-verify
+states the default.
+.TP
+.BI \-\-threads " n"
+With
+.I n
+of two or more,
+.B encode
+cuts the input into segments of
+.B \-\-segment\-bytes
+(default 16777216, whole blocks of 262144) that each start the model
+afresh, and codes them at once on as many of the
+.I n
+threads as the budget holds a model, a segment and a block's workspace
+for;
+.B decode \-\-threads
+decodes a segmented file the same way.
+Each restart costs ratio (about +4 % on enwik8 with 16 MiB segments), and
+each worker needs a whole model, so within a small budget one thread is the
+better answer.
+The report says how many threads ran.
+.TP
+.BI \-\-segment\-bytes " bytes"
+The segment length for
+.BR \-\-threads .
+.TP
+.BI \-\-max\-output " bytes"
+.B decode
+refuses to write more than this (default 1 GiB).
+.SH ENVIRONMENT
+.TP
+.B ADAPT_ISA
+Set to
+.B baseline
+to run the portable per-bit path instead of the x86-64-v3 one on a CPU
+that has it.
+Both write the same bytes; the knob exists so the two can be compared.
+.SH EXIT STATUS
+.TP
+0
+The command succeeded.
+.TP
+1
+It failed: an input that could not be read or decoded, an output that
+could not be written, a budget below the model's floor, a container the
+decoder's cap refuses.
+Nothing is left half-published.
+.TP
+2
+A usage error; the usage text follows the message.
+.SH EXAMPLES
+The floor configuration, the max model in the default 674 MiB with the
+table grown first:
+.PP
+.nf
+    cadapt encode enwik8 --max --allocation context
+.fi
+.PP
+The same model in 128 MiB, and what it will take to decode:
+.PP
+.nf
+    cadapt encode enwik8 --max --allocation context --max-memory 134217728
+    cadapt info enwik8.adpt
+.fi
+.PP
+The normal model in 64 MiB, which the max model cannot enter:
+.PP
+.nf
+    cadapt encode data.bin --max-memory 67108864
+.fi
+.PP
+A folder, proven as it is written, and restored:
+.PP
+.nf
+    cadapt encode project/ -o project.adpt --verify
+    cadapt decode project.adpt -o restored/
+.fi
+.PP
+A stream through a pipe:
+.PP
+.nf
+    tar c src | cadapt encode - --fast > src.tar.adpt
+    cadapt decode - < src.tar.adpt | tar x
+.fi
+.SH FILES
+Containers carry a format version in their header; a decoder refuses a
+version it does not implement.
+Versions 13 to 18 are refused; 19 to 24 are the three profiles as streams
+and as named files or folders; 25 to 52 are the experimental profiles.
+.SH SEE ALSO
+.BR xz (1).
+.br
+The project's
+.I README.md
+(usage and overview),
+.I LOCKS.md
+(the decisions and measurements the figures above come from),
+.I docs/CONSTRAINTS.md
+and
+.IR docs/performance-audit-128mib-2026-09-15.md .
