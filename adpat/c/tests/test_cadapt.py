@@ -103,6 +103,31 @@ class AllocationTest(CodecTest):
                 decoded = self.run_codec("decode", "-", data=run.stdout)
                 self.assertEqual(decoded.returncode, 0, decoded.stderr)
                 self.assertEqual(decoded.stdout, data)
+        # The compact side tables: a max budget that stops the context table
+        # short of a 4 MiB input's target under --allocation context (80 MiB:
+        # the full tables reach 2^19 blocks, the compact ones 2^20) writes
+        # version 53 (56 with metadata), the same reader decodes it, and the
+        # default budget still writes version 21 for this input.
+        big = self.root / "big.bin"
+        big.write_bytes((SOURCE * ((4 << 20) // len(SOURCE) + 1))[: 4 << 20])
+        compact = self.run_codec("encode", "-", "--max", "--allocation", "context", "--max-memory", str(80 << 20),
+                                 data=big.read_bytes())
+        self.assertEqual(compact.returncode, 0, compact.stderr)
+        self.assertEqual(compact.stdout[4], 53)
+        back = self.run_codec("decode", "-", data=compact.stdout)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertEqual(back.stdout, big.read_bytes())
+        named = self.root / "big.adpt"
+        run = self.run_codec("encode", big, "-o", named, "--max", "--allocation", "context", "--max-memory", str(80 << 20))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(named.read_bytes()[4], 56)
+        restored = self.root / "big.restored"
+        run = self.run_codec("decode", named, "-o", restored)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(restored.read_bytes(), big.read_bytes())
+        full = self.run_codec("encode", "-", "--max", "--allocation", "context", data=big.read_bytes())
+        self.assertEqual(full.returncode, 0, full.stderr)
+        self.assertEqual(full.stdout[4], 21)
         auto = self.run_codec("encode", self.source, "-o", "-", "--max", "--allocation", "context", "--adaptive", "auto", "--verify")
         self.assertEqual(auto.returncode, 0, auto.stderr)
         self.assertEqual(len(auto.stdout), min(sizes))

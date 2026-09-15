@@ -518,9 +518,30 @@ static void test_framing(void) {
     file[4] = 4;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
-    file[4] = ADAPT_MAX_BMP_METADATA_LAST_VERSION + 1;
+    file[4] = ADAPT_MAX_COMPACT_METADATA_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_MAX_BMP_METADATA_LAST_VERSION + 1);
+    CHECK(error.detail == ADAPT_MAX_COMPACT_METADATA_VERSION + 1);
+    /* the two numbers between the compact max profile and its metadata
+     * variant name no format and are refused */
+    file[4] = ADAPT_MAX_COMPACT_VERSION + 1;
+    CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
+    file[4] = ADAPT_MAX_COMPACT_VERSION + 2;
+    CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
+    /* the compact max profile reads as max with compact set, and its
+     * model is smaller than the full one by the side tables it halves */
+    file[4] = ADAPT_MAX_COMPACT_VERSION;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.max == 1 && sizes.compact == 1 && sizes.fast == 0);
+    {
+        adapt_sizes full = sizes;
+        full.compact = 0;
+        CHECK(adapt_model_bytes(full) > adapt_model_bytes(sizes));
+        CHECK(adapt_model_bytes(full) - adapt_model_bytes(sizes) ==
+              (uint64_t)(1u << 15) * 2 * (uint64_t)(3 * 21 + 6 + 2 + 1 + 1) * 4 + (uint64_t)(1u << 17) * 33 * 2);
+    }
+    file[4] = ADAPT_MAX_VERSION;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.max == 1 && sizes.compact == 0);
     /* 0.8.0's normal profile, version 6, is refused like every version no file was published in */
     file[4] = 6;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);

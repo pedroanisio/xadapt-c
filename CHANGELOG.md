@@ -13,6 +13,20 @@ and announced as [SECURITY.md](SECURITY.md) describes.
 
 The binary reports `0.12.0`; the tag is pending.
 
+### Added
+- Container versions 53 and 56 (with metadata): the max profile with
+  compact side tables — the third and fourth first-layer arbiters keep
+  2^15 weight sets instead of 2^16 and the second estimation stage 2^17
+  rows instead of 2^18, 26.5 MiB less. `--allocation context` chooses them
+  only when the budget would otherwise stop the context table at 2^22
+  blocks or fewer, short of the input's target, and spends the difference
+  on a table twice the size. Measured on enwik8: 20,712,600 → 20,258,968
+  bytes at 94 MiB, 20,091,771 → 19,715,577 at 128 MiB (peak RSS 124 MB),
+  19,597,276 → 19,284,703 at 192 MiB; at 256 MiB and the default 674 MiB
+  the full tables are kept and every byte is unchanged, the locked floors
+  included. Every earlier max container decodes as before, with its full
+  tables. `adapt_sizes` gains `compact`.
+
 ### Changed
 - The per-bit path of the normal and max profiles is faster and writes the
   same bytes: on the x86-64-v3 instantiation the twenty-one memories are

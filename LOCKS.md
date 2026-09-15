@@ -2,6 +2,48 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — Small max budgets buy context table with compact side tables (versions 53/56)
+
+**Decision.** Under `--allocation context`, when the budget stops the max
+profile's context table at 2^22 blocks or fewer and short of the input's
+target, the encoder halves the third and fourth arbiters' weight sets (2^16
+→ 2^15) and the second estimation stage's rows (2^18 → 2^17) — 26.5 MiB —
+and grows the table with what that frees. The container carries version
+53 (56 with metadata); a decoder sets `compact` from the version, so every
+existing max file keeps its full tables.
+
+**Why.** At small budgets the fixed side tables (60.9 MiB with the full
+set) crowd out the table that carries the ratio. Measured on enwik8, same
+binary, same command but for the budget:
+
+| Budget | Full tables | Compact tables | Change |
+|---:|---:|---:|---:|
+| 94 MiB | 20,712,600 B | 20,258,968 B | −2.19 % |
+| 128 MiB | 20,091,771 B | 19,715,577 B | −1.87 % |
+| 192 MiB | 19,597,276 B | 19,284,703 B | −1.60 % |
+| 256 MiB | 19,185,877 B | 19,251,456 B (not chosen) | +0.34 % |
+
+A control at 90 MiB with the compact tables but the same 2^21 table as the
+full ones cost +1.34 %: the gain is the table doubling, not the smaller
+side tables, which is why the rule is tied to the table's size and why
+budgets whose table already passes 2^22 keep the full set.
+
+**Consequences.**
+- The locked floors (enwik8 at 674 MiB, enwik9) reach their table target
+  with the full tables and are byte-identical; `make gate` and
+  `tools/check_ratio_floor.py --verify` on enwik8 were run on this build.
+- The window policy (`--allocation window`, the CLI default) is unchanged:
+  it spends a small budget on the window, where the compact tables were
+  not measured to pay.
+- The minimum max budget is still set by the full tables (about 70 MiB):
+  the switch happens after the full-table sizing, never instead of it.
+- Raising or lowering `ADAPT_COMPACT_TABLE_LOG` (22) or the compact sizes
+  is a new entry with the enwik8 runs that justify it.
+
+**Status.** Landed 2026-09-15 with `adapt_sizes.compact`, versions
+53/56, decoder support for both, C and CLI tests (a compact round trip,
+the version-byte checks, the sizing boundaries) and the gate runs above.
+
 ## 2026-09-14 — benchmark independence and regression-file ownership
 
 General benchmark orchestration belongs to the standalone codecbench project.

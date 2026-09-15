@@ -245,17 +245,25 @@ static const uint32_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
 #define MIXER2_SETS (3 * 2 * 256)
 /* The third and fourth first-layer arbiters, keyed by eight bits of the
  * order-2 hash and of the word hash with the partial byte: measured
- * 1.5 % on text, where two more (order-3, the recalled byte) lost it. */
-#define MIXER3_SETS (256 * 256)
-#define MIXER4_SETS (256 * 256)
+ * 1.5 % on text, where two more (order-3, the recalled byte) lost it.
+ * Under the compact side tables (ADAPT_MAX_COMPACT_VERSION) seven bits
+ * key them: half the sets, 9.6 MiB each instead of 19, the difference
+ * going to the context table at a small budget. */
+#define MIX34_LOG(compact) ((compact) ? 15 : 16)
+#define MIXER34_SETS(compact) ((size_t)1 << MIX34_LOG(compact))
+/* The hash bits that pick a set, above the partial byte's eight. */
+#define MIX34_ROW_MASK(compact) ((size_t)(1u << (MIX34_LOG(compact) - 8)) - 1)
 /* The final arbiter's inputs: the four verdicts and a bias. */
 #define FINAL_INPUTS 5
 #define FINAL_SETS (3 * 2 * 256)
 #define APM_BUCKETS 33
 #define APM_CONTEXTS (1u << 16)
 /* Rows of the second estimation stage: the max profile keys it by ten
- * bits of the order-2 hash, the normal profile by eight. */
-#define APM2_CONTEXTS(max) ((max) ? (1u << 18) : (1u << 16))
+ * bits of the order-2 hash (nine under the compact side tables), the
+ * normal profile by eight. */
+#define APM2_LOG(max, compact) ((max) ? ((compact) ? 17 : 18) : 16)
+#define APM2_CONTEXTS(max, compact) ((size_t)1 << APM2_LOG(max, compact))
+#define APM2_ROW_MASK(max, compact) ((size_t)(1u << (APM2_LOG(max, compact) - 8)) - 1)
 #define BLOCK 16
 /* Bytes of a line the record context remembers. */
 #define ROW_MAX 4096
@@ -968,6 +976,12 @@ typedef struct model {
     int fast;
     /* 1 for the max profile (format version 12); never with fast. */
     int max;
+    /* 1 for the compact side tables (ADAPT_MAX_COMPACT_VERSION): the
+     * masks below size the third and fourth arbiters' sets and the
+     * second estimation stage's rows, read once per bit. */
+    int compact;
+    size_t mix34_row_mask;
+    size_t apm2_mask;
     /* The record period in bytes, or 0: when set, the record and field
      * contexts read the byte one period back and its neighbours in place
      * of the line above (Core::period). */
@@ -1095,14 +1109,14 @@ static inline size_t model_layout(model *m, uint8_t *base, adapt_sizes sizes) {
     } while (0)
     ADAPT_PLACE(table, uint8_t *, ((size_t)1 << sizes.table_log) * BLOCK, 4096);
     ADAPT_PLACE(apm, uint16_t(*)[APM_BUCKETS], APM_CONTEXTS * sizeof(*m->apm), 4096);
-    ADAPT_PLACE(apm2, uint16_t(*)[APM_BUCKETS], APM2_CONTEXTS(sizes.max) * sizeof(*m->apm2), 4096);
+    ADAPT_PLACE(apm2, uint16_t(*)[APM_BUCKETS], APM2_CONTEXTS(sizes.max, sizes.compact) * sizeof(*m->apm2), 4096);
     ADAPT_PLACE(mtab, uint32_t *, ((size_t)1 << sizes.match_log) * sizeof(uint32_t), 4096);
     ADAPT_PLACE(rtab, uint32_t *, (size_t)RUNS_OF(sizes.max) * RUN_SLOTS * sizeof(uint32_t), 4096);
     ADAPT_PLACE(hist, uint8_t *, (size_t)1 << sizes.window_log, 4096);
     ADAPT_PLACE(weights, int32_t *, MIXER_SETS * (size_t)ARBITER_STRIDE(sizes.fast, sizes.max) * sizeof(int32_t), 64);
     ADAPT_PLACE(weights2, int32_t *, MIXER2_SETS * (size_t)ARBITER_STRIDE(0, sizes.max) * sizeof(int32_t), 64);
-    ADAPT_PLACE(weights3, int32_t *, MIXER3_SETS * (size_t)ARBITER_STRIDE(0, sizes.max) * sizeof(int32_t), 4096);
-    ADAPT_PLACE(weights4, int32_t *, MIXER4_SETS * (size_t)ARBITER_STRIDE(0, sizes.max) * sizeof(int32_t), 4096);
+    ADAPT_PLACE(weights3, int32_t *, MIXER34_SETS(sizes.compact) * (size_t)ARBITER_STRIDE(0, sizes.max) * sizeof(int32_t), 4096);
+    ADAPT_PLACE(weights4, int32_t *, MIXER34_SETS(sizes.compact) * (size_t)ARBITER_STRIDE(0, sizes.max) * sizeof(int32_t), 4096);
     ADAPT_PLACE(wfinal, arbiter_final *, FINAL_SETS * sizeof(arbiter_final), 64);
     ADAPT_PLACE(row, uint8_t *, ROW_MAX, 64);
     ADAPT_PLACE(prow, uint8_t *, ROW_MAX, 64);
@@ -1532,8 +1546,8 @@ static inline void start_byte(model *m, int fast) {
     }
     claim_chain(m);
     slots_refresh(m);
-    m->apm2_row = ((size_t)(mix64((c & 0xFFFF) | ((uint64_t)21 << 56)) >> 46) & 0x3FF) << 8;
-    m->wset4_row = ((size_t)(mix64(m->word + 1) >> 48) & 0xFF) * 256;
+    m->apm2_row = ((size_t)(mix64((c & 0xFFFF) | ((uint64_t)21 << 56)) >> 46) & (m->apm2_mask >> 8)) << 8;
+    m->wset4_row = ((size_t)(mix64(m->word + 1) >> 48) & m->mix34_row_mask) * 256;
 }
 
 static inline size_t recall_key(uint64_t c8, size_t mmask);
@@ -1581,14 +1595,14 @@ static inline void prefetch_byte(model *m, uint8_t b, int fast, int now) {
     }
     ADAPT_PREFETCH(&m->followed[v.c8 & 0xFFFF]);
     if (!fast) {
-        size_t row2 = ((size_t)(mix64((v.c8 & 0xFFFF) | ((uint64_t)21 << 56)) >> 46) & 0x3FF) << 8;
-        size_t w3 = (((size_t)(hk[H_O2] >> 48) & 0xFF) * 256 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
-        size_t w4 = (((size_t)(mix64(v.word + 1) >> 48) & 0xFF) * 256 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
+        size_t row2 = ((size_t)(mix64((v.c8 & 0xFFFF) | ((uint64_t)21 << 56)) >> 46) & (m->apm2_mask >> 8)) << 8;
+        size_t w3 = (((size_t)(hk[H_O2] >> 48) & m->mix34_row_mask) * 256 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
+        size_t w4 = (((size_t)(mix64(v.word + 1) >> 48) & m->mix34_row_mask) * 256 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
         size_t k;
         ADAPT_PREFETCH(m->apm[((size_t)b << 8 | 1) & (APM_CONTEXTS - 1)]);
         ADAPT_PREFETCH((const char *)m->apm[((size_t)b << 8 | 1) & (APM_CONTEXTS - 1)] + 64);
-        ADAPT_PREFETCH(m->apm2[(row2 | 1) & (APM2_CONTEXTS(m->max) - 1)]);
-        ADAPT_PREFETCH((const char *)m->apm2[(row2 | 1) & (APM2_CONTEXTS(m->max) - 1)] + 64);
+        ADAPT_PREFETCH(m->apm2[(row2 | 1) & m->apm2_mask]);
+        ADAPT_PREFETCH((const char *)m->apm2[(row2 | 1) & m->apm2_mask] + 64);
         for (k = 0; k < (size_t)ARBITER_STRIDE(0, m->max) * sizeof(int32_t); k += 64) {
             ADAPT_PREFETCH((const char *)(m->weights3 + w3) + k);
             ADAPT_PREFETCH((const char *)(m->weights4 + w4) + k);
@@ -1933,7 +1947,7 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
      * eight bits of the order-2 hash (slot 1 holds order-2 under every
      * set) and of the word hash, each with the partial byte */
     m->wset2 = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (size_t)(m->c8 & 0xFF);
-    m->wset3 = ((size_t)(m->h[1] >> 48) & 0xFF) * 256 + (m->c0 & 255);
+    m->wset3 = ((size_t)(m->h[1] >> 48) & m->mix34_row_mask) * 256 + (m->c0 & 255);
     m->wset4 = m->wset4_row + (m->c0 & 255);
 #if ADAPT_X86_V3
     if (v3) {
@@ -1975,7 +1989,7 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     b = row[j + 1];
     papm = (a * (128 - w) + b * w) >> 11;
     {
-        size_t ctx2 = (m->apm2_row | m->c0) & (APM2_CONTEXTS(max) - 1);
+        size_t ctx2 = (m->apm2_row | m->c0) & m->apm2_mask;
         const uint16_t *row2 = m->apm2[ctx2];
         int32_t papm2 = ((int32_t)row2[j] * (128 - w) + (int32_t)row2[j + 1] * w) >> 11;
         m->apm2_ctx = ctx2;
@@ -2067,8 +2081,8 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
         }
         ADAPT_PREFETCH(m->apm[(((size_t)(m->c8 & 0xFF) << 8) | c0n) & (APM_CONTEXTS - 1)]);
         ADAPT_PREFETCH((const char *)m->apm[(((size_t)(m->c8 & 0xFF) << 8) | c0n) & (APM_CONTEXTS - 1)] + 64);
-        ADAPT_PREFETCH(m->apm2[(m->apm2_row | c0n) & (APM2_CONTEXTS(max) - 1)]);
-        ADAPT_PREFETCH((const char *)m->apm2[(m->apm2_row | c0n) & (APM2_CONTEXTS(max) - 1)] + 64);
+        ADAPT_PREFETCH(m->apm2[(m->apm2_row | c0n) & m->apm2_mask]);
+        ADAPT_PREFETCH((const char *)m->apm2[(m->apm2_row | c0n) & m->apm2_mask] + 64);
     }
     /* arbiters */
     {
@@ -2092,7 +2106,7 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
         row[j] = (uint16_t)(v < 65535 ? v : 65535);
         v = row[j + 1] + ((g - row[j + 1]) >> APM_RATE);
         row[j + 1] = (uint16_t)(v < 65535 ? v : 65535);
-        row = m->apm2[m->apm2_ctx & (APM2_CONTEXTS(max) - 1)];
+        row = m->apm2[m->apm2_ctx & m->apm2_mask];
         j = m->apm2_j & 31;
         v = row[j] + ((g - row[j]) >> APM_RATE);
         row[j] = (uint16_t)(v < 65535 ? v : 65535);
@@ -2300,6 +2314,9 @@ static inline model *model_new(adapt_sizes sizes) {
     m->class_bits = 3 * CLASS_WIDTHS[sizes.class_code];
     m->fast = sizes.fast != 0;
     m->max = sizes.max != 0;
+    m->compact = sizes.compact != 0;
+    m->mix34_row_mask = MIX34_ROW_MASK(m->compact);
+    m->apm2_mask = APM2_CONTEXTS(m->max, m->compact) - 1;
     m->period = sizes.period;
     {
         uint32_t set = m->fast ? FAST_SETS[sizes.set_code] : CONTEXT_SETS[sizes.set_code];
@@ -2334,10 +2351,11 @@ static inline model *model_new(adapt_sizes sizes) {
             }
             w[lanes] = 0;
         }
-        for (i = 0; i < MIXER2_SETS + MIXER3_SETS + MIXER4_SETS; i++) {
+        for (i = 0; i < MIXER2_SETS + 2 * MIXER34_SETS(m->compact); i++) {
             int32_t *w = i < MIXER2_SETS ? m->weights2 + i * (lanes2 + 1)
-                         : i < MIXER2_SETS + MIXER3_SETS ? m->weights3 + (i - MIXER2_SETS) * (lanes2 + 1)
-                                                         : m->weights4 + (i - MIXER2_SETS - MIXER3_SETS) * (lanes2 + 1);
+                         : i < MIXER2_SETS + MIXER34_SETS(m->compact)
+                             ? m->weights3 + (i - MIXER2_SETS) * (lanes2 + 1)
+                             : m->weights4 + (i - MIXER2_SETS - MIXER34_SETS(m->compact)) * (lanes2 + 1);
             for (j = 0; j < lanes2; j++) {
                 w[j] = initial_weight(j, 0, m->max);
             }
@@ -2358,7 +2376,7 @@ static inline model *model_new(adapt_sizes sizes) {
     for (i = 0; i < APM_CONTEXTS; i++) {
         memcpy(m->apm[i], apm_row, sizeof(apm_row));
     }
-    for (i = 0; i < APM2_CONTEXTS(m->max); i++) {
+    for (i = 0; i < APM2_CONTEXTS(m->max, m->compact); i++) {
         memcpy(m->apm2[i], apm_row, sizeof(apm_row));
     }
     m->pmix = 2048;
@@ -2536,7 +2554,8 @@ static inline int sizes_valid(adapt_sizes s) {
            (!s.fast || s.set_code < ADAPT_FAST_SETS) && s.period != 1 && s.period <= ADAPT_PERIOD_MAX &&
            (!s.fast || s.period == 0) && s.segmented <= 1 && s.max <= 1 && !(s.fast && s.max) && s.x86 <= 1 &&
            s.archive <= 1 && s.adaptive <= 3 && (!s.adaptive || !s.fast) &&
-           s.bmp <= 1 && (!s.bmp || (!s.fast && !s.x86 && !s.archive));
+           s.bmp <= 1 && (!s.bmp || (!s.fast && !s.x86 && !s.archive)) &&
+           s.compact <= 1 && (!s.compact || (s.max && !s.adaptive && !s.bmp));
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {
@@ -2627,9 +2646,9 @@ static inline adapt_status read_block(const uint8_t *src, size_t len, size_t *po
 
 /* Bytes the run tables, arbiter weights and line buffers occupy under a
  * profile. */
-static inline uint64_t side_table_bytes(int fast, int max) {
+static inline uint64_t side_table_bytes(int fast, int max, int compact) {
     return (uint64_t)RUNS_OF(max) * RUN_SLOTS * 4 + (uint64_t)MIXER_SETS * ARBITER_STRIDE(fast, max) * 4 +
-           (uint64_t)(MIXER2_SETS + MIXER3_SETS + MIXER4_SETS) * ARBITER_STRIDE(0, max) * 4 +
+           (uint64_t)(MIXER2_SETS + 2 * MIXER34_SETS(compact)) * ARBITER_STRIDE(0, max) * 4 +
            (uint64_t)FINAL_SETS * (FINAL_INPUTS + 1) * 4 + 2 * ROW_MAX;
 }
 

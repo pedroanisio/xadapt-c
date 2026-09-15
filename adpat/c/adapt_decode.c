@@ -37,6 +37,7 @@ static int header_has_bmp(const uint8_t *header) {
 
 int adapt_header_has_metadata(const uint8_t *header) {
     return header != NULL && ((header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION) ||
+                              header[4] == ADAPT_MAX_COMPACT_METADATA_VERSION ||
                               (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_MAX_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION) ||
@@ -122,6 +123,7 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         version = (uint8_t)(version - ADAPT_MAX_BMP_VERSION + ADAPT_BMP_VERSION);
     }
     s.adaptive = 0;
+    s.compact = 0;
     if (version == ADAPT_FORMAT_VERSION) {
         s.fast = 0;
     } else if (version == ADAPT_FAST_VERSION) {
@@ -129,6 +131,10 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     } else if (version == ADAPT_MAX_VERSION) {
         s.fast = 0;
         s.max = 1;
+    } else if (version == ADAPT_MAX_COMPACT_VERSION) {
+        s.fast = 0;
+        s.max = 1;
+        s.compact = 1;
     } else if (version >= ADAPT_ADAPTIVE_VERSION && version <= ADAPT_ADAPTIVE_LAST_VERSION) {
         s.fast = 0;
         s.adaptive = (uint8_t)(version - ADAPT_ADAPTIVE_VERSION + 1);
@@ -227,7 +233,8 @@ void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len) {
 
 uint64_t adapt_model_bytes(adapt_sizes sizes) {
     return ((uint64_t)1 << sizes.table_log) * 16 + (sizes.fast ? O1_BYTES : 0) + ((uint64_t)1 << sizes.match_log) * 4 +
-           (uint64_t)(APM_CONTEXTS + APM2_CONTEXTS(sizes.max)) * APM_BUCKETS * 2 + side_table_bytes(sizes.fast, sizes.max) +
+           (uint64_t)(APM_CONTEXTS + APM2_CONTEXTS(sizes.max, sizes.compact)) * APM_BUCKETS * 2 +
+           side_table_bytes(sizes.fast, sizes.max, sizes.compact) +
            ((uint64_t)1 << sizes.window_log) + (sizes.adaptive ? sizeof(adaptive_model) : 0);
 }
 

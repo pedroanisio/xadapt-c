@@ -1,5 +1,5 @@
 /*
- * adapt.h — the adapt codec, format versions 19 through 52, in C99 with
+ * adapt.h — the adapt codec, format versions 19 through 56, in C99 with
  * nothing beyond the C standard library (and POSIX threads for the
  * encoder's proof, when built with ADAPT_THREADS).
  *
@@ -126,6 +126,21 @@ extern "C" {
 #define ADAPT_MAX_BMP_LAST_VERSION 48u
 #define ADAPT_MAX_BMP_METADATA_VERSION 49u
 #define ADAPT_MAX_BMP_METADATA_LAST_VERSION 52u
+/* The max profile with compact side tables (ADAPT_MAX_COMPACT_VERSION,
+ * 56 with metadata): the third and fourth arbiters keep 2^15 weight sets
+ * instead of 2^16 and the second estimation stage 2^17 rows instead of
+ * 2^18, so a small memory budget spends the difference on a context table
+ * twice the size. The encoder chooses it only when its budget would
+ * otherwise leave the max profile a table of at most
+ * ADAPT_COMPACT_TABLE_LOG blocks short of the input's target
+ * (adapt_table_log_for): measured on enwik8, 20,712,600 -> 20,258,968
+ * bytes at 94 MiB and 20,091,771 -> 19,715,577 at 128 MiB, while at
+ * 256 MiB and above the full tables win and the bytes are unchanged.
+ * A version-21 file of any table size still decodes with the full
+ * tables. */
+#define ADAPT_MAX_COMPACT_VERSION 53u
+#define ADAPT_MAX_COMPACT_METADATA_VERSION 56u
+#define ADAPT_COMPACT_TABLE_LOG 22u
 #define ADAPT_BMP_BYTES 12u
 #define ADAPT_METADATA_BYTES 28u
 #define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)
@@ -298,6 +313,12 @@ typedef struct adapt_sizes {
      * descriptor on decode. Exclusive with fast, archive and x86. */
     uint8_t bmp;
     uint32_t bmp_offset, bmp_width, bmp_rows;
+    /* 1 when the max profile runs its compact side tables
+     * (ADAPT_MAX_COMPACT_VERSION); never with `fast`, `adaptive` or `bmp`.
+     * adapt_sizes_for_input_max and adapt_sizes_prioritize_context set it
+     * from the budget (see ADAPT_COMPACT_TABLE_LOG); a decoder sets it
+     * from the version, so an older max file keeps its full tables. */
+    uint8_t compact;
 } adapt_sizes;
 
 /* Probe a BMP24 header without decoding text or modifying sizes on failure. */

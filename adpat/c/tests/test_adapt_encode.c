@@ -486,6 +486,85 @@ static void reset(reader *r, const uint8_t *src, size_t len, size_t chunk, write
 
 /* ---- the larger vectors --------------------------------------------- */
 
+/* The compact side tables: chosen by the context policy only when the
+ * budget stops the max profile's table at ADAPT_COMPACT_TABLE_LOG blocks
+ * or fewer, short of the target; written as ADAPT_MAX_COMPACT_VERSION;
+ * decoded by the same reader; never at the default budget on a large
+ * input, where the bytes are the locked ones. */
+static void test_compact_side_tables(void) {
+    adapt_sizes s, full;
+    adapt_error error;
+    uint8_t *data, *coded, *back = NULL;
+    size_t data_len, back_len = 0;
+    reader r;
+    writer w;
+    /* 100 MB at 128 MiB: the table stops at 2^21 with the full tables and
+     * reaches 2^22 with the compact ones. */
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, (uint64_t)128 << 20, &s, &error), ADAPT_OK);
+    CHECK(s.compact == 0);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, (uint64_t)128 << 20, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.max && s.compact == 1 && s.table_log == 22 && s.window_log == 24);
+    CHECK(adapt_encode_memory_bound(s) <= (uint64_t)128 << 20);
+    /* the same input at the default budget reaches its target with the
+     * full tables and stays on them (the locked bytes) */
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.compact == 0 && s.table_log == 25);
+    /* a table already past ADAPT_COMPACT_TABLE_LOG keeps the full tables */
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, (uint64_t)256 << 20, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, (uint64_t)256 << 20, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.compact == 0 && s.table_log == 23);
+    /* a small input whose target the full tables reach keeps them (the
+     * CI proxy's bytes at the default budget); at 128 MiB the full tables
+     * stop one short of it and the compact ones reach it */
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 8 << 20, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 8 << 20, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.compact == 0 && s.table_log == adapt_table_log_for(8 << 20));
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 8 << 20, (uint64_t)128 << 20, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 8 << 20, (uint64_t)128 << 20, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.compact == 1 && s.table_log == adapt_table_log_for(8 << 20));
+    /* compact is the max profile's alone */
+    full = s;
+    full.compact = 1;
+    CHECK(adapt_sizes_valid(full));
+    full.max = 0;
+    CHECK(!adapt_sizes_valid(full));
+    full = adapt_sizes_fast(adapt_sizes_max(s));
+    CHECK(full.compact == 0);
+    /* a compact container round-trips through the stream API and carries
+     * the compact version byte */
+    data = read_file("text.bin", &data_len);
+    coded = malloc(data_len + 4096);
+    s = adapt_sizes_max(s);
+    s.table_log = 18;
+    s.match_log = 12;
+    s.window_log = 16;
+    s.compact = 1;
+    reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error), ADAPT_OK);
+    CHECK(w.len > ADAPT_HEADER_BYTES && coded[4] == ADAPT_MAX_COMPACT_VERSION);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
+    adapt_free(back);
+    {
+        /* the same sizes with the full tables write the older version
+         * and other bytes: two formats, both readable */
+        size_t compact_len = w.len;
+        s.compact = 0;
+        reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
+        CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
+                     ADAPT_OK);
+        CHECK(coded[4] == ADAPT_MAX_VERSION && w.len != compact_len);
+        CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+        CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
+        adapt_free(back);
+    }
+    free(coded);
+    free(data);
+}
+
+
+
 /* A committed file the stream encoder must write again byte for byte
  * under the sizes `cadapt encode` chooses for its source at the default
  * budget: the normal profile, `--fast` (1) or `--max` (2); with and
@@ -1487,6 +1566,7 @@ int main(int argc, char **argv) {
     test_vector_profile("cjk.adpt", "cjk.bin", 0);
     test_sizes();
     test_context_allocation();
+    test_compact_side_tables();
     test_fast_fits_where_normal_fits();
     test_roundtrips();
     test_streams();
