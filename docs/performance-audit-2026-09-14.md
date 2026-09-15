@@ -15,6 +15,109 @@ sequentially — was measured at a **4.1 % ratio cost** on 100 MB of enwik8 with
 16 MiB segments (7.0 % when six workers share the default budget), so it lands
 only if the operator's floor admits that, and buys nothing below 16 MiB.
 
+## Results — the max profile's per-bit path, later the same day
+
+<!-- Authored with Claude Opus 5 (Claude Code), second session. Numbers are
+from runs on the same host; the floor is bench/ratio_floor.json. -->
+
+The audit below was written against format 13–15; format 19–24 (four
+arbiters, a second estimation stage, twenty max contexts, tables to 2^26)
+changed the picture. Measured on the max profile with the floor's arguments
+(`encode --max --allocation context`) on the first 8 MiB of enwik8, the
+encoder retired **3,200 instructions per coded bit at IPC 1.30** — 2,460
+cycles a bit — with **15 branch mispredictions and 69 L1d misses per bit**;
+`predict_max` held 60 % of cycles, `update_max` 21 %, `start_byte` 14 %.
+The control experiment that set the direction: with the context table shrunk
+to 2 MiB (cache-resident; a different container) the same run took only 6 %
+fewer cycles, so the codec was not memory-latency-bound but instruction- and
+dependency-bound, and prefetching alone could not halve it.
+
+What landed, each step measured on the 8 MiB slice against a snapshot of
+HEAD with `perf stat` (user cycles), interleaved, and byte-compared
+(`cmp`) against the snapshot's container — every step below writes the
+same bytes:
+
+| Step | Cycles (8 MiB, G) | vs HEAD | Instructions (G) |
+|---|---|---|---|
+| HEAD (815b7a3) | 143.5 | — | 215.0 |
+| Branch-free `claim` (four tags, one branch) and a per-state mode for the third lane | 137 | −5 % | — |
+| Explicit x86-64-v3 instantiations; the dot product as even/odd sign-extending multiplies, inlined | 131 | −9 % | — |
+| The memories as vectors: `cur`/`cbase` slots, planar lanes, gathered cells, vector learning, scalar write-back; aliased blocks fall back to the scalar loops | 128 | −11 % | 176 |
+| Next bit's arbiter sets and both estimation rows prefetched at the start of `update` | 111 | −23 % | — |
+| The next byte's claims planned from the byte being coded (a shadow of `end_byte`'s state) and its lines, the second nibble's exact lines too, issued ten at a time over the bits before them | 92 | −36 % | 184 |
+| Alias filter by a stamp table instead of a vector compare; next states assembled in a register (no byte-store → vector-load forwarding stall); the four dots in one pass; mode bits kept in the cell word and the next state from a byte table instead of two gathers; cells by scalar inserts instead of a gather | 78 | **−45 %** | 177 |
+
+Branch mispredictions fell from 15 to 6.9 per bit and IPC rose from 1.30
+to about 2.2. The whole-file check is under "Full enwik8" below.
+
+Two things measured and rejected on the way, kept here so they are not
+tried again: refreshing per-cell lane words (stretch and lanes) in the map
+update — every cell learns every bit, so it only moved work from `predict`
+to `update` and added 5 G instructions; and 24-lane planes to align the
+lane stores with the dot's loads — the same bytes, 8 % slower, since the
+extra lanes cost more than the forwarding stall they removed. Prefetching
+the arbiter sets toward L2 (`prefetcht1`) instead of L1 made no difference.
+
+Corpus sources read for this work, by doc-ray ordinal: *C++ High
+Performance* on the line a fetch brings whole (ord. 1052) and on false
+sharing of a line (3381–3386); *Advanced Compiler Design and Implementation*
+§17.4.3 on loop unrolling for scheduling freedom (5379–5412) and §20 on
+placing prefetches a computed number of iterations ahead (6703–6710); *AI
+Systems Performance Engineering* on measuring every optimization before and
+after (7321, 13766); the *Lossless Compression Handbook* on the cost of
+adapting the probability model after every coded symbol (ord. 2913), which
+is the cost this work reduces without changing the adaptation.
+
+### How the vector path stays bytes-identical
+
+- The lanes' order in `st[]` changed from interleaved to planar; a weight
+  follows its lane and the arbiters' sums are integer sums, which do not
+  depend on order, so the arbiters see the same values and learn the same
+  weights (`initial_weight` places the trusted starting weights on the
+  first plane).
+- Two hashed contexts can claim one table block in the same nibble (their
+  hashes share a line and both miss). The scalar loops then apply the
+  second context's update to the state the first just advanced; the vector
+  path cannot, so `claim_chain` detects the pair — a stamp table on the
+  block index, the exact pairwise scan only when a stamp repeats — and the
+  nibble takes the scalar loops. This was found by the byte compare at
+  byte 254 of a 2 MiB slice, before the check existed.
+- The map cell's two spare count bits hold the state's third-lane mode;
+  `map_update` masks the count and keeps them.
+- `ADAPT_ISA=baseline` runs the portable pair; `tests/test_cadapt.py`
+  encodes the vectors' sources both ways at the smallest budget, where
+  aliasing happens on most bytes, and asserts the same bytes and that each
+  path decodes the other's output.
+- Prefetches never change the model. The shadow view the encoder hashes
+  the next byte from is checked against the real one in a build with
+  `-DADAPT_SHADOW_CHECK` (abort on any mismatch); it ran clean over the
+  vectors and over CSV, JSON, x86 and text inputs under all three
+  profiles.
+
+### Full enwik8
+
+The floor's own run (`encode --max --allocation context`, enwik8, 100 MB;
+`bench/ratio_floor.json`): 18,564,510 bytes in 263 s wall on an idle host.
+The same command with the HEAD snapshot and with this build, one after the
+other on the same host while other agents' jobs shared it (load average
+≈ 3.5), `/usr/bin/time`:
+
+| Binary | Container | Wall | User | Peak RSS |
+|---|---|---|---|---|
+| HEAD 815b7a3 | 18,564,510 B | 316.7 s | 315.9 s | 659 MB |
+| this build | 18,564,510 B (`cmp`: identical) | 194.0 s | 193.2 s | 659 MB |
+
+That is 61 % of HEAD's time on the full file — less than the 55 % on the
+8 MiB slice, because the 512 MiB table of the full run leaves more of the
+claims in DRAM. Against the goal of half the floor's time (131 s idle), the
+remaining gap is about 18 % of the full-file time; the profile at full table
+size puts `start_byte` at 11 % (its claims, still partly missing), the
+arbiters' weight loads and the estimation rows at ~10 %, the rest spread
+thin across the per-bit path (about 2,600 instructions a bit at IPC 2.2).
+The bytes-identical candidates left are a fused per-bit coder (no indirect
+calls, the intermediates in registers), the runs without their data-dependent
+branches, and a cheaper claim; none of them alone is more than a few percent.
+
 ## Baseline
 
 **Hardware.** AMD Ryzen 5 5600X: 6 cores / 12 threads (SMT siblings 0+6, 1+7 …),

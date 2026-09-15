@@ -8,11 +8,15 @@ with Claude Opus 5 (Claude Code).
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import provenance
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOL = ROOT / "tools" / "provenance.py"
@@ -26,6 +30,16 @@ def run(*args, **kwargs):
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+class MakeVariablesTest(unittest.TestCase):
+    def test_directory_logging_does_not_corrupt_variable_capture(self):
+        """Recursive make exports its directory logging flag into child probes."""
+        with patch.dict(os.environ, {"MAKEFLAGS": "w", "MAKELEVEL": "1"}):
+            variables = provenance.make_variables()
+        self.assertEqual(variables["CC"], "cc")
+        self.assertIn("-std=c99", variables["CFLAGS"])
+        self.assertEqual(variables["LDFLAGS"], "")
 
 
 class SbomTest(unittest.TestCase):

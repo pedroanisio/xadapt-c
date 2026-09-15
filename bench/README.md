@@ -1,9 +1,13 @@
-# Encoding telemetry
+# Historical encoding telemetry
 
 <!-- Implementation authored with Codex (GPT-6); fetch_scripts.py with Claude Opus 5 (Claude Code). Telemetry values are measured by the executable tools. -->
 
-Part of [adapt](../README.md); this directory holds the benchmark and the
-corpus fetcher.
+Part of [adapt](../README.md). These scripts and result bundles are retained
+for historical research. New general benchmark runs belong to the standalone
+codecbench tool. Ordinary codec builds and tests do not load this directory.
+The active codec regression gates and floor data live under `tools/`; the old
+floor files here are historical snapshots. The instructions below describe the
+retained collector, and do not make it a build or test dependency.
 
 `telemetry.py` runs the C encoder against a corpus, keeps every run's evidence,
 and plots all numeric totals and sampled metrics. The default fixture is

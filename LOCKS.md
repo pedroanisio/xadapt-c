@@ -2,6 +2,17 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-14 — benchmark independence and regression-file ownership
+
+General benchmark orchestration belongs to the standalone codecbench project.
+Codec builds and correctness tests do not depend on it or on `bench/`. The
+canonical locked-floor data and checker have moved to `tools/ratio_floor.json`
+and `tools/check_ratio_floor.py`; all numbers and verification rules in the
+existing floor decision are preserved. References to their old `bench/` paths
+below identify retained historical snapshots. `make gate` and `make ratio-floor`
+use the canonical tools. Allocation and adaptive-search correctness stay with
+the codec. No historical measurements or plots are removed by this separation.
+
 ## 2026-09-14 — enwik8 and enwik9 with `--max --allocation context` are floors: size and throughput may only improve
 
 **Decision.** The operator's measurements of `cadapt encode --max --allocation

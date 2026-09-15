@@ -13,6 +13,23 @@ and announced as [SECURITY.md](SECURITY.md) describes.
 
 The binary reports `0.12.0`; the tag is pending.
 
+### Changed
+- The per-bit path of the normal and max profiles is faster and writes the
+  same bytes: on the x86-64-v3 instantiation the twenty-one memories are
+  read, learned and advanced as vectors (the slots' lanes in planes), the
+  four first-layer arbiters are one pass over the inputs with an explicit
+  sign-extending multiply, the block claims test their four tags without a
+  branch per way, the third lane is derived from a per-state mode, and the
+  lines the next nibble's and the next byte's claims will take, the next
+  bit's arbiter sets and estimation rows are prefetched — exactly, from the
+  byte the encoder is coding, over the bits before they are needed. On
+  enwik8 (100 MB, `--max --allocation context`) the container is byte for
+  byte the one before; the measurements are in
+  `docs/performance-audit-2026-09-14.md`. The x86-64-v3 pair is now chosen
+  once per block from a CPU test rather than through an ifunc, and
+  `ADAPT_ISA=baseline` in the environment selects the portable pair, which
+  the CLI tests use to hold the two to the same bytes.
+
 ### Added
 - Folders: a directory is coded as one container and restored byte for
   byte — every file, directory and symbolic link in its place — with

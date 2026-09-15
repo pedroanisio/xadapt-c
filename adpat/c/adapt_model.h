@@ -39,6 +39,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+#ifdef ADAPT_SHADOW_CHECK
+#include <stdio.h>
+#endif
 
 /* predict() and update(), the per-bit path, are compiled twice on x86-64
  * under GCC and Clang: once for the baseline instruction set and once for
@@ -52,9 +55,24 @@
  * dispatch. The fast profile's pair is built for the baseline only, see
  * predict_fast(). */
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && !defined(ADAPT_NO_MULTIVERSION)
-#define ADAPT_MULTIVERSION __attribute__((target_clones("arch=x86-64-v3", "default")))
+/* Each profile's predict() and update() are instantiated twice, the
+ * second with the x86-64-v3 target and the constant `v3` set, so the
+ * arbiters' dot product takes its hand-written AVX2 body (dot_v3) in
+ * that one and the portable body in the other; ADAPT_PROFILE picks the
+ * pair once per block from the CPU test model_new() ran. This replaces
+ * the earlier target_clones dispatch: a clone could not inline an AVX2
+ * intrinsic body without the compiler also emitting it for the
+ * baseline clone, where it does not compile. */
+#define ADAPT_X86_V3 1
+#define ADAPT_TARGET_V3 __attribute__((target("arch=x86-64-v3")))
+#include <immintrin.h>
 #else
-#define ADAPT_MULTIVERSION
+#define ADAPT_X86_V3 0
+#define ADAPT_TARGET_V3
+#endif
+#if ADAPT_X86_V3
+/* Whether this CPU runs the x86-64-v3 instantiations; model_new() sets it. */
+static int adapt_cpu_v3;
 #endif
 
 /* The model's tables live in one arena. On Linux it is an anonymous
@@ -129,6 +147,7 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
 /* Blocks a context may occupy within its cache line: four of sixteen
  * bytes fill the line, and a claim inspects it once. */
 #define WAYS 4
+ADAPT_STATIC_ASSERT(WAYS == 4, claim_reads_four_ways);
 
 /* The hashed context kinds: ten every profile may run, then ten the max
  * profile adds — the previous word with the current one, the first and
@@ -174,7 +193,11 @@ ADAPT_STATIC_ASSERT(sizeof(size_t) >= 4, size_t_holds_a_block);
  * profiles; under the max profile two more — the probability in the
  * linear domain and, for a context that has seen one value only, that
  * value's probability signed by it, so an arbiter can weigh a
- * never-contradicted context apart from a mixed one. */
+ * never-contradicted context apart from a mixed one. The lanes lie in
+ * planes: every context's stretched probability first, then every
+ * context's linear lane, then the third lanes (the order the vector path
+ * stores them in); a weight follows its lane, and a sum of integers is
+ * the same in any order, so the bytes do not depend on the arrangement. */
 #define CTX_LANES(max) ((max) ? 3 : 1)
 /* Inputs a first-layer arbiter takes at most: order-0, the hashed
  * contexts, the runs, recall's two, and a bias, under the max profile. */
@@ -376,6 +399,13 @@ typedef struct state_table {
     uint8_t next[256][2];
     uint8_t n0[256];
     uint8_t n1[256];
+    /* The sign of a state's third arbiter lane under the max profile:
+     * 1 when it has seen ones only, -1 zeros only, 0 for state 0 and
+     * the mixed states (see lane2_of). */
+    int8_t lane2_mode[256];
+    /* next again, by bit then state, for a loop over states with the
+     * bit fixed. */
+    uint8_t next8[2][256];
     unsigned len;
 } state_table;
 
@@ -460,6 +490,11 @@ static inline void state_table_init(state_table *t) {
         t->next[i][0] = (uint8_t)i;
         t->next[i][1] = (uint8_t)i;
     }
+    for (i = 0; i < 256; i++) {
+        t->lane2_mode[i] = (int8_t)(i == 0 ? 0 : (t->n0[i] == 0 ? 1 : (t->n1[i] == 0 ? -1 : 0)));
+        t->next8[0][i] = t->next[i][0];
+        t->next8[1][i] = t->next[i][1];
+    }
 }
 
 /* The probability of a one a state suggests before any learning:
@@ -471,12 +506,30 @@ static inline uint32_t prior_p22(const state_table *t, unsigned s) {
 }
 
 /* A learned probability per state: 22-bit probability in the high bits,
- * 10-bit count below. */
+ * 10-bit count below. Beside each cell, what the arbiters read of it —
+ * the probability in twelve bits, clamped to 1, in the low half, and its
+ * stretch in the high half — refreshed whenever the cell learns, so the
+ * per-bit path takes a context's inputs from one load with no table
+ * lookup behind it (measured a fifth of predict() under the max
+ * profile, twenty contexts of it). */
+/* A context's map cell also carries its state's third-lane mode in the
+ * two count bits the count never reaches (MAP_LIMIT is 255): 1 for a
+ * state that has seen ones only, 2 zeros only, 0 otherwise. The count
+ * arithmetic masks it out and the repack keeps it, so it costs the
+ * vector path nothing to read and saves it a gather. */
+#define CELL_MODE_SHIFT 8
+#define CELL_COUNT_MASK 255u
+
+static inline uint32_t cell_mode_bits(const state_table *t, unsigned s) {
+    int8_t mode = t->lane2_mode[s];
+    return (uint32_t)(mode > 0 ? 1 : (mode < 0 ? 2 : 0)) << CELL_MODE_SHIFT;
+}
+
 static inline void state_map_init(uint32_t *cells, const state_table *t) {
     unsigned s;
     memset(cells, 0, 256 * sizeof(uint32_t));
-    for (s = 0; s < t->len; s++) {
-        cells[s] = prior_p22(t, s) << 10;
+    for (s = 0; s < 256; s++) {
+        cells[s] = (s < t->len ? prior_p22(t, s) << 10 : 0) | cell_mode_bits(t, s);
     }
 }
 
@@ -485,34 +538,41 @@ static inline int32_t map_p12(const uint32_t *cells, uint8_t s) {
     return p > 1 ? p : 1;
 }
 
-/* A memory context's three inputs under the max profile, from its state
- * and its map. */
-static inline void context_lanes_max(int32_t *lane, const int16_t *stretch, const uint32_t *cells, const state_table *t,
-                                     uint8_t s) {
-    int32_t p = map_p12(cells, s);
-    lane[0] = stretch[p];
-    lane[1] = (p - 2048) >> 2;
-    lane[2] = s == 0 ? 0 : (t->n0[s] == 0 ? (p >> 2) : (t->n1[s] == 0 ? -((4096 - p) >> 2) : 0));
+/* The third lane of a memory context under the max profile, from its
+ * probability and the state's precomputed mode (+1 for a state that has
+ * seen ones only, -1 zeros only, 0 for state 0 and every mixed state):
+ * two masked values in place of the three-way test on the counts, which
+ * mispredicted on a fifth of the contexts. */
+static inline int32_t lane2_of(int32_t p, int32_t mode) {
+    int32_t up = p >> 2;
+    int32_t down = -((4096 - p) >> 2);
+    return (up & -(int32_t)(mode > 0)) | (down & -(int32_t)(mode < 0));
 }
 
-/* A memory context's CTX_LANES(max) inputs. */
+/* A memory context's CTX_LANES(max) inputs from its state and its map:
+ * the stretched probability; under the max profile also the probability
+ * in the linear domain and the third lane. */
 static inline ADAPT_ALWAYS_INLINE void context_lanes(int32_t *lane, const int16_t *stretch, const uint32_t *cells,
                                                      const state_table *t, uint8_t s, const int max) {
+    int32_t p = map_p12(cells, s);
+    lane[0] = stretch[p];
     if (max) {
-        context_lanes_max(lane, stretch, cells, t, s);
-    } else {
-        lane[0] = stretch[map_p12(cells, s)];
+        lane[1 + HASHED] = (p - 2048) >> 2;
+        lane[2 * (1 + HASHED)] = lane2_of(p, t->lane2_mode[s]);
     }
 }
 
-/* Learn that `bit` followed `state`; rate[n] is 65536 / (2n + 3). */
+/* Learn that `bit` followed `state`; rate[n] is 65536 / (2n + 3). The
+ * count sits in the low eight bits, whatever the two above hold (a
+ * context map's mode bits; nothing for the run and recall cells). */
 static inline void map_update(uint32_t *cell, uint32_t bit, const int32_t *rate, uint32_t limit) {
-    uint32_t n = *cell & 1023;
-    int32_t p = (int32_t)(*cell >> 10);
+    uint32_t c = *cell;
+    uint32_t n = c & CELL_COUNT_MASK;
+    int32_t p = (int32_t)(c >> 10);
     int32_t target = bit ? (1 << 22) - 1 : 0;
     p = p + ((((target - p) >> 6) * rate[n & (RATE_LEN - 1)]) >> 9);
     n = n + (n < limit);
-    *cell = ((uint32_t)p << 10) | n;
+    *cell = ((uint32_t)p << 10) | (c & (1023u & ~CELL_COUNT_MASK)) | n;
 }
 
 /* ------------------------------------------------------------------------
@@ -710,13 +770,9 @@ typedef struct arbiter_final {
     int32_t n;
 } arbiter_final;
 
-/* A mixer's output in the log-odds domain, clamped to the squash range. */
-static inline int32_t dot(const int32_t *w, const int32_t *x, size_t n) {
-    int64_t acc = 0;
-    size_t i;
-    for (i = 0; i < n; i++) {
-        acc += (int64_t)w[i] * (int64_t)x[i];
-    }
+/* A mixer's output in the log-odds domain, clamped to the squash range:
+ * the 64-bit sum of 32-bit products, shifted. */
+static inline int32_t dot_clamp(int64_t acc) {
     acc >>= 16;
     if (acc < -2047) {
         return -2047;
@@ -725,6 +781,109 @@ static inline int32_t dot(const int32_t *w, const int32_t *x, size_t n) {
         return 2047;
     }
     return (int32_t)acc;
+}
+
+static inline int32_t dot_scalar(const int32_t *w, const int32_t *x, size_t n) {
+    int64_t acc = 0;
+    size_t i;
+    for (i = 0; i < n; i++) {
+        acc += (int64_t)w[i] * (int64_t)x[i];
+    }
+    return dot_clamp(acc);
+}
+
+#if ADAPT_X86_V3
+/* The same sum on eight lanes at a time: the even lanes' products
+ * straight from the sign-extending 32 x 32 -> 64 multiply, the odd
+ * lanes' after a shift down, and the two added into four 64-bit
+ * accumulators. The compiler's own vectorization of dot_scalar
+ * sign-extends every lane through two shuffles before the multiply,
+ * which was a fifth of predict(); this is the same arithmetic in half
+ * the instructions. Two accumulators, so consecutive adds do not wait
+ * on each other. The lanes past a multiple of eight go the scalar way. */
+static inline ADAPT_TARGET_V3 int32_t dot_v3(const int32_t *w, const int32_t *x, size_t n) {
+    __m256i acc0 = _mm256_setzero_si256(), acc1 = _mm256_setzero_si256();
+    __m128i lo;
+    int64_t sum;
+    size_t i, vec = n & ~(size_t)7;
+    for (i = 0; i < vec; i += 8) {
+        __m256i a = _mm256_loadu_si256((const __m256i *)(const void *)(w + i));
+        __m256i b = _mm256_loadu_si256((const __m256i *)(const void *)(x + i));
+        acc0 = _mm256_add_epi64(acc0, _mm256_mul_epi32(a, b));
+        acc1 = _mm256_add_epi64(acc1, _mm256_mul_epi32(_mm256_srli_epi64(a, 32), _mm256_srli_epi64(b, 32)));
+    }
+    acc0 = _mm256_add_epi64(acc0, acc1);
+    lo = _mm_add_epi64(_mm256_castsi256_si128(acc0), _mm256_extracti128_si256(acc0, 1));
+    lo = _mm_add_epi64(lo, _mm_unpackhi_epi64(lo, lo));
+    sum = _mm_cvtsi128_si64(lo);
+    for (; i < n; i++) {
+        sum += (int64_t)w[i] * (int64_t)x[i];
+    }
+    return dot_clamp(sum);
+}
+#endif
+
+#if ADAPT_X86_V3
+/* Four arbiters' dot products over one input vector in a single pass:
+ * the inputs are loaded and split once for all four, and eight
+ * accumulators keep the adds independent. */
+static inline ADAPT_TARGET_V3 void dot4_v3(const int32_t *w1, const int32_t *w2, const int32_t *w3, const int32_t *w4,
+                                           const int32_t *x, size_t n, int32_t out[4]) {
+    __m256i a1 = _mm256_setzero_si256(), b1 = a1, a2 = a1, b2 = a1, a3 = a1, b3 = a1, a4 = a1, b4 = a1;
+    size_t i, vec = n & ~(size_t)7;
+    int64_t s1, s2, s3, s4;
+    for (i = 0; i < vec; i += 8) {
+        __m256i xe = _mm256_loadu_si256((const __m256i *)(const void *)(x + i));
+        __m256i xo = _mm256_srli_epi64(xe, 32);
+        __m256i w;
+        w = _mm256_loadu_si256((const __m256i *)(const void *)(w1 + i));
+        a1 = _mm256_add_epi64(a1, _mm256_mul_epi32(w, xe));
+        b1 = _mm256_add_epi64(b1, _mm256_mul_epi32(_mm256_srli_epi64(w, 32), xo));
+        w = _mm256_loadu_si256((const __m256i *)(const void *)(w2 + i));
+        a2 = _mm256_add_epi64(a2, _mm256_mul_epi32(w, xe));
+        b2 = _mm256_add_epi64(b2, _mm256_mul_epi32(_mm256_srli_epi64(w, 32), xo));
+        w = _mm256_loadu_si256((const __m256i *)(const void *)(w3 + i));
+        a3 = _mm256_add_epi64(a3, _mm256_mul_epi32(w, xe));
+        b3 = _mm256_add_epi64(b3, _mm256_mul_epi32(_mm256_srli_epi64(w, 32), xo));
+        w = _mm256_loadu_si256((const __m256i *)(const void *)(w4 + i));
+        a4 = _mm256_add_epi64(a4, _mm256_mul_epi32(w, xe));
+        b4 = _mm256_add_epi64(b4, _mm256_mul_epi32(_mm256_srli_epi64(w, 32), xo));
+    }
+#define ADAPT_HSUM64(v, out_)                                                                   \
+    do {                                                                                        \
+        __m128i lo_ = _mm_add_epi64(_mm256_castsi256_si128(v), _mm256_extracti128_si256(v, 1)); \
+        lo_ = _mm_add_epi64(lo_, _mm_unpackhi_epi64(lo_, lo_));                                 \
+        out_ = _mm_cvtsi128_si64(lo_);                                                          \
+    } while (0)
+    ADAPT_HSUM64(_mm256_add_epi64(a1, b1), s1);
+    ADAPT_HSUM64(_mm256_add_epi64(a2, b2), s2);
+    ADAPT_HSUM64(_mm256_add_epi64(a3, b3), s3);
+    ADAPT_HSUM64(_mm256_add_epi64(a4, b4), s4);
+#undef ADAPT_HSUM64
+    for (; i < n; i++) {
+        s1 += (int64_t)w1[i] * (int64_t)x[i];
+        s2 += (int64_t)w2[i] * (int64_t)x[i];
+        s3 += (int64_t)w3[i] * (int64_t)x[i];
+        s4 += (int64_t)w4[i] * (int64_t)x[i];
+    }
+    out[0] = dot_clamp(s1);
+    out[1] = dot_clamp(s2);
+    out[2] = dot_clamp(s3);
+    out[3] = dot_clamp(s4);
+}
+#endif
+
+/* The dot product of an instantiation: `v3` is a constant of the
+ * per-bit path, so one body or the other remains. */
+static inline ADAPT_ALWAYS_INLINE int32_t dot(const int32_t *w, const int32_t *x, size_t n, const int v3) {
+#if ADAPT_X86_V3
+    if (v3) {
+        return dot_v3(w, x, n);
+    }
+#else
+    (void)v3;
+#endif
+    return dot_scalar(w, x, n);
 }
 
 /* Move a mixer's weights along the gradient of the coding cost, unless
@@ -767,9 +926,30 @@ typedef struct model {
      * profile. */
     uint8_t o1[O1_BLOCKS][BLOCK];
     size_t blk[HASHED];
+    /* The block of each context for the nibble being coded, as a
+     * pointer, set beside blk by claim_chain(). */
+    uint8_t *base[HASHED];
     /* The cell of each context for the bit being coded, found by predict()
      * and updated by update(). */
     uint8_t *cell[HASHED];
+    /* The memories by slot — 0 the order-0 memory, 1.. the hashed
+     * contexts in slot order — as the vector path reads them: each
+     * slot's block for the nibble, its state for the bit being coded,
+     * and the cell word predict() gathered, which update() learns from.
+     * SLOTS is the count rounded up to the eight-lane loads. */
+#define SLOTS 24
+    uint8_t *cbase[SLOTS];
+    uint8_t cur[SLOTS];
+    uint32_t cellv[SLOTS];
+    /* Whether two hashed contexts share a block this nibble, in which
+     * case the per-bit path runs its scalar loops; see slots_refresh()
+     * and claim_chain(), whose stamp table and stamp these are. */
+    int aliased;
+#define ALIAS_SLOTS 4096
+    uint8_t alias_seen[ALIAS_SLOTS];
+    uint8_t alias_stamp;
+    /* The stretch again as 32-bit words, for the vector path's gather. */
+    int32_t stretch32[4096];
     size_t o0_blk;
     uint64_t h[HASHED];
     /* Three bits per byte, the newest lowest. */
@@ -853,6 +1033,10 @@ typedef struct model {
     uint16_t (*apm2)[APM_BUCKETS];
     size_t apm2_ctx;
     size_t apm2_j;
+    /* The byte's part of the second stage's row and of the fourth
+     * arbiter's set — an order-2 hash and the word hash — computed once
+     * in start_byte() rather than on every bit. */
+    size_t apm2_row, wset4_row;
     /* the current line's bytes and the previous line's, for the record context */
     uint8_t *row;
     uint8_t *prow;
@@ -863,6 +1047,19 @@ typedef struct model {
     uint32_t c0;
     uint32_t bitpos;
     size_t node;
+    /* The byte being coded, when the caller knows it (the encoder does,
+     * the decoder does not): prefetch_byte() takes it at the nibble;
+     * otherwise both values the last bit leaves possible, at bit seven. */
+    uint32_t coding;
+    int coding_known;
+    /* Lines prefetch_byte() and nibble_plan() chose, issued a half at a
+     * time over the following bits. */
+    const uint8_t *planned[HASHED];
+#ifdef ADAPT_SHADOW_CHECK
+    uint64_t shadow_hk[HASHED];
+    uint64_t shadow_rh;
+    int shadow_valid;
+#endif
     /* The arena every table above points into: what was mapped or
      * allocated, and its length, for model_free. */
     void *arena_base;
@@ -946,29 +1143,108 @@ static inline int model_arena(model *m, adapt_sizes sizes) {
 static inline size_t claim(model *m, uint64_t h) {
     size_t base = ((size_t)h & m->table_mask) & ~(size_t)(WAYS - 1);
     uint8_t tag = (uint8_t)(h >> 56);
-    size_t victim = 0, k;
-    unsigned fewest = 255;
-    uint8_t *b;
-    for (k = 0; k < WAYS; k++) {
-        b = m->table + (base + k) * BLOCK;
-        if (b[0] == tag) {
-            return base + k;
-        }
-        if (m->seen[b[1]] < fewest) {
-            fewest = m->seen[b[1]];
-            victim = k;
-        }
+    uint8_t *line = m->table + base * BLOCK;
+    /* The four tags at once, then one branch on the line: the way loop
+     * with a compare-and-return per way was four data-dependent branches
+     * a claim, and the tag of every way is in the one cache line anyway.
+     * The first matching way wins, as the loop's order had it. */
+    unsigned hits = (unsigned)(line[0 * BLOCK] == tag) | (unsigned)(line[1 * BLOCK] == tag) << 1 |
+                    (unsigned)(line[2 * BLOCK] == tag) << 2 | (unsigned)(line[3 * BLOCK] == tag) << 3;
+    if (hits != 0) {
+        size_t k = 0;
+        k += (hits & 1) == 0;
+        k += (hits & 3) == 0;
+        k += (hits & 7) == 0;
+        return base + k;
     }
-    b = m->table + (base + victim) * BLOCK;
-    memset(b, 0, BLOCK);
-    b[0] = tag;
-    return base + victim;
+    {
+        /* A miss: evict the way whose first node has seen the least, the
+         * earliest of equals — the same choice the loop made with its
+         * strict compare against a falling minimum. */
+        unsigned s0 = m->seen[line[0 * BLOCK + 1]], s1 = m->seen[line[1 * BLOCK + 1]],
+                 s2 = m->seen[line[2 * BLOCK + 1]], s3 = m->seen[line[3 * BLOCK + 1]];
+        size_t victim = 0;
+        unsigned fewest = s0 < 255 ? s0 : 255;
+        if (s1 < fewest) {
+            fewest = s1;
+            victim = 1;
+        }
+        if (s2 < fewest) {
+            fewest = s2;
+            victim = 2;
+        }
+        if (s3 < fewest) {
+            victim = 3;
+        }
+        uint8_t *b = line + victim * BLOCK;
+        memset(b, 0, BLOCK);
+        b[0] = tag;
+        return base + victim;
+    }
 }
 
-static inline void claim_chain(model *m) {
+/* Point the slots at their blocks for the nibble and read each one's
+ * state at the first node: after every claim_chain(). Two hashed
+ * contexts can claim one block — their hashes fall in one line and both
+ * miss, so both evict the way with the fewest observations, which the
+ * first claim has just zeroed — and then the scalar path's order shows:
+ * the second context reads the state the first has already moved on.
+ * The vector path reads every state at once, so a nibble with such a
+ * pair takes the scalar path; claim_chain() sets `aliased` to say so. */
+static inline void slots_refresh(model *m) {
     size_t i;
+    const size_t hashed = m->hashed;
+    uint8_t **cbase = m->cbase;
+    uint8_t *cur = m->cur;
+    cbase[0] = m->o0[m->o0_blk & 31];
+    for (i = 0; i < hashed; i++) {
+        cbase[1 + i] = m->base[i];
+    }
+    /* Eight states at a time into one word, one store each: the vector
+     * path loads them eight at a time, which eight byte stores could not
+     * forward to. */
+    for (i = 0; i <= hashed; i += 8) {
+        uint64_t word = 0;
+        size_t k, n = hashed + 1 - i < 8 ? hashed + 1 - i : 8;
+        for (k = 0; k < n; k++) {
+            word |= (uint64_t)cbase[i + k][1] << (8 * k);
+        }
+        memcpy(cur + i, &word, 8);
+    }
+}
+
+
+
+/* Claim every hashed context's block, and find whether two of them are
+ * one block (see slots_refresh): each index stamps a small table on its
+ * low bits with the nibble's stamp, and a stamp already there names a
+ * candidate pair, which the exact scan then settles. A true alias always
+ * stamps twice, so none escapes; a false candidate costs one scan. The
+ * stamps are a byte, cleared when they wrap. */
+static inline void claim_chain(model *m) {
+    size_t i, j;
+    uint8_t stamp;
+    int candidate = 0;
+    if (++m->alias_stamp == 0) {
+        memset(m->alias_seen, 0, sizeof(m->alias_seen));
+        m->alias_stamp = 1;
+    }
+    stamp = m->alias_stamp;
     for (i = 0; i < m->hashed; i++) {
-        m->blk[i] = claim(m, m->h[i]);
+        size_t blk = claim(m, m->h[i]);
+        uint8_t *slot = &m->alias_seen[blk & (ALIAS_SLOTS - 1)];
+        m->blk[i] = blk;
+        m->base[i] = m->table + blk * BLOCK;
+        candidate |= *slot == stamp;
+        *slot = stamp;
+    }
+    m->aliased = 0;
+    if (candidate) {
+        for (i = 1; i < m->hashed; i++) {
+            for (j = 0; j < i; j++) {
+                m->aliased |= m->blk[i] == m->blk[j];
+            }
+        }
     }
 }
 
@@ -978,17 +1254,149 @@ static inline size_t o1_blk(const model *m) {
     return ((size_t)(m->c8 & 0xFF) << 5 | (m->o0_blk & 31)) & (O1_BLOCKS - 1);
 }
 
-static inline void start_byte(model *m, int fast) {
-    uint64_t c = m->c8;
-    uint64_t above, rh;
-    size_t i;
-    m->c0 = 1;
-    m->bitpos = 0;
-    m->node = 1;
-    m->o0_blk = 0;
-    /* Every kind's hash, then the kinds this file runs packed into their
-     * slots; a kind without a slot is not hashed. */
-    uint64_t hk[HASHED];
+/* What the context hashes of a byte are computed from: the byte-level
+ * state end_byte() advances, and the few table reads start_byte() makes
+ * of it. Filled either from the model as it stands (view_now) or as it
+ * will stand after a byte the encoder already knows (view_after), so the
+ * lines the next byte's claims will take can be brought in early. The
+ * second only guides prefetches: a mismatch there costs a wasted line
+ * and nothing else, since the model's bytes never depend on it. */
+typedef struct byte_view {
+    uint64_t c8, n, word, word_lc, word_prev, word_prev2, classes;
+    uint32_t nest_link, nest_tmpl, nest_intag;
+    uint64_t nest_tag, nest_last;
+    uint64_t line_pos;
+    uint32_t field_pos, field_idx;
+    /* what followed the order-2 context c8 & 0xFFFF the last two times */
+    uint16_t followed;
+    /* the line above at line_pos and line_pos + 1, both clamped to the row */
+    uint8_t above0, above1;
+    /* the record period's neighbours, when `periodic` */
+    uint8_t up, corner;
+    int periodic;
+} byte_view;
+
+static inline void view_now(const model *m, byte_view *v) {
+    v->c8 = m->c8;
+    v->n = m->n;
+    v->word = m->word;
+    v->word_lc = m->word_lc;
+    v->word_prev = m->word_prev;
+    v->word_prev2 = m->word_prev2;
+    v->classes = m->classes;
+    v->nest_link = m->nest_link;
+    v->nest_tmpl = m->nest_tmpl;
+    v->nest_intag = m->nest_intag;
+    v->nest_tag = m->nest_tag;
+    v->nest_last = m->nest_last;
+    v->line_pos = m->line_pos;
+    v->field_pos = m->field_pos;
+    v->field_idx = m->field_idx;
+    v->followed = m->followed[m->c8 & 0xFFFF];
+    v->above0 = m->prow[m->line_pos < ROW_MAX - 1 ? m->line_pos : ROW_MAX - 1];
+    v->above1 = m->prow[m->line_pos + 1 < ROW_MAX - 1 ? m->line_pos + 1 : ROW_MAX - 1];
+    v->periodic = m->period != 0 && (size_t)m->n > m->period;
+    v->up = v->periodic ? m->hist[((size_t)m->n - m->period) & m->hmask] : 0;
+    v->corner = v->periodic ? m->hist[((size_t)m->n - m->period - 1) & m->hmask] : 0;
+}
+
+/* The view after end_byte(b): each field moved as end_byte() moves it,
+ * in the same order, the table reads taken from what end_byte() will
+ * have written. */
+static inline void view_after(const model *m, uint8_t b, int fast, byte_view *v) {
+    uint64_t c8 = (m->c8 << 8) | b;
+    uint64_t n = m->n + 1;
+    uint8_t prev = (uint8_t)(m->c8 & 0xFF);
+    size_t idx_written = (size_t)((c8 >> 8) & 0xFFFF), idx_read = (size_t)(c8 & 0xFFFF);
+    uint16_t f = m->followed[idx_read];
+    v->c8 = c8;
+    v->n = n;
+    v->word_prev = m->word_prev;
+    v->word_prev2 = m->word_prev2;
+    if (!is_word_byte(b) && m->word != 0) {
+        v->word_prev2 = m->word_prev;
+        v->word_prev = m->word;
+    }
+    v->word = is_word_byte(b) ? mix64(m->word ^ ((uint64_t)b + 1)) + b : 0;
+    {
+        uint8_t lc = (uint8_t)((b >= 'A' && b <= 'Z') ? b + 32 : b);
+        v->word_lc = is_word_byte(b) ? mix64(m->word_lc ^ ((uint64_t)lc + 1)) + lc : 0;
+    }
+    v->classes = (m->classes << 3) | byte_class(b);
+    v->nest_link = m->nest_link;
+    v->nest_tmpl = m->nest_tmpl;
+    v->nest_intag = m->nest_intag;
+    v->nest_tag = m->nest_tag;
+    v->nest_last = m->nest_last;
+    if (b == '[' && prev == '[' && m->nest_link < 3) {
+        v->nest_link++;
+    } else if (b == ']' && prev == ']' && m->nest_link > 0) {
+        v->nest_link--;
+    } else if (b == '{' && prev == '{' && m->nest_tmpl < 3) {
+        v->nest_tmpl++;
+    } else if (b == '}' && prev == '}' && m->nest_tmpl > 0) {
+        v->nest_tmpl--;
+    } else if (b == '<') {
+        v->nest_intag = 1;
+        v->nest_tag = 0;
+    } else if (b == '>') {
+        if (m->nest_intag) {
+            v->nest_last = m->nest_tag;
+        }
+        v->nest_intag = 0;
+    } else if (m->nest_intag && m->nest_tag != 0xFFFFFFFF && is_word_byte(b)) {
+        v->nest_tag = mix64(m->nest_tag ^ ((uint64_t)b + 1)) + b;
+    } else if (m->nest_intag && (b == ' ' || b == '/')) {
+        v->nest_tag = m->nest_tag != 0 ? m->nest_tag : 0xFFFFFFFF;
+    }
+    v->line_pos = m->line_pos;
+    v->field_pos = m->field_pos;
+    v->field_idx = m->field_idx;
+    v->above0 = v->above1 = 0;
+    if (!fast) {
+        /* the row after b is written at line_pos: on a newline it becomes
+         * the line above, read at 0 and 1; otherwise the line above stays */
+        if (b == '\n') {
+            uint64_t k0 = 0 < ROW_MAX - 1 ? 0 : ROW_MAX - 1, k1 = 1 < ROW_MAX - 1 ? 1 : ROW_MAX - 1;
+            v->above0 = (m->line_pos == k0 && m->line_pos < ROW_MAX) ? b : m->row[k0];
+            v->above1 = (m->line_pos == k1 && m->line_pos < ROW_MAX) ? b : m->row[k1];
+            v->line_pos = 0;
+            v->field_pos = 0;
+            v->field_idx = 0;
+        } else {
+            uint64_t lp = m->line_pos + 1;
+            v->line_pos = lp;
+            v->above0 = m->prow[lp < ROW_MAX - 1 ? lp : ROW_MAX - 1];
+            v->above1 = m->prow[lp + 1 < ROW_MAX - 1 ? lp + 1 : ROW_MAX - 1];
+            if (b == ',' || b == '\t' || b == ';' || b == '|') {
+                v->field_pos = 0;
+                v->field_idx += 1;
+            } else {
+                v->field_pos += 1;
+            }
+        }
+    }
+    /* end_byte() writes what followed the order-2 context before b; the
+     * hash reads the context after it, the same slot when the last three
+     * bytes are one value */
+    if (idx_read == idx_written) {
+        f = (uint16_t)(f << 8 | b);
+    }
+    v->followed = f;
+    v->periodic = m->period != 0 && (size_t)n > m->period;
+    v->up = 0;
+    v->corner = 0;
+    if (v->periodic) {
+        uint64_t iu = n - m->period, ic = n - m->period - 1;
+        v->up = iu == m->n ? b : m->hist[(size_t)iu & m->hmask];
+        v->corner = ic == m->n ? b : m->hist[(size_t)ic & m->hmask];
+    }
+}
+
+/* Every kind's hash from a view, the kinds this file does not run left
+ * 0, and the word run's hash. */
+static inline void hash_kinds(const model *m, const byte_view *v, int fast, uint64_t hk[HASHED], uint64_t *rh) {
+    uint64_t c = v->c8;
     hk[H_O2] = mix64((c & 0xFFFF) | ((uint64_t)2 << 56));
     if (!fast) {
         hk[H_O1] = mix64((c & 0xFF) | ((uint64_t)1 << 56));
@@ -1002,73 +1410,111 @@ static inline void start_byte(model *m, int fast) {
         hk[H_O4] = m->on[H_O4] ? mix64((c & 0xFFFFFFFFull) | ((uint64_t)4 << 56)) : 0;
         hk[H_O6] = 0;
     }
-    hk[H_WORD] = m->on[H_WORD] ? mix64(m->word != 0 ? m->word : ((c & 0xFF) | ((uint64_t)7 << 56))) : 0;
-    if (m->period != 0 && (size_t)m->n > m->period) {
+    hk[H_WORD] = m->on[H_WORD] ? mix64(v->word != 0 ? v->word : ((c & 0xFF) | ((uint64_t)7 << 56))) : 0;
+    if (v->periodic) {
         /* A record period: the byte one period back (above), the byte
          * before it (the corner) and the previous byte (left) stand in for
          * the line above; the gradient above + left - corner is the
          * predictor a raw image's pixels follow. */
-        uint64_t up = m->hist[((size_t)m->n - m->period) & m->hmask];
-        uint64_t corner = m->hist[((size_t)m->n - m->period - 1) & m->hmask];
+        uint64_t up = v->up;
+        uint64_t corner = v->corner;
         uint64_t left = c & 0xFF;
         int64_t g = (int64_t)up + (int64_t)left - (int64_t)corner;
         uint64_t gradient = (uint64_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
         hk[H_FIELD] = m->on[H_FIELD] ? mix64((gradient >> 1) | (up >> 4) << 8 | (left >> 4) << 12 | ((uint64_t)8 << 56)) : 0;
         hk[H_RECORD] = m->on[H_RECORD] ? mix64(up | left << 8 | (corner >> 2) << 16 | ((uint64_t)15 << 56)) : 0;
     } else {
-        hk[H_FIELD] = m->on[H_FIELD] ? mix64((uint64_t)(m->field_pos < 31 ? m->field_pos : 31) |
-                                             (uint64_t)(m->field_idx < 63 ? m->field_idx : 63) << 5 | (c & 0xFF) << 11 |
+        hk[H_FIELD] = m->on[H_FIELD] ? mix64((uint64_t)(v->field_pos < 31 ? v->field_pos : 31) |
+                                             (uint64_t)(v->field_idx < 63 ? v->field_idx : 63) << 5 | (c & 0xFF) << 11 |
                                              ((uint64_t)8 << 56))
                                      : 0;
-        above = m->prow[m->line_pos < ROW_MAX - 1 ? m->line_pos : ROW_MAX - 1];
-        hk[H_RECORD] = m->on[H_RECORD]
-                           ? mix64(above | (uint64_t)m->prow[m->line_pos + 1 < ROW_MAX - 1 ? m->line_pos + 1 : ROW_MAX - 1] << 8 |
-                                   (c & 0xFF) << 16 | (uint64_t)(m->field_idx < 63 ? m->field_idx : 63) << 24 | ((uint64_t)15 << 56))
-                           : 0;
+        hk[H_RECORD] = m->on[H_RECORD] ? mix64((uint64_t)v->above0 | (uint64_t)v->above1 << 8 | (c & 0xFF) << 16 |
+                                               (uint64_t)(v->field_idx < 63 ? v->field_idx : 63) << 24 | ((uint64_t)15 << 56))
+                                       : 0;
     }
     hk[H_SPARSE] = m->on[H_SPARSE] ? mix64((c & 0xFFFF0000ull) | ((uint64_t)10 << 56)) : 0;
-    hk[H_CLASS] = m->class_bits != 0 ? mix64((m->classes & (((uint64_t)1 << m->class_bits) - 1)) | ((uint64_t)11 << 56)) : 0;
+    hk[H_CLASS] = m->class_bits != 0 ? mix64((v->classes & (((uint64_t)1 << m->class_bits) - 1)) | ((uint64_t)11 << 56)) : 0;
     /* the max profile's kinds; off under the others, so never hashed */
-    hk[H_WORD2] = m->on[H_WORD2] ? mix64((m->word_prev * 0x9E3779B97F4A7C15ull) ^ (m->word != 0 ? m->word : (c & 0xFF)) ^
+    hk[H_WORD2] = m->on[H_WORD2] ? mix64((v->word_prev * 0x9E3779B97F4A7C15ull) ^ (v->word != 0 ? v->word : (c & 0xFF)) ^
                                          ((uint64_t)12 << 56))
                                  : 0;
     hk[H_SPARSE2] = m->on[H_SPARSE2] ? mix64((c & 0xFF00FFull) | ((uint64_t)14 << 56)) : 0;
-    hk[H_INDIRECT] = m->on[H_INDIRECT]
-                         ? mix64((c & 0xFFFF) | (uint64_t)m->followed[c & 0xFFFF] << 16 | ((uint64_t)16 << 56))
-                         : 0;
+    hk[H_INDIRECT] = m->on[H_INDIRECT] ? mix64((c & 0xFFFF) | (uint64_t)v->followed << 16 | ((uint64_t)16 << 56)) : 0;
     hk[H_NIBBLES] = m->on[H_NIBBLES] ? mix64((c & 0xF0F0F0F0ull) | ((uint64_t)18 << 56)) : 0;
     hk[H_NEST] = m->on[H_NEST]
-                     ? mix64((uint64_t)(m->nest_link & 3) | (uint64_t)(m->nest_tmpl & 3) << 2 | (uint64_t)m->nest_intag << 4 |
-                             ((m->nest_intag ? m->nest_tag : m->nest_last) & 0xFFFFFF) << 8 | (c & 0xFF) << 32 |
+                     ? mix64((uint64_t)(v->nest_link & 3) | (uint64_t)(v->nest_tmpl & 3) << 2 | (uint64_t)v->nest_intag << 4 |
+                             ((v->nest_intag ? v->nest_tag : v->nest_last) & 0xFFFFFF) << 8 | (c & 0xFF) << 32 |
                              ((uint64_t)19 << 56))
                      : 0;
     hk[H_O5] = m->on[H_O5] ? mix64((c & 0xFFFFFFFFFFull) | ((uint64_t)5 << 56)) : 0;
     hk[H_O8] = m->on[H_O8] ? mix64(c ^ ((uint64_t)20 << 56)) : 0;
-    hk[H_WORDLC] = m->on[H_WORDLC] ? mix64((m->word_lc != 0 ? m->word_lc : (c & 0xFF)) ^ ((uint64_t)22 << 56)) : 0;
-    hk[H_WORD3] = m->on[H_WORD3] ? mix64((m->word_prev2 * 0x9E3779B97F4A7C15ull + m->word_prev) ^
-                                         (m->word != 0 ? m->word : (c & 0xFF)) ^ ((uint64_t)23 << 56))
+    hk[H_WORDLC] = m->on[H_WORDLC] ? mix64((v->word_lc != 0 ? v->word_lc : (c & 0xFF)) ^ ((uint64_t)22 << 56)) : 0;
+    hk[H_WORD3] = m->on[H_WORD3] ? mix64((v->word_prev2 * 0x9E3779B97F4A7C15ull + v->word_prev) ^
+                                         (v->word != 0 ? v->word : (c & 0xFF)) ^ ((uint64_t)23 << 56))
                                  : 0;
-    hk[H_WORDC] = m->on[H_WORDC] ? mix64((m->word != 0 ? m->word : (c & 0xFF)) ^ (uint64_t)(m->classes & 0x1FF) << 40 ^
+    hk[H_WORDC] = m->on[H_WORDC] ? mix64((v->word != 0 ? v->word : (c & 0xFF)) ^ (uint64_t)(v->classes & 0x1FF) << 40 ^
                                          ((uint64_t)24 << 56))
                                  : 0;
+    *rh = mix64(v->word != 0 ? (v->word ^ ((uint64_t)13 << 56)) : ((c & 0xFF) | ((uint64_t)13 << 56)));
+}
+
+/* The runs' slots and tags from the hashes: order-2 and the word for
+ * every profile, the max profile's four more on order-1, -3, -4 and -6,
+ * which every set keeps. */
+static inline void run_slots(const model *m, const uint64_t hk[HASHED], uint64_t rh, uint64_t c8, size_t ridx[RUNS],
+                             uint32_t rtag[RUNS]) {
+    static const uint8_t RUN_KINDS[RUNS - BASE_RUNS] = {H_O1, H_O3, H_O4, H_O6};
+    size_t i;
+    ridx[0] = (size_t)(c8 & 0xFFFF);
+    ridx[1] = RUN_SLOTS + ((size_t)rh & (RUN_SLOTS - 1));
+    rtag[0] = 1;
+    rtag[1] = ((uint32_t)(rh >> 40) & 0xFF) | 1;
+    if (m->runs > BASE_RUNS) {
+        for (i = 0; i < RUNS - BASE_RUNS; i++) {
+            uint64_t h = hk[RUN_KINDS[i]];
+            ridx[BASE_RUNS + i] = RUN_SLOTS * (BASE_RUNS + i) + ((size_t)h & (RUN_SLOTS - 1));
+            rtag[BASE_RUNS + i] = ((uint32_t)(h >> 40) & 0xFF) | 1;
+        }
+    }
+}
+
+static inline void start_byte(model *m, int fast) {
+    uint64_t c = m->c8;
+    uint64_t rh;
+    size_t i;
+    byte_view v;
+    /* Every kind's hash, then the kinds this file runs packed into their
+     * slots; a kind without a slot is not hashed. */
+    uint64_t hk[HASHED];
+    m->c0 = 1;
+    m->bitpos = 0;
+    m->node = 1;
+    m->o0_blk = 0;
+    view_now(m, &v);
+    hash_kinds(m, &v, fast, hk, &rh);
+#ifdef ADAPT_SHADOW_CHECK
+    /* A check build: the view prefetch_byte() advanced for this byte must
+     * agree with the real one, hash for hash, or the prefetch is aimed
+     * wrong — a speed fault, never a bytes fault, but one to catch. */
+    if (m->shadow_valid) {
+        for (i = 0; i < m->hashed; i++) {
+            if (m->shadow_hk[m->kind[i]] != hk[m->kind[i]]) {
+                fprintf(stderr, "shadow hash mismatch: kind %s at byte %llu\n", CONTEXT_NAMES[m->kind[i]],
+                        (unsigned long long)m->n);
+                abort();
+            }
+        }
+        if (m->shadow_rh != rh) {
+            fprintf(stderr, "shadow run hash mismatch at byte %llu\n", (unsigned long long)m->n);
+            abort();
+        }
+        m->shadow_valid = 0;
+    }
+#endif
     for (i = 0; i < m->hashed; i++) {
         m->h[i] = hk[m->kind[i]];
     }
-    rh = mix64(m->word != 0 ? (m->word ^ ((uint64_t)13 << 56)) : ((c & 0xFF) | ((uint64_t)13 << 56)));
-    m->ridx[0] = (size_t)(c & 0xFFFF);
-    m->ridx[1] = RUN_SLOTS + ((size_t)rh & (RUN_SLOTS - 1));
-    m->rtag[0] = 1;
-    m->rtag[1] = ((uint32_t)(rh >> 40) & 0xFF) | 1;
-    if (m->runs > BASE_RUNS) {
-        /* the max profile's runs, on the hashes of order-1, -3, -4 and -6,
-         * which every set keeps */
-        static const uint8_t RUN_KINDS[RUNS - BASE_RUNS] = {H_O1, H_O3, H_O4, H_O6};
-        for (i = 0; i < RUNS - BASE_RUNS; i++) {
-            uint64_t h = hk[RUN_KINDS[i]];
-            m->ridx[BASE_RUNS + i] = RUN_SLOTS * (BASE_RUNS + i) + ((size_t)h & (RUN_SLOTS - 1));
-            m->rtag[BASE_RUNS + i] = ((uint32_t)(h >> 40) & 0xFF) | 1;
-        }
-    }
+    run_slots(m, hk, rh, c, m->ridx, m->rtag);
     for (i = 0; i < m->runs; i++) {
         uint32_t e;
         if (!RUN_ON(fast, i)) {
@@ -1085,6 +1531,69 @@ static inline void start_byte(model *m, int fast) {
         }
     }
     claim_chain(m);
+    slots_refresh(m);
+    m->apm2_row = ((size_t)(mix64((c & 0xFFFF) | ((uint64_t)21 << 56)) >> 46) & 0x3FF) << 8;
+    m->wset4_row = ((size_t)(mix64(m->word + 1) >> 48) & 0xFF) * 256;
+}
+
+static inline size_t recall_key(uint64_t c8, size_t mmask);
+
+/* Bring in what the byte after `b` will touch first: the line of every
+ * hashed context's claim, the runs' slots, the recall slot, the first
+ * rows of both estimation stages and the first sets of the arbiters
+ * keyed by hashes — all from the view after b, none of it changing the
+ * model. The encoder calls this with the byte it is coding, once its
+ * high nibble has been coded; the decoder with both values the last bit
+ * can take. */
+static inline void prefetch_byte(model *m, uint8_t b, int fast, int now) {
+    byte_view v;
+    uint64_t hk[HASHED], rh;
+    size_t ridx[RUNS];
+    uint32_t rtag[RUNS];
+    size_t i;
+    view_after(m, b, fast, &v);
+    hash_kinds(m, &v, fast, hk, &rh);
+#ifdef ADAPT_SHADOW_CHECK
+    if (m->coding_known) {
+        memcpy(m->shadow_hk, hk, sizeof(hk));
+        m->shadow_rh = rh;
+        m->shadow_valid = 1;
+    }
+#endif
+    /* The claims' lines: issued now, or kept for the caller to issue a
+     * few at a time — a burst of forty outstanding misses is more than
+     * the core's fill buffers hold, and the rest of a burst is lost. */
+    for (i = 0; i < m->hashed; i++) {
+        uint64_t h = hk[m->kind[i]];
+        m->planned[i] = m->table + (((size_t)h & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK;
+        if (now) {
+            ADAPT_PREFETCH(m->planned[i]);
+        }
+    }
+    run_slots(m, hk, rh, v.c8, ridx, rtag);
+    for (i = 0; i < m->runs; i++) {
+        if (RUN_ON(fast, i)) {
+            ADAPT_PREFETCH(&m->rtab[ridx[i]]);
+        }
+    }
+    if (v.n >= MATCH_MIN) {
+        ADAPT_PREFETCH(&m->mtab[recall_key(v.c8, m->mmask)]);
+    }
+    ADAPT_PREFETCH(&m->followed[v.c8 & 0xFFFF]);
+    if (!fast) {
+        size_t row2 = ((size_t)(mix64((v.c8 & 0xFFFF) | ((uint64_t)21 << 56)) >> 46) & 0x3FF) << 8;
+        size_t w3 = (((size_t)(hk[H_O2] >> 48) & 0xFF) * 256 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
+        size_t w4 = (((size_t)(mix64(v.word + 1) >> 48) & 0xFF) * 256 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
+        size_t k;
+        ADAPT_PREFETCH(m->apm[((size_t)b << 8 | 1) & (APM_CONTEXTS - 1)]);
+        ADAPT_PREFETCH((const char *)m->apm[((size_t)b << 8 | 1) & (APM_CONTEXTS - 1)] + 64);
+        ADAPT_PREFETCH(m->apm2[(row2 | 1) & (APM2_CONTEXTS(m->max) - 1)]);
+        ADAPT_PREFETCH((const char *)m->apm2[(row2 | 1) & (APM2_CONTEXTS(m->max) - 1)] + 64);
+        for (k = 0; k < (size_t)ARBITER_STRIDE(0, m->max) * sizeof(int32_t); k += 64) {
+            ADAPT_PREFETCH((const char *)(m->weights3 + w3) + k);
+            ADAPT_PREFETCH((const char *)(m->weights4 + w4) + k);
+        }
+    }
 }
 
 static inline size_t recall_key(uint64_t c8, size_t mmask) {
@@ -1226,21 +1735,135 @@ static inline void skip_bytes(model *m, const uint8_t *bytes, size_t len) {
     m->mmiss = 0;
 }
 
+#if ADAPT_X86_V3
+/* The max profile's context inputs, eight slots at a time: the cell of
+ * every slot's state gathered from its map, the probability and its
+ * stretch, the linear lane and the third lane, into the three planes of
+ * st[] — the stretched probabilities of the slots first, then their
+ * linear lanes, then their third lanes. The three groups cover 24 slots,
+ * so each plane's stores run three past the last slot into the next
+ * plane, which is stored after it and puts its own values there; the
+ * runs' lanes after the last plane are written by the caller, after
+ * this. Slots a file's context set leaves out are zeroed at the end, as
+ * the scalar path leaves them. */
+static inline ADAPT_TARGET_V3 void context_lanes_v3(model *m) {
+    const int *cells = (const int *)&m->maps[0][0];
+    const __m256i one = _mm256_set1_epi32(1), c512 = _mm256_set1_epi32(512), c4096 = _mm256_set1_epi32(4096);
+    const __m256i zero = _mm256_setzero_si256(), two = _mm256_set1_epi32(2), three = _mm256_set1_epi32(3);
+    __m256i l1[3], l2[3];
+    int g;
+    size_t i;
+    for (g = 0; g < 3; g++) {
+        /* the eight cells by scalar loads: a gather is microcoded on the
+         * cores this runs on, and dearer than the inserts */
+        const uint8_t *cur = m->cur + 8 * g;
+        const int *row = cells + g * 8 * 256;
+        __m256i c = _mm256_setr_epi32(row[0 * 256 + cur[0]], row[1 * 256 + cur[1]], row[2 * 256 + cur[2]],
+                                      row[3 * 256 + cur[3]], row[4 * 256 + cur[4]], row[5 * 256 + cur[5]],
+                                      row[6 * 256 + cur[6]], row[7 * 256 + cur[7]]);
+        __m256i p = _mm256_max_epi32(_mm256_srli_epi32(c, 20), one);
+        __m256i q = _mm256_srai_epi32(p, 2);
+        __m256i mode = _mm256_and_si256(_mm256_srli_epi32(c, CELL_MODE_SHIFT), three);
+        __m256i down = _mm256_sub_epi32(zero, _mm256_srai_epi32(_mm256_sub_epi32(c4096, p), 2));
+        _mm256_storeu_si256((__m256i *)(void *)(m->cellv + 8 * g), c);
+        _mm256_storeu_si256((__m256i *)(void *)(m->st + 8 * g), _mm256_i32gather_epi32(m->stretch32, p, 4));
+        l1[g] = _mm256_sub_epi32(q, c512);
+        l2[g] = _mm256_or_si256(_mm256_and_si256(q, _mm256_cmpeq_epi32(mode, one)),
+                                _mm256_and_si256(down, _mm256_cmpeq_epi32(mode, two)));
+    }
+    for (g = 0; g < 3; g++) {
+        _mm256_storeu_si256((__m256i *)(void *)(m->st + (1 + HASHED) + 8 * g), l1[g]);
+    }
+    for (g = 0; g < 3; g++) {
+        _mm256_storeu_si256((__m256i *)(void *)(m->st + 2 * (1 + HASHED) + 8 * g), l2[g]);
+    }
+    {
+        int32_t *st_ = m->st;
+        const size_t from = 1 + m->hashed;
+        for (i = from; i <= HASHED; i++) {
+            st_[i] = 0;
+            st_[(1 + HASHED) + i] = 0;
+            st_[2 * (1 + HASHED) + i] = 0;
+        }
+    }
+}
+
+/* Learn `bit` into every slot's cell, eight at a time from the words
+ * predict() gathered, and move each slot's state on: the same arithmetic
+ * as map_update() and the transition table, the results written back
+ * one slot at a time. */
+static inline ADAPT_TARGET_V3 void memories_learn_v3(model *m, uint32_t bit, size_t node, size_t node_next) {
+    uint32_t *cells = &m->maps[0][0];
+    const __m256i target = _mm256_set1_epi32(bit ? (1 << 22) - 1 : 0);
+    const __m256i m255 = _mm256_set1_epi32((int)CELL_COUNT_MASK), c255 = _mm256_set1_epi32(255);
+    const __m256i modebits = _mm256_set1_epi32(3 << CELL_MODE_SHIFT);
+    const uint8_t *next = m->states.next8[bit];
+    uint32_t learned[SLOTS];
+    uint8_t *const *cbase = m->cbase;
+    uint8_t *cur = m->cur;
+    const size_t slots = 1 + m->hashed;
+    int g;
+    size_t i;
+    for (g = 0; g < 3; g++) {
+        __m256i c = _mm256_loadu_si256((const __m256i *)(const void *)(m->cellv + 8 * g));
+        __m256i n = _mm256_and_si256(c, m255);
+        __m256i p = _mm256_srli_epi32(c, 10);
+        __m256i d = _mm256_srai_epi32(_mm256_sub_epi32(target, p), 6);
+        __m256i r = _mm256_i32gather_epi32(m->rate, n, 4);
+        __m256i p2 = _mm256_add_epi32(p, _mm256_srai_epi32(_mm256_mullo_epi32(d, r), 9));
+        __m256i n2 = _mm256_sub_epi32(n, _mm256_cmpgt_epi32(c255, n));
+        __m256i keep = _mm256_and_si256(c, modebits);
+        _mm256_storeu_si256((__m256i *)(void *)(learned + 8 * g),
+                            _mm256_or_si256(_mm256_or_si256(_mm256_slli_epi32(p2, 10), keep), n2));
+    }
+    /* Write back, and read each slot's state at the next node for the
+     * next bit — at a boundary slots_refresh() replaces it. The next
+     * states are gathered into a register and stored eight at a time:
+     * eight byte stores followed by the eight-byte load predict() makes
+     * of them cannot be forwarded and would wait for every one to
+     * commit. The state stores are bytes, which could alias anything,
+     * so the bounds and pointers are locals. */
+    for (g = 0; g < 3; g++) {
+        uint64_t word = 0;
+        size_t base = (size_t)g * 8, k, n;
+        if (base >= slots) {
+            break;
+        }
+        n = slots - base < 8 ? slots - base : 8;
+        for (k = 0; k < n; k++) {
+            uint8_t *blk = cbase[base + k];
+            uint8_t s = cur[base + k];
+            cells[(base + k) * 256 + s] = learned[base + k];
+            blk[node] = next[s];
+            word |= (uint64_t)blk[node_next] << (8 * k);
+        }
+        memcpy(cur + base, &word, 8);
+    }
+    (void)i;
+}
+#endif
+
 /* Probability, in 1..=4095, that the next bit is one. The body, with the
  * profile a constant; predict() and predict_fast() below are its two
  * instantiations, each compiled per instruction set. */
-static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast, const int max) {
+static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast, const int max, const int v3) {
     size_t node = m->node & (BLOCK - 1);
     const int16_t *st = m->stretch;
-    size_t mask = m->table_mask;
     size_t i, mstate, ctx, j, key;
     int32_t m_sm = 0, m_fixed = 0, s, w, a, b, papm, p;
     const uint16_t *row;
-    context_lanes(m->st, st, m->maps[0], &m->states, m->o0[m->o0_blk & 31][node], max);
-    for (i = 0; i < m->hashed; i++) {
-        uint8_t *cell = m->table + (m->blk[i] & mask) * BLOCK + node;
-        m->cell[i] = cell;
-        context_lanes(m->st + CTX_LANES(max) * (1 + i), st, m->maps[1 + i], &m->states, *cell, max);
+#if ADAPT_X86_V3
+    if (max && v3 && !m->aliased) {
+        context_lanes_v3(m);
+    } else
+#endif
+    {
+        context_lanes(m->st, st, m->maps[0], &m->states, m->o0[m->o0_blk & 31][node], max);
+        for (i = 0; i < m->hashed; i++) {
+            uint8_t *cell = m->base[i] + node;
+            m->cell[i] = cell;
+            context_lanes(m->st + 1 + i, st, m->maps[1 + i], &m->states, *cell, max);
+        }
     }
     /* runs: the byte that followed this context last time, while its bits
      * so far agree with the byte being coded */
@@ -1293,9 +1916,9 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
      * answer and two of those bits. */
     key = fast ? ((size_t)(m->rcnt[1] > 0) << 2 | (size_t)((m->c8 >> 6) & 3)) : (size_t)((m->c8 >> 5) & 7);
     m->wset = (mstate * 8 + key) * 256 + (m->c0 & 255);
-    m->pmix = m->squashed[dot(m->weights + m->wset * ARBITER_STRIDE(fast, max), m->st, LANES(fast, max)) + 2047];
     if (fast) {
         /* the fast profile: one arbiter is the whole verdict */
+        m->pmix = m->squashed[dot(m->weights + m->wset * ARBITER_STRIDE(fast, max), m->st, LANES(fast, max), v3) + 2047];
         m->pfinal = m->pmix;
         p = m->pfinal;
         if (p < 1) {
@@ -1306,16 +1929,30 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
         }
         return (uint32_t)p;
     }
-    /* second arbiter: weights by the previous byte */
+    /* second arbiter: weights by the previous byte; third and fourth: by
+     * eight bits of the order-2 hash (slot 1 holds order-2 under every
+     * set) and of the word hash, each with the partial byte */
     m->wset2 = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (size_t)(m->c8 & 0xFF);
-    m->pmix2 = m->squashed[dot(m->weights2 + m->wset2 * ARBITER_STRIDE(0, max), m->st, LANES(0, max)) + 2047];
-    /* third and fourth arbiters: by eight bits of the order-2 hash (slot 1
-     * holds order-2 under every set) and of the word hash, each with the
-     * partial byte */
     m->wset3 = ((size_t)(m->h[1] >> 48) & 0xFF) * 256 + (m->c0 & 255);
-    m->pmix3 = m->squashed[dot(m->weights3 + m->wset3 * ARBITER_STRIDE(0, max), m->st, LANES(0, max)) + 2047];
-    m->wset4 = ((size_t)(mix64(m->word + 1) >> 48) & 0xFF) * 256 + (m->c0 & 255);
-    m->pmix4 = m->squashed[dot(m->weights4 + m->wset4 * ARBITER_STRIDE(0, max), m->st, LANES(0, max)) + 2047];
+    m->wset4 = m->wset4_row + (m->c0 & 255);
+#if ADAPT_X86_V3
+    if (v3) {
+        int32_t d[4];
+        dot4_v3(m->weights + m->wset * ARBITER_STRIDE(0, max), m->weights2 + m->wset2 * ARBITER_STRIDE(0, max),
+                m->weights3 + m->wset3 * ARBITER_STRIDE(0, max), m->weights4 + m->wset4 * ARBITER_STRIDE(0, max), m->st,
+                LANES(0, max), d);
+        m->pmix = m->squashed[d[0] + 2047];
+        m->pmix2 = m->squashed[d[1] + 2047];
+        m->pmix3 = m->squashed[d[2] + 2047];
+        m->pmix4 = m->squashed[d[3] + 2047];
+    } else
+#endif
+    {
+        m->pmix = m->squashed[dot(m->weights + m->wset * ARBITER_STRIDE(0, max), m->st, LANES(0, max), v3) + 2047];
+        m->pmix2 = m->squashed[dot(m->weights2 + m->wset2 * ARBITER_STRIDE(0, max), m->st, LANES(0, max), v3) + 2047];
+        m->pmix3 = m->squashed[dot(m->weights3 + m->wset3 * ARBITER_STRIDE(0, max), m->st, LANES(0, max), v3) + 2047];
+        m->pmix4 = m->squashed[dot(m->weights4 + m->wset4 * ARBITER_STRIDE(0, max), m->st, LANES(0, max), v3) + 2047];
+    }
     /* final arbiter: weights by the partial byte */
     m->stf[0] = st[m->pmix];
     m->stf[1] = st[m->pmix2];
@@ -1323,7 +1960,7 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     m->stf[3] = st[m->pmix4];
     m->stf[4] = 256;
     m->wsetf = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (m->c0 & 255);
-    m->pfinal = m->squashed[dot(m->wfinal[m->wsetf].w, m->stf, FINAL_INPUTS) + 2047];
+    m->pfinal = m->squashed[dot(m->wfinal[m->wsetf].w, m->stf, FINAL_INPUTS, 0) + 2047];
     /* secondary estimation keyed by the previous byte and the partial
      * byte, and a second stage keyed by an order-2 hash with the partial
      * byte, averaged; three parts of it to one of the arbiters' verdict */
@@ -1338,8 +1975,7 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     b = row[j + 1];
     papm = (a * (128 - w) + b * w) >> 11;
     {
-        size_t ctx2 = (((size_t)(mix64((m->c8 & 0xFFFF) | ((uint64_t)21 << 56)) >> 46) & 0x3FF) << 8 | m->c0) &
-                      (APM2_CONTEXTS(max) - 1);
+        size_t ctx2 = (m->apm2_row | m->c0) & (APM2_CONTEXTS(max) - 1);
         const uint16_t *row2 = m->apm2[ctx2];
         int32_t papm2 = ((int32_t)row2[j] * (128 - w) + (int32_t)row2[j + 1] * w) >> 11;
         m->apm2_ctx = ctx2;
@@ -1356,31 +1992,84 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     return (uint32_t)p;
 }
 
-static ADAPT_MULTIVERSION uint32_t predict(model *m) {
-    return predict_impl(m, 0, 0);
+static uint32_t predict(model *m) {
+    return predict_impl(m, 0, 0, 0);
 }
 
 /* The max profile's path, compiled like the normal one. */
-static ADAPT_MULTIVERSION uint32_t predict_max(model *m) {
-    return predict_impl(m, 0, 1);
+static uint32_t predict_max(model *m) {
+    return predict_impl(m, 0, 1, 0);
 }
+
+#if ADAPT_X86_V3
+static ADAPT_TARGET_V3 uint32_t predict_v3(model *m) {
+    return predict_impl(m, 0, 0, 1);
+}
+
+static ADAPT_TARGET_V3 uint32_t predict_max_v3(model *m) {
+    return predict_impl(m, 0, 1, 1);
+}
+#endif
 
 /* The fast profile's path is short and scalar: compiled for the wide
  * instruction set it ran 15 % slower here (eight lanes do not pay for the
  * widening multiplies), so it is built once, for the baseline. */
 static uint32_t predict_fast(model *m) {
-    return predict_impl(m, 1, 0);
+    return predict_impl(m, 1, 0, 0);
+}
+
+/* The lines the second nibble's claims will take when the nibble is
+ * known — the encoder's case — into `planned`, from the same salt the
+ * claims will use. */
+static inline void nibble_plan(model *m, uint64_t hi) {
+    uint64_t salt = (hi + 1) * 0x2545F4914F6CDD1Dull;
+    size_t i;
+    for (i = 0; i < m->hashed; i++) {
+        uint64_t x = (m->h[i] + salt) * 0x9E3779B97F4A7C15ull;
+        m->planned[i] = m->table + (((size_t)(x ^ (x >> 29)) & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK;
+    }
+}
+
+/* Issue half of the planned lines: the first half or the second. */
+static inline void issue_planned(const model *m, int second) {
+    size_t half = (m->hashed + 1) / 2;
+    size_t i, from = second ? half : 0, to = second ? m->hashed : half;
+    for (i = from; i < to; i++) {
+        ADAPT_PREFETCH(m->planned[i]);
+    }
 }
 
 /* Learn from `bit`, which must be the bit predict() was asked about. The
  * body, as for predict_impl. */
-static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const int fast, const int max) {
+static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const int fast, const int max, const int v3) {
     int32_t target, g, v;
     uint16_t *row;
     size_t j, node, o0_blk, i;
     uint8_t s0;
+    (void)v3;
     bit &= 1;
     target = (int32_t)(bit << 12);
+    if (!fast && m->bitpos < 7) {
+        /* The next bit's partial byte is known now, and with it the sets
+         * of the arbiters keyed by it and the rows of both estimation
+         * stages: bring them in while this bit's learning runs. The third
+         * and fourth arbiters' tables are 19 MiB each and the second
+         * stage's 17 MiB, so a set or row is rarely still in cache. */
+        size_t c0n = (m->c0 << 1) | bit;
+        const int32_t *w3 = m->weights3 + (m->wset3 - (m->c0 & 255) + c0n) * ARBITER_STRIDE(0, max);
+        const int32_t *w4 = m->weights4 + (m->wset4_row + c0n) * ARBITER_STRIDE(0, max);
+        const int32_t *w1 = m->weights + (m->wset - (m->c0 & 255) + c0n) * ARBITER_STRIDE(fast, max);
+        size_t k;
+        for (k = 0; k < (size_t)ARBITER_STRIDE(0, max) * sizeof(int32_t); k += 64) {
+            ADAPT_PREFETCH((const char *)w3 + k);
+            ADAPT_PREFETCH((const char *)w4 + k);
+            ADAPT_PREFETCH((const char *)w1 + k);
+        }
+        ADAPT_PREFETCH(m->apm[(((size_t)(m->c8 & 0xFF) << 8) | c0n) & (APM_CONTEXTS - 1)]);
+        ADAPT_PREFETCH((const char *)m->apm[(((size_t)(m->c8 & 0xFF) << 8) | c0n) & (APM_CONTEXTS - 1)] + 64);
+        ADAPT_PREFETCH(m->apm2[(m->apm2_row | c0n) & (APM2_CONTEXTS(max) - 1)]);
+        ADAPT_PREFETCH((const char *)m->apm2[(m->apm2_row | c0n) & (APM2_CONTEXTS(max) - 1)] + 64);
+    }
     /* arbiters */
     {
         int32_t *w = m->weights + m->wset * ARBITER_STRIDE(fast, max);
@@ -1413,20 +2102,27 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
     /* memories */
     node = m->node & (BLOCK - 1);
     o0_blk = m->o0_blk & 31;
-    s0 = m->o0[o0_blk][node];
-    map_update(&m->maps[0][s0], bit, m->rate, MAP_LIMIT);
-    m->o0[o0_blk][node] = m->states.next[s0][bit];
-    if (fast) {
-        size_t o1b = o1_blk(m);
-        uint8_t s1 = m->o1[o1b][node];
-        map_update(&m->maps[O1_MAP][s1], bit, m->rate, MAP_LIMIT);
-        m->o1[o1b][node] = m->states.next[s1][bit];
-    }
-    for (i = 0; i < m->hashed; i++) {
-        uint8_t *cell = m->cell[i];
-        uint8_t s = *cell;
-        map_update(&m->maps[1 + i][s], bit, m->rate, MAP_LIMIT);
-        *cell = m->states.next[s][bit];
+#if ADAPT_X86_V3
+    if (max && v3 && !m->aliased) {
+        memories_learn_v3(m, bit, node, ((node << 1) | bit) & (BLOCK - 1));
+    } else
+#endif
+    {
+        s0 = m->o0[o0_blk][node];
+        map_update(&m->maps[0][s0], bit, m->rate, MAP_LIMIT);
+        m->o0[o0_blk][node] = m->states.next[s0][bit];
+        if (fast) {
+            size_t o1b = o1_blk(m);
+            uint8_t s1 = m->o1[o1b][node];
+            map_update(&m->maps[O1_MAP][s1], bit, m->rate, MAP_LIMIT);
+            m->o1[o1b][node] = m->states.next[s1][bit];
+        }
+        for (i = 0; i < m->hashed; i++) {
+            uint8_t *cell = m->cell[i];
+            uint8_t s = *cell;
+            map_update(&m->maps[1 + i][s], bit, m->rate, MAP_LIMIT);
+            *cell = m->states.next[s][bit];
+        }
     }
     for (i = 0; i < m->runs; i++) {
         if (RUN_ON(fast, i) && m->rcnt[i] > 0) {
@@ -1441,22 +2137,7 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
     m->c0 = (m->c0 << 1) | bit;
     m->node = ((node << 1) | bit) & (BLOCK - 1);
     m->bitpos += 1;
-    if (!fast && m->bitpos == 3) {
-        /* The nibble completes with the next bit, and the blocks its two
-         * possible values select can be brought in now, ahead of the
-         * claims at the boundary: each is a random line of the table.
-         * Worth 3 % to the normal profile; nothing to the fast one, whose
-         * two contexts' lines the core keeps up with. */
-        uint64_t hi0 = (m->c0 << 1) & 15;
-        uint64_t salt0 = (hi0 + 1) * 0x2545F4914F6CDD1Dull;
-        uint64_t salt1 = (hi0 + 2) * 0x2545F4914F6CDD1Dull;
-        for (i = 0; i < m->hashed; i++) {
-            uint64_t x0 = (m->h[i] + salt0) * 0x9E3779B97F4A7C15ull;
-            uint64_t x1 = (m->h[i] + salt1) * 0x9E3779B97F4A7C15ull;
-            ADAPT_PREFETCH(m->table + (((size_t)(x0 ^ (x0 >> 29)) & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK);
-            ADAPT_PREFETCH(m->table + (((size_t)(x1 ^ (x1 >> 29)) & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK);
-        }
-    } else if (m->bitpos == 4) {
+    if (m->bitpos == 4) {
         uint64_t hi = m->c0 & 15;
         uint64_t salt = (hi + 1) * 0x2545F4914F6CDD1Dull;
         m->o0_blk = (size_t)hi + 1;
@@ -1466,22 +2147,77 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
         }
         claim_chain(m);
         m->node = 1;
-    } else if (m->bitpos == 8) {
+        slots_refresh(m);
+        if (!fast && m->coding_known) {
+            /* the next byte's lines, planned now and issued over bits 5 and 6 */
+            prefetch_byte(m, (uint8_t)m->coding, fast, 0);
+        }
+        return;
+    }
+    if (m->bitpos == 8) {
         end_byte(m, (uint8_t)(m->c0 & 0xFF), fast);
         start_byte(m, fast);
+        return;
+    }
+    if (!fast) {
+        /* Ahead of the claims at each boundary — every one a random line
+         * of the table — the lines are brought in early. When the byte is
+         * known, the twenty exact lines of the second nibble go out over
+         * bits 1 and 2 and the next byte's over bits 5 and 6, ten at a
+         * time, which the fill buffers hold; when it is not, the two
+         * candidates' lines go out at bits 3 and 7 (the nibble's, worth
+         * 3 % to the normal profile when it was the only prefetch).
+         * Nothing for the fast profile, whose two contexts' lines the core
+         * keeps up with. */
+        if (m->coding_known) {
+            if (m->bitpos == 1) {
+                nibble_plan(m, (m->coding >> 4) & 15);
+                issue_planned(m, 0);
+            } else if (m->bitpos == 2) {
+                issue_planned(m, 1);
+            } else if (m->bitpos == 5) {
+                issue_planned(m, 0);
+            } else if (m->bitpos == 6) {
+                issue_planned(m, 1);
+            }
+        } else if (m->bitpos == 3) {
+            uint64_t hi0 = (m->c0 << 1) & 15;
+            uint64_t salt0 = (hi0 + 1) * 0x2545F4914F6CDD1Dull;
+            uint64_t salt1 = (hi0 + 2) * 0x2545F4914F6CDD1Dull;
+            for (i = 0; i < m->hashed; i++) {
+                uint64_t x0 = (m->h[i] + salt0) * 0x9E3779B97F4A7C15ull;
+                uint64_t x1 = (m->h[i] + salt1) * 0x9E3779B97F4A7C15ull;
+                ADAPT_PREFETCH(m->table + (((size_t)(x0 ^ (x0 >> 29)) & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK);
+                ADAPT_PREFETCH(m->table + (((size_t)(x1 ^ (x1 >> 29)) & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK);
+            }
+        } else if (m->bitpos == 7) {
+            uint8_t low = (uint8_t)((m->c0 << 1) & 0xFE);
+            prefetch_byte(m, low, fast, 1);
+            prefetch_byte(m, (uint8_t)(low | 1), fast, 1);
+        }
     }
 }
 
-static ADAPT_MULTIVERSION void update(model *m, uint32_t bit) {
-    update_impl(m, bit, 0, 0);
+static void update(model *m, uint32_t bit) {
+    update_impl(m, bit, 0, 0, 0);
 }
 
-static ADAPT_MULTIVERSION void update_max(model *m, uint32_t bit) {
-    update_impl(m, bit, 0, 1);
+static void update_max(model *m, uint32_t bit) {
+    update_impl(m, bit, 0, 1, 0);
 }
+
+#if ADAPT_X86_V3
+static ADAPT_TARGET_V3 void update_v3(model *m, uint32_t bit) {
+    update_impl(m, bit, 0, 0, 1);
+}
+
+static ADAPT_TARGET_V3 void update_max_v3(model *m, uint32_t bit) {
+    update_impl(m, bit, 0, 1, 1);
+}
+#endif
 
 static void update_fast(model *m, uint32_t bit) {
-    update_impl(m, bit, 1, 0);
+    update_impl(m, bit, 1, 0, 0);
 }
 
 /* The starting weight of arbiter lane j under a profile: 1/4 for a
@@ -1489,7 +2225,8 @@ static void update_fast(model *m, uint32_t bit) {
 static inline int32_t initial_weight(size_t j, int fast, int max) {
     size_t base = (size_t)RUN_BASE(fast, max);
     if (j < base) {
-        return j % (size_t)CTX_LANES(max) == 0 ? 1 << 14 : 0;
+        /* the first plane, the stretched probabilities, is trusted */
+        return j < base / (size_t)CTX_LANES(max) ? 1 << 14 : 0;
     }
     return j < base + (size_t)RUNS_OF(max) ? 0 : 1 << 14;
 }
@@ -1501,6 +2238,20 @@ static inline model *model_new(adapt_sizes sizes) {
     if (m == NULL) {
         return NULL;
     }
+#if ADAPT_X86_V3
+    /* The x86-64-v3 instantiations on a CPU that runs them, unless the
+     * environment says ADAPT_ISA=baseline: a diagnostic knob, so the two
+     * paths can be run on one input and their bytes compared (the CLI
+     * tests do). */
+    __builtin_cpu_init();
+    adapt_cpu_v3 = __builtin_cpu_supports("x86-64-v3");
+    {
+        const char *isa = getenv("ADAPT_ISA");
+        if (isa != NULL && strcmp(isa, "baseline") == 0) {
+            adapt_cpu_v3 = 0;
+        }
+    }
+#endif
     if (sizes.adaptive) {
         m->adaptive = malloc(sizeof(*m->adaptive));
         if (m->adaptive == NULL) { model_free(m); return NULL; }
@@ -1523,6 +2274,10 @@ static inline model *model_new(adapt_sizes sizes) {
     for (i = 0; i < 4095; i++) {
         m->squashed[i] = (int16_t)squash((int32_t)i - 2047);
     }
+    for (i = 0; i < 4096; i++) {
+        m->stretch32[i] = m->stretch[i];
+    }
+
     for (i = 0; i < RATE_LEN; i++) {
         m->rate[i] = 65536 / (2 * (int32_t)i + 3);
     }
@@ -1623,28 +2378,54 @@ static inline model *model_new(adapt_sizes sizes) {
  * container.rs — the block methods
  * --------------------------------------------------------------------- */
 
-static ADAPT_MULTIVERSION uint32_t predict_adaptive(model *m) {
-    uint32_t base = m->max ? predict_impl(m, 0, 1) : predict_impl(m, 0, 0);
+static uint32_t predict_adaptive(model *m) {
+    uint32_t base = m->max ? predict_impl(m, 0, 1, 0) : predict_impl(m, 0, 0, 0);
     return adaptive_predict(m->adaptive, base, m->stretch[base], m->squashed, m->c8, m->c0, m->bitpos);
 }
-static ADAPT_MULTIVERSION void update_adaptive(model *m, uint32_t bit) {
+static void update_adaptive(model *m, uint32_t bit) {
     adaptive_update(m->adaptive, bit);
-    if (m->max) update_impl(m, bit, 0, 1);
-    else update_impl(m, bit, 0, 0);
+    if (m->max) update_impl(m, bit, 0, 1, 0);
+    else update_impl(m, bit, 0, 0, 0);
 }
+#if ADAPT_X86_V3
+static ADAPT_TARGET_V3 uint32_t predict_adaptive_v3(model *m) {
+    uint32_t base = m->max ? predict_impl(m, 0, 1, 1) : predict_impl(m, 0, 0, 1);
+    return adaptive_predict(m->adaptive, base, m->stretch[base], m->squashed, m->c8, m->c0, m->bitpos);
+}
+static ADAPT_TARGET_V3 void update_adaptive_v3(model *m, uint32_t bit) {
+    adaptive_update(m->adaptive, bit);
+    if (m->max) update_impl(m, bit, 0, 1, 1);
+    else update_impl(m, bit, 0, 0, 1);
+}
+#endif
 
-/* The per-bit pair of the model's profile, chosen once per block. */
+/* The per-bit pair of the model's profile, chosen once per block: the
+ * x86-64-v3 instantiation on a CPU that runs it (adapt_cpu_v3, set by
+ * model_new), the baseline one otherwise. */
 typedef uint32_t (*predict_fn)(model *m);
 typedef void (*update_fn)(model *m, uint32_t bit);
+#if ADAPT_X86_V3
+#define ADAPT_PROFILE(m, predict_p, update_p)                                                                       \
+    predict_fn predict_p = (m)->adaptive ? (adapt_cpu_v3 ? predict_adaptive_v3 : predict_adaptive)                    \
+                           : (m)->fast   ? predict_fast                                                              \
+                           : (m)->max    ? (adapt_cpu_v3 ? predict_max_v3 : predict_max)                              \
+                                         : (adapt_cpu_v3 ? predict_v3 : predict);                                    \
+    update_fn update_p = (m)->adaptive ? (adapt_cpu_v3 ? update_adaptive_v3 : update_adaptive)                        \
+                         : (m)->fast   ? update_fast                                                                  \
+                         : (m)->max    ? (adapt_cpu_v3 ? update_max_v3 : update_max)                                  \
+                                       : (adapt_cpu_v3 ? update_v3 : update)
+#else
 #define ADAPT_PROFILE(m, predict_p, update_p)                                                   \
     predict_fn predict_p = (m)->adaptive ? predict_adaptive : (m)->fast ? predict_fast : ((m)->max ? predict_max : predict);      \
     update_fn update_p = (m)->adaptive ? update_adaptive : (m)->fast ? update_fast : ((m)->max ? update_max : update)
+#endif
 
 /* Decode `raw` bytes of one modeled block. */
 static inline void decode_bytes(model *m, arith *d, size_t raw, uint8_t *out) {
     size_t i;
     int k;
     ADAPT_PROFILE(m, predict_p, update_p);
+    m->coding_known = 0;
     for (i = 0; i < raw; i++) {
         uint32_t byte = 0;
         for (k = 0; k < 8; k++) {
@@ -1661,6 +2442,8 @@ static inline void decode_bytes(model *m, arith *d, size_t raw, uint8_t *out) {
 static inline void encode_byte(model *m, arith_enc *e, uint8_t byte) {
     int k;
     ADAPT_PROFILE(m, predict_p, update_p);
+    m->coding = byte;
+    m->coding_known = 1;
     for (k = 7; k >= 0; k--) {
         uint32_t bit = ((uint32_t)byte >> k) & 1;
         uint32_t p = predict_p(m);
@@ -1676,6 +2459,8 @@ static inline void observe_bytes(model *m, const uint8_t *bytes, size_t len) {
     ADAPT_PROFILE(m, predict_p, update_p);
     for (i = 0; i < len; i++) {
         uint32_t byte = bytes[i];
+        m->coding = byte;
+        m->coding_known = 1;
         for (k = 7; k >= 0; k--) {
             uint32_t bit = (byte >> k) & 1;
             (void)predict_p(m);

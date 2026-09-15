@@ -543,6 +543,77 @@ def snapshot(root: Path) -> dict:
     return seen
 
 
+class InstructionSetTest(unittest.TestCase):
+    """The per-bit path is built twice, for the baseline instruction set and
+    for x86-64-v3, and the second runs the model's memories as vectors: the
+    two must write the same bytes. At the smallest budget the context table
+    is a few hundred lines, so two contexts claiming one block — the case
+    the vector path hands back to the scalar one — happens on most bytes."""
+
+    def encode(self, source: Path, out: Path, *args, baseline: bool) -> bytes:
+        env = dict(os.environ)
+        env.pop("ADAPT_ISA", None)
+        if baseline:
+            env["ADAPT_ISA"] = "baseline"
+        run = subprocess.run(
+            [str(CADAPT), "encode", str(source), "-o", str(out), "--force", "--no-verify", *map(str, args)],
+            capture_output=True,
+            timeout=120,
+            env=env,
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return out.read_bytes()
+
+    def test_vector_and_baseline_paths_write_the_same_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            for name in ("text.bin", "records.bin"):
+                source = VECTORS / name
+                for profile in (["--max"], [], ["--fast"]):
+                    args = [*profile, "--max-memory", str(74 << 20), "--allocation", "context"]
+                    vector = self.encode(source, root / "vector.adpt", *args, baseline=False)
+                    scalar = self.encode(source, root / "scalar.adpt", *args, baseline=True)
+                    self.assertEqual(vector, scalar, f"{name} {profile}: the two instruction-set paths differ")
+                    self.assertLess(len(vector), source.stat().st_size)
+                    # each path decodes what the other wrote
+                    for written, decoder in ((root / "vector.adpt", True), (root / "scalar.adpt", False)):
+                        env = dict(os.environ)
+                        env["ADAPT_ISA"] = "baseline" if decoder else ""
+                        if not decoder:
+                            env.pop("ADAPT_ISA")
+                        run = subprocess.run(
+                            [str(CADAPT), "decode", str(written), "-o", str(root / "back.bin"), "--force"],
+                            capture_output=True,
+                            timeout=120,
+                            env=env,
+                        )
+                        self.assertEqual(run.returncode, 0, run.stderr)
+                        self.assertEqual((root / "back.bin").read_bytes(), source.read_bytes())
+
+    def test_the_knob_is_read_and_anything_else_means_auto(self) -> None:
+        """ADAPT_ISA=baseline is the only value that changes the path; the
+        bytes are the same either way, so what is checked is that both
+        values are accepted and encode."""
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            written = []
+            for value in ("baseline", "anything", ""):
+                env = dict(os.environ)
+                env["ADAPT_ISA"] = value
+                run = subprocess.run(
+                    [str(CADAPT), "encode", str(VECTORS / "text.bin"), "-o", str(root / "o.adpt"), "--force",
+                     "--no-verify", "--max"],
+                    capture_output=True,
+                    timeout=120,
+                    env=env,
+                )
+                self.assertEqual(run.returncode, 0, run.stderr)
+                written.append(payload_stream((root / "o.adpt").read_bytes()))
+            self.assertEqual(written[0], written[1])
+            self.assertEqual(written[1], written[2])
+            self.assertEqual(written[0], (VECTORS / "text-max.adpt").read_bytes())
+
+
 class FolderTest(unittest.TestCase):
     """A folder is coded as one container and restored byte for byte, with
     its structure: the constraints in docs/CONSTRAINTS.md."""

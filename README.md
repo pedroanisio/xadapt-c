@@ -33,7 +33,7 @@ refuses versions 10–18. The header of
 | [adpat/c/tests/](adpat/c/tests/) | C unit tests for both units, the CLI's Python tests, the coverage gate's tests, and the committed vectors |
 | [adpat/c/fuzz/](adpat/c/fuzz/) | A libFuzzer harness for the two decoders |
 | [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |
-| [bench/](bench/README.md) | Encoding telemetry on the enwik8 corpus, run history and plots |
+| [bench/](bench/README.md) | Retained historical benchmark scripts, measurements and plots |
 | [research/](research/arxiv-compression-review.md) | A review of the compression literature against this codec, the enwik8 baseline, and the [per-script measurements](research/scripts-measurement.md) |
 | [static/corpus/](static/corpus/scripts/manifest.json) | The benchmark's fixtures: enwik8, text8, and the six per-script rows with their manifest |
 | [tools/](tools/provenance.py) | The provenance tool: the SPDX SBOM, the build manifest, and the rebuild that confirms it |
@@ -258,8 +258,10 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   model is byte-level throughout, so a script is never decoded, only seen.
 - `make check` adds the Python tests — the CLI command by command
   (`tests/test_cadapt.py`), the coverage gate's own tests
-  (`tests/test_check_gcov.py`), the benchmark's (`bench/test_telemetry.py`)
-  — and then runs the coverage gate.
+  (`tests/test_check_gcov.py`), and the allocation SDK probe
+  (`tests/test_allocation_probe.py`) — then runs the coverage gate. The root
+  check also tests provenance and codec-owned ratio floors under `tools/`.
+  No build or correctness test imports `bench/` or the standalone benchmark.
 - **Branch coverage** is gated by `check-gcov.py` at 80 % for the library
   and 60 % for the CLI; `make coverage` builds every unit with GCC's
   instrumentation into `build-cov/` (one instantiation of the per-bit path,
@@ -329,3 +331,20 @@ versions 22–24. The byte-oriented library encoders still emit versions
 `adapt_read_metadata()` reads it. Use `adapt_header_len()` for the actual
 container header size; `adapt_sizes_header_bytes()` gives the base encoder
 header size without metadata.
+
+## Benchmark ownership
+
+General benchmark runs belong to the independent `codecbench` tool. Install it
+separately and describe the `cadapt` executable with an external command adapter;
+its examples include normal, fast, max, adaptive and segmented configurations.
+The codec builds and passes `make check` without either `bench/` or codecbench.
+`make bench` and `make plot` report this migration instead of invoking the old
+collector. Historical scripts, result bundles, plots and research links remain
+under `bench/`; they have not been deleted.
+
+The codec-specific ratio and throughput regression gates remain here:
+`make gate` and `make ratio-floor` use `tools/check_ratio_floor.py` and the
+canonical `tools/ratio_floor.json`. Their thresholds and verification behavior
+are unchanged. The old copies in `bench/` are historical snapshots; update the
+canonical files in `tools/` for any separately approved floor change. Allocation,
+adaptive-search and filesystem-restoration correctness stay in the codec tests.

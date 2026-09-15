@@ -91,7 +91,7 @@ test: $(TESTS)
 check: all test
 	$(PYTHON) -B tests/test_check_gcov.py
 	$(PYTHON) -B tests/test_cadapt.py "$(BIN)"
-	$(PYTHON) -B ../../bench/test_telemetry.py "$(BIN)"
+	$(PYTHON) -B tests/test_allocation_probe.py "$(BIN)"
 	$(MAKE) coverage
 
 # The instrumented build lives beside the ordinary one and starts afresh

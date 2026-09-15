@@ -72,7 +72,7 @@ def commit() -> str | None:
 def make_variables() -> dict[str, str]:
     """CC, CFLAGS and LDFLAGS exactly as the codec's Makefile resolves them."""
     out = subprocess.run(
-        ["make", "-s", "-C", str(CODEC), "--eval=cadapt-variables: ; @printf '%s\\n%s\\n%s\\n' '$(CC)' '$(CFLAGS)' '$(LDFLAGS)'", "cadapt-variables"],
+        ["make", "-s", "--no-print-directory", "-C", str(CODEC), "--eval=cadapt-variables: ; @printf '%s\\n%s\\n%s\\n' '$(CC)' '$(CFLAGS)' '$(LDFLAGS)'", "cadapt-variables"],
         capture_output=True,
         text=True,
         check=True,
