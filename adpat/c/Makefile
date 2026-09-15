@@ -39,7 +39,7 @@ TEST_THREADS = $(if $(findstring -DADAPT_THREADS,$(CFLAGS)),1,0)
 
 LIB   = $(BUILD)/libadapt.a
 BIN   = $(BUILD)/cadapt
-TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode $(BUILD)/test_adapt_text
+TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode $(BUILD)/test_adapt_text $(BUILD)/test_model_dispatch
 
 all: $(LIB) $(BIN)
 
@@ -93,6 +93,9 @@ $(BUILD)/test_fuzz_decode: tests/test_fuzz_decode.c fuzz/fuzz_decode.c fuzz/fuzz
 $(BUILD)/test_adapt_text: tests/test_adapt_text.c adapt.h adapt_text.h | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ tests/test_adapt_text.c $(LDFLAGS)
 
+$(BUILD)/test_model_dispatch: tests/test_model_dispatch.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/test_model_dispatch.c $(LDFLAGS)
+
 # The two large C suites run as shards, k/n (see their mains).
 ENCODE_SHARDS = 0 1 2 3
 DECODE_SHARDS = 0 1 2
@@ -105,7 +108,7 @@ test: $(TESTS)
 	rm -f $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r) $(BUILD)/runs/$(r).log) && mkdir -p $(BUILD)/runs
 	$(MAKE) -j $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r))
 	@for r in $(TESTRUNS); do tail -1 $(BUILD)/runs/$$r.log; done
-TESTRUNS = adaptive $(foreach k,$(DECODE_SHARDS),decode-$(k)) $(foreach k,$(ENCODE_SHARDS),encode-$(k)) archive budget fuzz text
+TESTRUNS = adaptive $(foreach k,$(DECODE_SHARDS),decode-$(k)) $(foreach k,$(ENCODE_SHARDS),encode-$(k)) archive budget fuzz text dispatch
 $(BUILD)/runs/adaptive: ; @$(BUILD)/test_adapt_adaptive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/decode-%: ; @$(BUILD)/test_adapt_decode tests/vectors $*/$(words $(DECODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/encode-%: ; @$(BUILD)/test_adapt_encode tests/vectors $*/$(words $(ENCODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
@@ -113,6 +116,7 @@ $(BUILD)/runs/archive: ; @$(BUILD)/test_adapt_archive > $@.log 2>&1 && touch $@ 
 $(BUILD)/runs/budget: ; @$(BUILD)/test_decode_budget tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/fuzz: ; @$(BUILD)/test_fuzz_decode tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/text: ; @$(BUILD)/test_adapt_text tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/dispatch: ; @$(BUILD)/test_model_dispatch > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
 # The plain suites and the coverage pass run at once: they build into
 # different directories and share nothing.

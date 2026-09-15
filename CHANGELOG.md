@@ -15,6 +15,16 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Security
 
+- Publish folders without `--force` using atomic no-replace operations, so
+  a destination created during decoding is preserved. Unsupported platforms
+  refuse the operation instead of using a racy existence check.
+- Clean up staged file and folder outputs on POSIX `SIGINT`, `SIGTERM`,
+  `SIGHUP` and `SIGPIPE`, including blocked pipe I/O. Signal handlers only
+  notify the command thread; cleanup runs through the ordinary failure path.
+- Store CPU dispatch selection in each model, removing concurrent writes to
+  shared dispatch state. Add model-isolation and concurrent prediction tests.
+- Add CLI regression coverage for explicit text transforms with fractional
+  context tables, already supported by the sizing-byte text flag.
 - Keep POSIX output staging files at mode `0600` during processing and
   verification; apply recorded or umask-derived permissions only after success.
 - Return worker failures safely when threaded codec callers pass `error=NULL`.

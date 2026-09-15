@@ -46,6 +46,9 @@
 #if defined(__linux__) && !defined(_GNU_SOURCE)
 #define _GNU_SOURCE 1
 #endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE 1
+#endif
 #if !defined(_WIN32) && !defined(_FILE_OFFSET_BITS)
 #define _FILE_OFFSET_BITS 64
 #endif
@@ -55,6 +58,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,6 +75,7 @@
 typedef long long cadapt_off;
 #else
 #include <dirent.h>
+#include <poll.h>
 #include <unistd.h>
 #define cadapt_getpid getpid
 #define cadapt_fseek fseeko
@@ -86,6 +91,77 @@ typedef off_t cadapt_off;
 #endif
 
 #define CADAPT_VERSION "0.12.0"
+
+/* Only the command thread reads cancellation state. A handler, including
+ * one delivered to a codec worker, only writes to this nonblocking pipe.
+ * Allocation, stdio and recursive staging cleanup stay on the normal path. */
+static int interrupted_signal;
+#ifndef _WIN32
+static int interrupt_pipe[2] = {-1, -1};
+
+static void request_interrupt(int number) {
+    int saved_errno = errno;
+    unsigned char byte = (unsigned char)number;
+    ssize_t written = write(interrupt_pipe[1], &byte, 1);
+    (void)written; /* A full pipe already contains a cancellation request. */
+    errno = saved_errno;
+}
+
+static int setup_interrupts(void) {
+    static const int signals[] = {SIGINT, SIGTERM, SIGHUP, SIGPIPE};
+    struct sigaction action;
+    size_t i;
+    if (pipe(interrupt_pipe) != 0) return -1;
+    for (i = 0; i < 2; i++) {
+        /* Preserve a caller's closed stdin/stdout/stderr: private wakeup
+         * descriptors must never turn one into our cancellation pipe. */
+        if (interrupt_pipe[i] < 3) {
+            int fd = fcntl(interrupt_pipe[i], F_DUPFD, 3);
+            if (fd < 0) return -1;
+            close(interrupt_pipe[i]);
+            interrupt_pipe[i] = fd;
+        }
+        if (fcntl(interrupt_pipe[i], F_SETFL, O_NONBLOCK) != 0 ||
+            fcntl(interrupt_pipe[i], F_SETFD, FD_CLOEXEC) != 0) return -1;
+    }
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = request_interrupt;
+    sigemptyset(&action.sa_mask);
+    for (i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        if (sigaction(signals[i], &action, NULL) != 0) return -1;
+    }
+    return 0;
+}
+#endif
+
+static int cancelled(void) {
+#ifndef _WIN32
+    if (!interrupted_signal && interrupt_pipe[0] >= 0) {
+        unsigned char byte;
+        int saved_errno = errno;
+        if (read(interrupt_pipe[0], &byte, 1) == 1) interrupted_signal = byte;
+        errno = saved_errno;
+    }
+#endif
+    return interrupted_signal != 0;
+}
+
+#ifndef _WIN32
+static int wait_stream(int fd, short events) {
+    struct pollfd descriptors[2] = {{fd, events, 0}, {interrupt_pipe[0], POLLIN, 0}};
+    for (;;) {
+        int rc;
+        if (cancelled()) return EINTR;
+        rc = poll(descriptors, 2, -1);
+        if (cancelled()) return EINTR;
+        if (rc < 0) {
+            if (errno == EINTR) continue;
+            return errno;
+        }
+        if (descriptors[0].revents) return 0;
+    }
+}
+#endif
 
 /* Capture before reading a file or traversing a directory, which can change
  * its access time. Archive links are examined without following them. */
@@ -720,21 +796,58 @@ typedef struct stream {
 
 static int read_stream(void *context, uint8_t *buf, size_t len, size_t *got) {
     stream *s = context;
+#ifndef _WIN32
+    size_t at = 0;
+    *got = 0;
+    while (at < len) {
+        ssize_t n;
+        int rc = wait_stream(fileno(s->file), POLLIN);
+        if (rc != 0) return s->error = rc;
+        n = read(fileno(s->file), buf + at, len - at);
+        if (n < 0) {
+            if (errno == EINTR || errno == EAGAIN) continue;
+            return s->error = errno;
+        }
+        if (n == 0) break;
+        at += (size_t)n;
+    }
+    *got = at;
+#else
     size_t n = fread(buf, 1, len, s->file);
     if (n < len && ferror(s->file)) {
         s->error = errno;
         return s->error != 0 ? s->error : EIO;
     }
     *got = n;
+#endif
     return 0;
 }
 
 static int write_stream(void *context, const uint8_t *buf, size_t len) {
     stream *s = context;
+#ifndef _WIN32
+    size_t at = 0;
+    while (at < len) {
+        /* A pipe reported writable can accept PIPE_BUF bytes without
+         * blocking. Recheck cancellation before each further chunk. */
+        size_t take = len - at < PIPE_BUF ? len - at : PIPE_BUF;
+        ssize_t n;
+        int rc = wait_stream(fileno(s->file), POLLOUT);
+        if (rc != 0) return s->error = rc;
+        n = write(fileno(s->file), buf + at, take);
+        if (n < 0) {
+            if (errno == EINTR || errno == EAGAIN) continue;
+            return s->error = errno;
+        }
+        if (n == 0) return s->error = EIO;
+        at += (size_t)n;
+    }
+#else
     if (fwrite(buf, 1, len, s->file) != len) {
         s->error = errno;
         return s->error != 0 ? s->error : EIO;
     }
+#endif
     return 0;
 }
 
@@ -893,6 +1006,10 @@ static int staged_open(staged *s, const char *target, int force) {
 
 /* Publish the staged file as `target`. Returns an exit code or 0. */
 static int staged_publish(staged *s, const char *target, int force, const adapt_metadata *metadata) {
+    if (cancelled()) {
+        staged_discard(s);
+        return other_error(target, "interrupted");
+    }
     int rc;
     if (s->file != NULL && fclose(s->file) != 0) {
         int e = errno;
@@ -1535,6 +1652,7 @@ static int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
     packer *p = context;
     size_t at = 0;
     while (at < len) {
+        if (cancelled()) return p->error = EINTR;
         if (p->stage == PACK_DONE) {
             break;
         }
@@ -2200,10 +2318,31 @@ static void staged_dir_discard(staged *s) {
     }
 }
 
+/* POSIX rename() may replace a directory created after the initial check.
+ * Refuse safely when the platform cannot make the no-replace operation atomic. */
+static int rename_directory_exclusive(const char *source, const char *target) {
+#if defined(__linux__) && defined(RENAME_NOREPLACE)
+    return renameat2(AT_FDCWD, source, AT_FDCWD, target, RENAME_NOREPLACE);
+#elif defined(__APPLE__) && defined(RENAME_EXCL)
+    return renamex_np(source, target, RENAME_EXCL);
+#elif defined(_WIN32)
+    return rename(source, target); /* Windows rename refuses existing names. */
+#else
+    (void)source;
+    (void)target;
+    errno = ENOTSUP;
+    return -1;
+#endif
+}
+
 /* Publish the staged directory as `target`: with --force an existing file
  * or empty directory is replaced; a directory with contents is not, so no
  * bytes of the user's are ever removed here. */
 static int staged_dir_publish(staged *s, const char *target, int force) {
+    if (cancelled()) {
+        staged_dir_discard(s);
+        return other_error(target, "interrupted");
+    }
     if (force && file_exists(target)) {
         int rc = is_directory(target) ?
 #ifdef _WIN32
@@ -2219,9 +2358,12 @@ static int staged_dir_publish(staged *s, const char *target, int force) {
                                                                       : strerror(e));
         }
     }
-    if (rename(s->path, target) != 0) {
+    if ((force ? rename(s->path, target) : rename_directory_exclusive(s->path, target)) != 0) {
         int e = errno;
         staged_dir_discard(s);
+        if (!force && (e == ENOSYS || e == EINVAL || e == ENOTSUP)) {
+            return other_error(target, "atomic directory publication is unavailable; pass --force to allow replacement");
+        }
         return other_error(target, e == EEXIST || e == ENOTEMPTY ? "exists; pass --force to overwrite" : strerror(e));
     }
     free(s->path);
@@ -3391,7 +3533,7 @@ static int info_command(int argc, char **argv) {
  * main
  * --------------------------------------------------------------------- */
 
-int main(int argc, char **argv) {
+static int run_command(int argc, char **argv) {
     const char *cmd;
     if (argc < 2) {
         return usage_error("a command is required%s", "");
@@ -3415,4 +3557,16 @@ int main(int argc, char **argv) {
         return 0;
     }
     return usage_error("unknown command %s", cmd);
+}
+
+int main(int argc, char **argv) {
+    int rc;
+#ifndef _WIN32
+    if (argc > 1 && (strcmp(argv[1], "encode") == 0 || strcmp(argv[1], "decode") == 0) &&
+        setup_interrupts() != 0) {
+        return other_error("signal setup", strerror(errno));
+    }
+#endif
+    rc = run_command(argc, argv);
+    return cancelled() ? 128 + interrupted_signal : rc;
 }

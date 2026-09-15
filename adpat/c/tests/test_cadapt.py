@@ -78,6 +78,23 @@ class CodecTest(unittest.TestCase):
 
 
 class AllocationTest(CodecTest):
+    def test_explicit_text_composes_with_fractional_context_allocation(self):
+        # A pipe at this tier gets a fractional table. The explicit text
+        # option must preserve both the fraction and the transform bit.
+        for options in ((), ("--threads", "2")):
+            with self.subTest(options=options):
+                encoded = self.run_codec("encode", "-", "--max", "-3", "--allocation", "context",
+                                         "--transform", "text", "-o", "-", *options, data=SOURCE)
+                self.assertEqual(encoded.returncode, 0, encoded.stderr)
+                header = encoded.stdout
+                self.assertEqual(header[4], 58)  # sized max profile
+                sizing = header[8 + (2 if header[7] & 0x80 else 0)]
+                self.assertNotEqual((sizing >> 2) & 7, 0)
+                self.assertTrue(sizing & 32)  # text transform
+                decoded = self.run_codec("decode", "-", "-o", "-", data=encoded.stdout)
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                self.assertEqual(decoded.stdout, SOURCE)
+
     def test_context_policy_roundtrips_and_search(self):
         for profile in ((), ("--fast",), ("--max",), ("--max", "--adaptive", "rates"),
                         ("--adaptive", "auto"), ("--threads", "2")):

@@ -5,6 +5,8 @@ including its filesystem sink and refusal cleanup, without a model encoder.
 """
 
 import os
+import select
+import signal
 import struct
 import subprocess
 import sys
@@ -82,6 +84,89 @@ class SafetyTest(unittest.TestCase):
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=60,
             preexec_fn=constrain if memory_limit is not None else None,
         )
+
+    def wait_for_stage(self, process, child=None):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            staged = list(self.root.glob(f".cadapt-{process.pid}-*.part"))
+            if staged and (child is None or (staged[0] / child).exists()):
+                return staged[0]
+            self.assertIsNone(process.poll(), "codec exited before staging")
+            time.sleep(0.01)
+        self.fail("codec did not create staging")
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory publication")
+    def test_folder_publication_refuses_a_destination_created_during_decode(self):
+        data = archive([entry(2, "child", b"contents" * 1024)])
+        for kind in ("directory", "file", "symlink"):
+            with self.subTest(kind=kind):
+                target = self.root / kind
+                with subprocess.Popen([str(CADAPT), "decode", "-", "-o", str(target)],
+                                      stdin=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                    process.stdin.write(data[:-13])
+                    process.stdin.flush()
+                    self.wait_for_stage(process, "child")
+                    if kind == "directory":
+                        target.mkdir()
+                    elif kind == "file":
+                        target.write_bytes(b"keep")
+                    else:
+                        target.symlink_to("missing")
+                    expected = target.lstat()
+                    process.stdin.write(data[-13:])
+                    process.stdin.close()
+                    process.wait(timeout=10)
+                    self.assertNotEqual(process.returncode, 0, process.stderr.read())
+                actual = target.lstat()
+                self.assertEqual((actual.st_dev, actual.st_ino, actual.st_mode),
+                                 (expected.st_dev, expected.st_ino, expected.st_mode))
+                self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX signal cancellation")
+    def test_signals_discard_file_and_folder_staging_with_input_still_open(self):
+        raw = b"private bytes" * 1024
+        file_data = (HEADER + struct.pack("<BII", 2, len(raw), len(raw)) + raw
+                     + struct.pack("<BQI", 3, len(raw), zlib.crc32(raw)))
+        folder_data = archive([entry(1, "nested"), entry(2, "nested/child", raw)])
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            for command, data, child in (("encode", b"unfinished input", None),
+                                         ("decode", file_data[:-13], None),
+                                         ("decode", folder_data[:-13], "nested/child")):
+                with self.subTest(signal=sig, command=command, child=child):
+                    output = self.root / "existing"
+                    output.write_bytes(b"keep destination")
+                    with subprocess.Popen([str(CADAPT), command, "-", "-o", str(output), "--force"],
+                                          stdin=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                        process.stdin.write(data)
+                        process.stdin.flush()
+                        self.wait_for_stage(process, child)
+                        process.send_signal(sig)
+                        process.wait(timeout=10)
+                        self.assertEqual(process.returncode, 128 + sig, process.stderr.read())
+                    self.assertEqual(output.read_bytes(), b"keep destination")
+                    self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX pipe cancellation")
+    def test_signal_wakes_decode_with_unread_stdout(self):
+        source = self.root / "source.adpt"
+        segmented_file(source, 2)
+        with subprocess.Popen([str(CADAPT), "decode", str(source), "-o", "-", "--threads", "2"],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            self.assertTrue(select.select([process.stdout], [], [], 10)[0], "decoder produced no output")
+            process.send_signal(signal.SIGTERM)
+            # No one drains stdout: cancellation must wake the blocked writer.
+            process.wait(timeout=10)
+            self.assertEqual(process.returncode, 128 + signal.SIGTERM, process.stderr.read())
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor ownership")
+    def test_closed_stdin_is_not_reused_as_the_signal_pipe(self):
+        output = self.root / "closed-input"
+        result = subprocess.run([str(CADAPT), "decode", "-", "-o", str(output)],
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=10,
+                                preexec_fn=lambda: os.close(0))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertFalse(output.exists())
+        self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
 
     @unittest.skipIf(os.name == "nt", "POSIX staging permissions")
     def test_private_file_stays_private_until_publication(self):

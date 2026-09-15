@@ -247,6 +247,17 @@ complete, so an interrupted run leaves no partial target. Without
 meanwhile but is unavailable on filesystems without hard links (FAT, exFAT,
 some network mounts); pass `--force` there.
 
+Folder publication without `--force` uses an atomic no-replace rename on
+Linux and macOS; Windows rename also refuses existing destinations. If the
+platform or filesystem lacks the operation, the command fails and asks for
+`--force` rather than risking replacement after a separate existence check.
+
+On POSIX, `SIGINT`, `SIGTERM`, `SIGHUP` and `SIGPIPE` cancel encoding or
+decoding through the normal cleanup path. Blocked stream I/O wakes to discard
+staging; active codec work reaches its next I/O boundary first. The command
+exits with status `128 + signal number`. Uncatchable termination (`SIGKILL`)
+or machine failure can still leave staging files behind.
+
 ```sh
 cadapt encode corpus.txt                   # corpus.txt.adpt, not verified
 cadapt encode corpus.txt --verify --max    # proven as written, max profile

@@ -70,10 +70,6 @@
 #define ADAPT_X86_V3 0
 #define ADAPT_TARGET_V3
 #endif
-#if ADAPT_X86_V3
-/* Whether this CPU runs the x86-64-v3 instantiations; model_new() sets it. */
-static int adapt_cpu_v3;
-#endif
 
 /* The model's tables live in one arena. On Linux it is an anonymous
  * mapping aligned to 2 MiB and advised MADV_HUGEPAGE: the context table,
@@ -987,6 +983,8 @@ typedef struct model {
      * masks below size the third and fourth arbiters' sets and the
      * second estimation stage's rows, read once per bit. */
     int compact;
+    /* Immutable dispatch choice owned by this model, never shared by workers. */
+    int cpu_v3;
     size_t mix34_row_mask;
     size_t apm2_mask;
     /* The record period in bytes, or 0: when set, the record and field
@@ -2280,12 +2278,12 @@ static inline model *model_new(adapt_sizes sizes) {
      * environment says ADAPT_ISA=baseline: a diagnostic knob, so the two
      * paths can be run on one input and their bytes compared (the CLI
      * tests do). */
-    __builtin_cpu_init();
-    adapt_cpu_v3 = __builtin_cpu_supports("x86-64-v3");
+    /* GCC/Clang initialize CPU features before ordinary constructors. */
+    m->cpu_v3 = __builtin_cpu_supports("x86-64-v3");
     {
         const char *isa = getenv("ADAPT_ISA");
         if (isa != NULL && strcmp(isa, "baseline") == 0) {
-            adapt_cpu_v3 = 0;
+            m->cpu_v3 = 0;
         }
     }
 #endif
@@ -2443,20 +2441,20 @@ static ADAPT_TARGET_V3 void update_adaptive_v3(model *m, uint32_t bit) {
 #endif
 
 /* The per-bit pair of the model's profile, chosen once per block: the
- * x86-64-v3 instantiation on a CPU that runs it (adapt_cpu_v3, set by
+ * x86-64-v3 instantiation on a CPU that runs it (m->cpu_v3, set by
  * model_new), the baseline one otherwise. */
 typedef uint32_t (*predict_fn)(model *m);
 typedef void (*update_fn)(model *m, uint32_t bit);
 #if ADAPT_X86_V3
 #define ADAPT_PROFILE(m, predict_p, update_p)                                                                       \
-    predict_fn predict_p = (m)->adaptive ? (adapt_cpu_v3 ? predict_adaptive_v3 : predict_adaptive)                    \
+    predict_fn predict_p = (m)->adaptive ? ((m)->cpu_v3 ? predict_adaptive_v3 : predict_adaptive)                    \
                            : (m)->fast   ? predict_fast                                                              \
-                           : (m)->max    ? (adapt_cpu_v3 ? predict_max_v3 : predict_max)                              \
-                                         : (adapt_cpu_v3 ? predict_v3 : predict);                                    \
-    update_fn update_p = (m)->adaptive ? (adapt_cpu_v3 ? update_adaptive_v3 : update_adaptive)                        \
+                           : (m)->max    ? ((m)->cpu_v3 ? predict_max_v3 : predict_max)                              \
+                                         : ((m)->cpu_v3 ? predict_v3 : predict);                                    \
+    update_fn update_p = (m)->adaptive ? ((m)->cpu_v3 ? update_adaptive_v3 : update_adaptive)                        \
                          : (m)->fast   ? update_fast                                                                  \
-                         : (m)->max    ? (adapt_cpu_v3 ? update_max_v3 : update_max)                                  \
-                                       : (adapt_cpu_v3 ? update_v3 : update)
+                         : (m)->max    ? ((m)->cpu_v3 ? update_max_v3 : update_max)                                  \
+                                       : ((m)->cpu_v3 ? update_v3 : update)
 #else
 #define ADAPT_PROFILE(m, predict_p, update_p)                                                   \
     predict_fn predict_p = (m)->adaptive ? predict_adaptive : (m)->fast ? predict_fast : ((m)->max ? predict_max : predict);      \
