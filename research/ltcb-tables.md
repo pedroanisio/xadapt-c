@@ -18,6 +18,15 @@ repository; see [current-baseline.md](current-baseline.md) for local results.
 | [ltcb-main-table.csv](ltcb-main-table.csv) | <https://mattmahoney.net/dc/text.html> | Sept 12, 2026 | 224 |
 | [ltcb-textdata-text8-fil9.csv](ltcb-textdata-text8-fil9.csv) | <https://mattmahoney.net/dc/textdata.html> | Sept. 1, 2011 | 27 |
 
+What is tracked and what is not: the two transcribed CSVs, the local
+entries and this note are in git. The tooling that reads them lives in
+[tools/ltcb/](../tools/ltcb/) with its tests
+(`python3 -B -m unittest discover -s tools/ltcb -p 'test_*.py'`). The
+renderings it writes into this directory — `ltcb-dashboard.{svg,png}`,
+`ltcb-phases.{svg,png,csv}`, `ltcb-analysis.{json,md}`,
+`ltcb-interactive.html` — are ignored by git and regenerated with the commands
+below; nothing quotes a number from them that the CSVs do not carry.
+
 Both pages were fetched on 2026-09-14 (text.html at 20:04 UTC, SHA-256
 `a504ea64cfbe1117bc7bbb7c64777eb427c9d9fcf0bb039e3711bf1c42e0b84f`;
 textdata.html at 20:02 UTC, SHA-256
@@ -91,14 +100,14 @@ options were tuned for enwik9.
 
 [ltcb-dashboard.svg](ltcb-dashboard.svg) (and the same figure as
 [ltcb-dashboard.png](ltcb-dashboard.png)) is rendered from the main-table CSV
-by [plot_ltcb_tables.py](plot_ltcb_tables.py); its tests are in
-[test_plot_ltcb_tables.py](test_plot_ltcb_tables.py). Matplotlib is the only
+by [plot_ltcb_tables.py](../tools/ltcb/plot_ltcb_tables.py); its tests are in
+[test_plot_ltcb_tables.py](../tools/ltcb/test_plot_ltcb_tables.py). Matplotlib is the only
 dependency beyond the standard library (`bench/requirements.txt`). To
 regenerate after refreshing the CSV:
 
 ```sh
-python3 -B research/plot_ltcb_tables.py --output research/ltcb-dashboard.svg
-python3 -B -m unittest discover -s research -p 'test_plot_ltcb_tables.py'
+python3 -B tools/ltcb/plot_ltcb_tables.py --output research/ltcb-dashboard.svg
+python3 -B -m unittest discover -s tools/ltcb -p 'test_*.py'
 ```
 
 The output is deterministic: the same CSV gives byte-identical SVG and PNG.
@@ -115,8 +124,8 @@ publish one and say how many that is.
 ## Phase map of the speed/ratio frontier
 
 [ltcb-phases.svg](ltcb-phases.svg) (PNG twin [ltcb-phases.png](ltcb-phases.png))
-is rendered by [plot_ltcb_phases.py](plot_ltcb_phases.py), tested in
-[test_plot_ltcb_phases.py](test_plot_ltcb_phases.py), and the numbers behind
+is rendered by [plot_ltcb_phases.py](../tools/ltcb/plot_ltcb_phases.py), tested in
+[test_plot_ltcb_phases.py](../tools/ltcb/test_plot_ltcb_phases.py), and the numbers behind
 it are written to [ltcb-phases.csv](ltcb-phases.csv). The frontier is the set
 of timed entries no other entry beats on both speed and enwik9 ratio. A phase
 is a maximal run of frontier points held by one algorithm family; it holds
@@ -152,15 +161,15 @@ re-enters once (glza 0.12 at 9.4 ns/B) before the same CM, PPM and neural
 sequence.
 
 ```sh
-python3 -B research/plot_ltcb_phases.py --local research/ltcb-local-entries.csv \
+python3 -B tools/ltcb/plot_ltcb_phases.py --local research/ltcb-local-entries.csv \
     --output research/ltcb-phases.svg
 ```
 
 ## Statistical analysis
 
 [ltcb-analysis.md](ltcb-analysis.md) is the report written by
-[analyze_ltcb.py](analyze_ltcb.py) (tests in
-[test_analyze_ltcb.py](test_analyze_ltcb.py)); [ltcb-analysis.json](ltcb-analysis.json)
+[analyze_ltcb.py](../tools/ltcb/analyze_ltcb.py) (tests in
+[test_analyze_ltcb.py](../tools/ltcb/test_analyze_ltcb.py)); [ltcb-analysis.json](ltcb-analysis.json)
 holds the same numbers for programs. Standard library only: average-rank
 Spearman and Pearson correlations, ordinary least squares by normal equations,
 inclusive-method quartiles, and the frontier from `plot_ltcb_phases.py`. It
@@ -178,17 +187,17 @@ per gigabyte of memory), a tunable weighted cost
 memory, ratio).
 
 ```sh
-python3 -B research/analyze_ltcb.py --local research/ltcb-local-entries.csv \
+python3 -B tools/ltcb/analyze_ltcb.py --local research/ltcb-local-entries.csv \
     --output research/ltcb-analysis.json
 ```
 
 ## Interactive explorer
 
 [ltcb-interactive.html](ltcb-interactive.html) is a single-page explorer
-assembled by [build_ltcb_interactive.py](build_ltcb_interactive.py) from
-[ltcb-interactive.template.html](ltcb-interactive.template.html) with the
+assembled by [build_ltcb_interactive.py](../tools/ltcb/build_ltcb_interactive.py) from
+[ltcb-interactive.template.html](../tools/ltcb/ltcb-interactive.template.html) with the
 main table, the local entries, the phase table and the analysis JSON embedded
-(tests in [test_build_ltcb_interactive.py](test_build_ltcb_interactive.py),
+(tests in [test_build_ltcb_interactive.py](../tools/ltcb/test_build_ltcb_interactive.py),
 including a syntax check of the inline script). It loads Plotly from cdnjs
 and the IBM Plex faces from Google Fonts; everything else ships in the file.
 One filter row scopes every chart and the table: one family emphasised at a
@@ -204,7 +213,7 @@ table that also lists the total-time and per-GB rates.
 Light and dark themes follow the viewer. Rebuild after any input changes:
 
 ```sh
-python3 -B research/build_ltcb_interactive.py
+python3 -B tools/ltcb/build_ltcb_interactive.py
 ```
 
 ## Local entries beside the table
@@ -223,7 +232,7 @@ and the enwik8 axis); LTCB's own ranking needs enwik9.
 Regenerate with the local entries included:
 
 ```sh
-python3 -B research/plot_ltcb_tables.py --local research/ltcb-local-entries.csv \
+python3 -B tools/ltcb/plot_ltcb_tables.py --local research/ltcb-local-entries.csv \
     --output research/ltcb-dashboard.svg
 ```
 

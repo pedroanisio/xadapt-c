@@ -1,0 +1,463 @@
+<title>LTCB Frontier Explorer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --surface: #fcfcfb; --page: #f9f9f7; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --context: #c3c2b7; --blue: #2a78d6; --orange: #eb6834;
+    --chip: #f0efec; --chip-on: #0b0b0b; --chip-on-ink: #fcfcfb; --border: rgba(11,11,11,0.10);
+    --diamond: #0b0b0b; --diamond-ring: #fcfcfb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: #1a1a19; --page: #0d0d0d; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --context: #55544f; --blue: #3987e5; --orange: #d95926;
+      --chip: #262624; --chip-on: #ffffff; --chip-on-ink: #1a1a19; --border: rgba(255,255,255,0.10);
+      --diamond: #ffffff; --diamond-ring: #1a1a19;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface: #1a1a19; --page: #0d0d0d; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --context: #55544f; --blue: #3987e5; --orange: #d95926;
+    --chip: #262624; --chip-on: #ffffff; --chip-on-ink: #1a1a19; --border: rgba(255,255,255,0.10);
+    --diamond: #ffffff; --diamond-ring: #1a1a19;
+  }
+  body { background: var(--page); color: var(--ink); font: 14px/1.5 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; padding: 0 20px; padding-block: 24px 48px; }
+  .mono, table, .tick, .kpi .value, .num { font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 1440px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+  header h1 { font-size: 26px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; text-wrap: balance; }
+  header p { margin: 0; color: var(--ink2); max-width: 78ch; }
+  header .src { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px 24px; }
+  .kpi .label { color: var(--ink2); font-size: 12.5px; }
+  .kpi .value { font-size: 22px; font-weight: 500; color: var(--ink); line-height: 1.25; margin: 2px 0; }
+  .kpi .sub { color: var(--muted); font-size: 12px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; position: sticky; top: 0; z-index: 5; }
+  .filters .group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .filters .name { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+  .chip { border: 1px solid var(--border); background: var(--chip); color: var(--ink); border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--chip-on); color: var(--chip-on-ink); border-color: var(--chip-on); }
+  .chip:focus-visible, select:focus-visible, input:focus-visible, th button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  select, input[type="search"] { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 4px; padding: 4px 8px; }
+  input[type="search"] { min-width: 180px; }
+  .count { color: var(--ink2); font-size: 12.5px; margin-left: auto; }
+  section h2 { font-size: 16px; font-weight: 600; margin: 0 0 2px; }
+  section .lede { color: var(--ink2); font-size: 13px; margin: 0 0 10px; max-width: 100ch; }
+  .chart { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+  .chart.tall { height: 520px; } .chart.mid { height: 420px; } .chart.phase { height: 560px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+  .readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 18px 28px; }
+  .readout > div { min-width: 0; overflow-x: auto; }
+  .stat-table td, .stat-table th { white-space: nowrap; }
+  .readout h3 { font-size: 13px; font-weight: 600; margin: 0 0 4px; }
+  .readout p, .readout li { margin: 0; color: var(--ink2); font-size: 13px; }
+  .readout ul { margin: 0; padding-left: 18px; }
+  .readout .num { color: var(--ink); }
+  .stat-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .stat-table th, .stat-table td { text-align: right; padding: 3px 8px; border-bottom: 1px solid var(--grid); }
+  .stat-table th:first-child, .stat-table td:first-child { text-align: left; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+  .stat-table th { color: var(--ink2); font-weight: 500; }
+  .tablewrap { overflow: auto; max-height: 600px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+  #entries { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  #entries th, #entries td { padding: 5px 10px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  #entries th { position: sticky; top: 0; background: var(--surface); color: var(--ink2); font-weight: 500; }
+  #entries th button { all: unset; cursor: pointer; }
+  #entries th button::after { content: " ↕"; color: var(--muted); }
+  #entries th[aria-sort="ascending"] button::after { content: " ↑"; color: var(--ink); }
+  #entries th[aria-sort="descending"] button::after { content: " ↓"; color: var(--ink); }
+  #entries td.name, #entries th.name { text-align: left; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+  #entries tr.local td { font-weight: 500; }
+  #entries tr.hit td.name { color: var(--orange); }
+  #entries tr.fam td.name::before { content: "● "; color: var(--blue); }
+  #entries tr.local td.name::before { content: "◆ "; color: var(--diamond); }
+  .flag { display: inline-block; font-size: 10.5px; padding: 0 5px; border-radius: 3px; background: var(--chip); color: var(--ink2); margin-left: 4px; }
+  footer { color: var(--muted); font-size: 12px; max-width: 90ch; }
+  @media (prefers-reduced-motion: no-preference) { .chip { transition: background 120ms; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>LTCB Frontier Explorer</h1>
+    <p>Every program on Matt Mahoney's Large Text Compression Benchmark, on enwik9 (10⁹ bytes of Wikipedia) and enwik8 (its first 10⁸), with this repository's cadapt drawn beside them. Lower bits per byte is better; times are the benchmark's nanoseconds per byte on assorted machines.</p>
+    <p class="src" id="source"></p>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="filters" role="region" aria-label="Filters">
+    <div class="group"><span class="name">Emphasis</span><span id="family-chips"></span></div>
+    <div class="group"><label class="name" for="search">Find</label><input type="search" id="search" placeholder="program name…" aria-label="Find entries by name"></div>
+    <div class="group"><label class="name" for="ratio-axis">Ratio</label>
+      <select id="ratio-axis"><option value="e9">enwik9 (ranked)</option><option value="e8">enwik8</option></select></div>
+    <div class="group"><label class="name" for="time-axis">Time</label>
+      <select id="time-axis"><option value="comp">compression</option><option value="decomp">decompression</option><option value="tt">compression + decompression</option></select></div>
+    <div class="group"><label class="name" for="mem-cap">Memory ≤</label>
+      <select id="mem-cap"><option value="">any</option><option value="64">64 MB</option><option value="1000">1 GB</option><option value="4000">4 GB</option><option value="16000">16 GB</option></select></div>
+    <div class="group"><label class="name" for="time-cap">Time ≤</label>
+      <select id="time-cap"><option value="">any</option><option value="100">100 ns/B</option><option value="1000">1,000</option><option value="10000">10,000</option><option value="100000">100,000</option></select></div>
+    <span class="count" id="count"></span>
+  </div>
+
+  <section>
+    <h2>Ratio against time</h2>
+    <p class="lede">Hover any mark for the entry. The line is the frontier over all timed published entries: no entry is both faster and smaller. The emphasised family is blue, search hits orange, cadapt the diamond.</p>
+    <div id="main" class="chart tall"></div>
+  </section>
+
+  <div class="two">
+    <section>
+      <h2>Ratio against memory</h2>
+      <p class="lede">Peak compression memory as the tester measured it.</p>
+      <div id="memory" class="chart mid"></div>
+    </section>
+    <section>
+      <h2>Decompression against compression time</h2>
+      <p class="lede">Bit-at-a-time modellers pay the same to decode; string parsers decode far faster.</p>
+      <div id="symmetry" class="chart mid"></div>
+    </section>
+  </div>
+
+  <section>
+    <h2>Phases of the frontier</h2>
+    <p class="lede">A phase is a run of frontier points held by one family; shaded bands alternate per phase and a band runs until the next family's first point. Rules mark each change with what it buys. The strip below is the marginal gain of each step, bits per byte per tenfold time: spikes are cliffs, troughs plateaus. Uses the time axis chosen above; hover a frontier point for what its step buys.</p>
+    <div id="phases" class="chart phase"></div>
+  </section>
+
+  <div class="two">
+    <section>
+      <h2>Size removed per second</h2>
+      <p class="lede">For enwik9 the ns-per-byte figure is numerically the run time in seconds, so this is (10⁹ − output) ÷ time: how fast each program makes data smaller.</p>
+      <div id="rates" class="chart mid"></div>
+    </section>
+    <section>
+      <h2>enwik8 → enwik9 scaling</h2>
+      <p class="lede">Fitted power law across the published pairs, with cadapt's predicted enwik9 (and its interval) drawn from its enwik8 result; a measured enwik9 is drawn as the solid diamond.</p>
+      <div id="scaling" class="chart mid"></div>
+    </section>
+  </div>
+
+  <section>
+    <h2>Weighted efficiency</h2>
+    <p class="lede">Cost = bpb × (compress + decompress ns/B)<sup>α</sup> × (memory MB)<sup>β</sup>, lower is better. α and β say how much a tenfold increase in time or memory is worth in ratio terms; at α = β = 0 this is the plain ranking. Units cancel in the ranking. The table on the right is the winner for each weighting.</p>
+    <div class="two">
+      <div>
+        <div class="filters" style="position: static; margin-bottom: 10px">
+          <div class="group"><label class="name" for="alpha">α time</label><input type="range" id="alpha" min="0" max="0.5" step="0.05" value="0.1"><span class="mono" id="alpha-val">0.10</span></div>
+          <div class="group"><label class="name" for="beta">β memory</label><input type="range" id="beta" min="0" max="0.35" step="0.05" value="0.05"><span class="mono" id="beta-val">0.05</span></div>
+        </div>
+        <div id="weighted" class="chart mid"></div>
+      </div>
+      <div><table class="stat-table" id="prefmap"></table></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Analysis readout</h2>
+    <p class="lede">Computed from the published columns by <span class="mono">analyze_ltcb.py</span>; the same numbers as the Markdown report in the repository.</p>
+    <div class="readout" id="readout"></div>
+  </section>
+
+  <section>
+    <h2>Table</h2>
+    <p class="lede">The same entries the charts show, under the same filters. Click a heading to sort. Flags: x executable, s source, d separate decompressor; ◆ frontier-best time or memory as underlined on the page.</p>
+    <div class="tablewrap"><table id="entries"></table></div>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+
+<script id="ltcb-data" type="application/json">/*__DATA__*/</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/4.1.0/plotly.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  const D = JSON.parse(document.getElementById('ltcb-data').textContent);
+  const FAMILIES = D.meta.families;             // key -> label
+  const ORDER = Object.keys(FAMILIES);
+  const SHORT = { CM: 'Context mixing', Neural: 'Neural', PPM: 'PPM', BWT: 'BWT', LZ: 'LZ / dictionary', Other: 'Other' };
+  const bpb9 = r => r.e9 * 8 / 1e9, bpb8 = r => r.e8 == null ? null : r.e8 * 8 / 1e8;
+  const fmt = n => n == null ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const f3 = n => n == null ? '—' : n.toFixed(3);
+  const tok = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  const state = { family: 'all', q: '', ratio: 'e9', time: 'comp', mem: '', tcap: '', sort: ['rank', 1], alpha: 0.1, beta: 0.05 };
+  const tt = r => r.comp != null && r.decomp != null ? r.comp + r.decomp : null;
+  const rows = D.rows.map(r => ({ ...r, bpb9: bpb9(r), bpb8: bpb8(r), total_bpb: r.total * 8 / 1e9, tt: tt(r) }));
+  const local = D.local.map(r => ({ ...r, bpb9: r.e9 == null ? null : r.e9 * 8 / 1e9, bpb8: r.e8 == null ? null : r.e8 * 8 / 1e8,
+                                    total: r.e9 == null ? null : r.e9 + r.zip, tt: tt(r) }));
+  const TIME_LABEL = { comp: 'compression', decomp: 'decompression', tt: 'compression + decompression' };
+
+  // ---- KPIs and header ------------------------------------------------------------------
+  document.getElementById('source').textContent = 'Source: ' + D.meta.source + '. Fetched ' + D.meta.fetched + '. Published values only; nothing here is measured except the local entries, which are labelled as such.';
+  document.getElementById('footer').textContent = 'Families fold the page\'s algorithm labels: context mixing (CM, CM1); neural (Tr, LSTM); PPM; BWT (BWT, BWTS, ST); LZ / dictionary (LZ77, LZ, LZSS, LZW, ROLZ, LZP, Dict, Gram, BPE); other (order-n, SR, DMC, MTF and unlabelled rows). The frontier, phases, and statistics are computed from the published table by the repository\'s analysis scripts.';
+  (function kpis() {
+    const withE8 = rows.filter(r => r.e8 != null), timed = rows.filter(r => r.comp != null);
+    const best = rows.reduce((a, b) => a.total < b.total ? a : b);
+    const bestE8 = withE8.reduce((a, b) => a.e8 < b.e8 ? a : b);
+    const tiles = [
+      ['Entries', String(rows.length), withE8.length + ' with enwik8 · ' + timed.length + ' timed'],
+      ['Best total (enwik9 + decompressor)', fmt(best.total) + ' B', best.label + ' · ' + f3(best.total_bpb) + ' bpb'],
+      ['Best enwik8', fmt(bestE8.e8) + ' B', bestE8.label + ' · ' + f3(bestE8.bpb8) + ' bpb'],
+    ];
+    for (const L of local) {
+      const a = D.analysis.local.find(x => x.label === L.label) || {};
+      if (L.e9 != null) tiles.push(['◆ ' + L.program + ' (local)', fmt(L.total) + ' B total', 'would rank #' + a.total_rank + ' of ' + rows.length + ' · ' + f3(L.bpb9) + ' bpb · enwik8 ' + f3(L.bpb8)]);
+      else tiles.push(['◆ ' + L.program + ' (local)', fmt(L.e8) + ' B enwik8', '#' + a.enwik8_rank + ' of ' + a.enwik8_rank_of + ' on enwik8 · ' + f3(L.bpb8) + ' bpb · enwik9 pending']);
+    }
+    document.getElementById('kpis').innerHTML = tiles.map(t => '<div class="kpi"><div class="label">' + esc(t[0]) + '</div><div class="value">' + esc(t[1]) + '</div><div class="sub">' + esc(t[2]) + '</div></div>').join('');
+  })();
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  // ---- filters ----------------------------------------------------------------------------
+  const chips = document.getElementById('family-chips');
+  [['all', 'All (grey)'], ...ORDER.map(k => [k, FAMILIES[k]])].forEach(([k, label]) => {
+    const b = document.createElement('button'); b.className = 'chip'; b.type = 'button'; b.id = 'chip-' + k;
+    b.textContent = label; b.setAttribute('aria-pressed', String(k === state.family));
+    b.addEventListener('click', () => { state.family = k; chips.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(c === b))); render(); });
+    chips.appendChild(b);
+  });
+  const bind = (id, key) => document.getElementById(id).addEventListener('input', e => { state[key] = e.target.value; render(); });
+  bind('search', 'q'); bind('ratio-axis', 'ratio'); bind('time-axis', 'time'); bind('mem-cap', 'mem'); bind('time-cap', 'tcap');
+  for (const k of ['alpha', 'beta']) document.getElementById(k).addEventListener('input', e => { state[k] = +e.target.value; document.getElementById(k + '-val').textContent = state[k].toFixed(2); drawWeighted(visible(), theme()); });
+
+  function visible() {
+    return rows.filter(r => (!state.mem || r.mem <= +state.mem) && (!state.tcap || (r[state.time] != null && r[state.time] <= +state.tcap)));
+  }
+  const isHit = r => state.q.trim() && r.label.toLowerCase().includes(state.q.trim().toLowerCase());
+  const ratioOf = r => state.ratio === 'e9' ? r.bpb9 : r.bpb8;
+  const ratioName = () => state.ratio === 'e9' ? 'enwik9, bits per byte' : 'enwik8, bits per byte';
+  const timeName = () => TIME_LABEL[state.time] + ', ns per byte (log)';
+
+  // ---- Plotly helpers ---------------------------------------------------------------------
+  function theme() {
+    return { surface: tok('--surface'), ink: tok('--ink'), ink2: tok('--ink2'), muted: tok('--muted'), grid: tok('--grid'),
+             axis: tok('--axis'), context: tok('--context'), blue: tok('--blue'), orange: tok('--orange'), diamond: tok('--diamond'), ring: tok('--diamond-ring') };
+  }
+  function layoutBase(t, extra) {
+    return Object.assign({
+      paper_bgcolor: t.surface, plot_bgcolor: t.surface, font: { family: 'IBM Plex Sans, system-ui, sans-serif', size: 12, color: t.ink2 },
+      margin: { l: 56, r: 24, t: 16, b: 48 }, hovermode: 'closest', hoverlabel: { bgcolor: t.surface, bordercolor: t.axis, font: { family: 'IBM Plex Mono, monospace', size: 12, color: t.ink } },
+      legend: { orientation: 'h', x: 0, y: 1.08, font: { color: t.ink2 } },
+      xaxis: { gridcolor: t.grid, zeroline: false, linecolor: t.axis, tickfont: { family: 'IBM Plex Mono, monospace', color: t.muted }, title: { font: { color: t.ink2 } } },
+      yaxis: { gridcolor: t.grid, zeroline: false, linecolor: t.axis, tickfont: { family: 'IBM Plex Mono, monospace', color: t.muted }, title: { font: { color: t.ink2 } } },
+    }, extra);
+  }
+  const CONFIG = { displaylogo: false, responsive: true, modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'] };
+  function hover(r) {
+    return '<b>' + esc(r.label) + '</b><br>#' + r.rank + ' · ' + FAMILIES[r.family] + ' (' + esc(r.alg || '—') + ')<br>enwik9 ' + fmt(r.e9) + ' B · ' + f3(r.bpb9) + ' bpb' +
+      (r.e8 != null ? '<br>enwik8 ' + fmt(r.e8) + ' B · ' + f3(r.bpb8) + ' bpb' : '') +
+      '<br>comp ' + fmt(r.comp) + ' · decomp ' + fmt(r.decomp) + ' ns/B · mem ' + fmt(r.mem) + ' MB' +
+      '<br>decompressor ' + fmt(r.zip) + ' B ' + (r.flags || '') + (r.cp || r.dp || r.mp ? ' · ◆ frontier-best' : '') + '<extra></extra>';
+  }
+  function hoverLocal(r) {
+    return '<b>' + esc(r.label) + '</b> — local<br>' + (r.e9 != null ? 'enwik9 ' + fmt(r.e9) + ' B · ' + f3(r.bpb9) + ' bpb<br>' : 'enwik9 pending<br>') +
+      'enwik8 ' + fmt(r.e8) + ' B · ' + f3(r.bpb8) + ' bpb<br>comp ' + fmt(r.comp) + ' · decomp ' + fmt(r.decomp) + ' ns/B (' + r.timed_on + ') · mem ' + fmt(r.mem) + ' MB<extra></extra>';
+  }
+  function marks(list, xf, yf, name, color, size, t) {
+    const pts = list.filter(r => xf(r) != null && yf(r) != null && xf(r) > 0);
+    return { type: 'scatter', mode: 'markers', name: name + ' · ' + pts.length, x: pts.map(xf), y: pts.map(yf),
+             text: pts.map(hover), hovertemplate: '%{text}', marker: { size, color, line: { width: 1, color: t.surface } } };
+  }
+  function localMarks(xf, yf, t, provisional) {
+    const pts = local.filter(r => xf(r) != null && yf(r) != null);
+    if (!pts.length) return null;
+    const hollow = pts.map(r => provisional(r));
+    return { type: 'scatter', mode: 'markers+text', name: 'cadapt (local)', x: pts.map(xf), y: pts.map(yf), customdata: pts.map(hoverLocal), hovertemplate: '%{customdata}',
+             text: pts.map(r => r.program + (provisional(r) ? ' (enwik8 ratio)' : '')), textposition: 'top right', textfont: { family: 'IBM Plex Sans, system-ui, sans-serif', size: 12, color: t.ink },
+             marker: { symbol: 'diamond', size: 13, color: hollow.map(h => h ? t.surface : t.diamond), line: { width: 2, color: t.diamond } } };
+  }
+  function frontier(list, key, yf) {
+    const pts = list.filter(r => r[key] != null && yf(r) != null).sort((a, b) => a[key] - b[key] || yf(a) - yf(b));
+    const out = []; let best = Infinity;
+    for (const r of pts) { const y = yf(r); if (y < best) { out.push({ x: r[key], y, r }); best = y; } }
+    return out;
+  }
+  function frontierTrace(front, t, xmax) {
+    return { type: 'scatter', mode: 'lines', name: 'frontier', x: front.map(p => p.x).concat([xmax]), y: front.map(p => p.y).concat([front[front.length - 1].y]),
+             line: { shape: 'hv', width: 2, color: t.ink2 }, hoverinfo: 'skip' };
+  }
+  function emphasisTraces(list, xf, yf, t) {
+    const hits = list.filter(isHit), fam = list.filter(r => state.family !== 'all' && r.family === state.family && !isHit(r));
+    const rest = list.filter(r => !isHit(r) && !(state.family !== 'all' && r.family === state.family));
+    return [marks(rest, xf, yf, 'other entries', t.context, 7, t),
+            marks(fam, xf, yf, state.family === 'all' ? 'emphasised family' : FAMILIES[state.family], t.blue, 9, t),
+            marks(hits, xf, yf, 'search hits', t.orange, 10, t)];
+  }
+  const localRatio = r => state.ratio === 'e9' ? (r.bpb9 != null ? r.bpb9 : r.bpb8) : r.bpb8;
+  const localProvisional = r => state.ratio === 'e9' && r.bpb9 == null;
+
+  // ---- charts -----------------------------------------------------------------------------
+  function drawMain(list, t) {
+    const key = state.time, xf = r => r[key], yf = ratioOf;
+    const front = frontier(rows, key, yf);
+    const traces = emphasisTraces(list, xf, yf, t);
+    traces.push(frontierTrace(front, t, 2e7));
+    const lm = localMarks(r => r[key], localRatio, t, localProvisional); if (lm) traces.push(lm);
+    Plotly.react('main', traces, layoutBase(t, { xaxis: Object.assign(layoutBase(t).xaxis, { type: 'log', title: { text: timeName() }, range: [0, 7.3] }),
+                                              yaxis: Object.assign(layoutBase(t).yaxis, { title: { text: ratioName() }, range: [0.5, 8.5] }) }), CONFIG);
+  }
+  function drawMemory(list, t) {
+    const traces = emphasisTraces(list, r => r.mem, ratioOf, t);
+    const lm = localMarks(r => r.mem, localRatio, t, localProvisional); if (lm) traces.push(lm);
+    Plotly.react('memory', traces, layoutBase(t, { xaxis: Object.assign(layoutBase(t).xaxis, { type: 'log', title: { text: 'compression memory, MB (log)' } }),
+                                                yaxis: Object.assign(layoutBase(t).yaxis, { title: { text: ratioName() }, range: [0.5, 8.5] }) }), CONFIG);
+  }
+  function drawSymmetry(list, t) {
+    const traces = emphasisTraces(list, r => r.comp, r => r.decomp, t);
+    traces.push({ type: 'scatter', mode: 'lines', name: 'decode = encode', x: [1, 2e7], y: [1, 2e7], line: { width: 1, color: t.axis }, hoverinfo: 'skip' });
+    const lm = localMarks(r => r.comp, r => r.decomp, t, () => false); if (lm) traces.push(lm);
+    Plotly.react('symmetry', traces, layoutBase(t, { xaxis: Object.assign(layoutBase(t).xaxis, { type: 'log', title: { text: 'compression, ns per byte (log)' }, range: [0, 7.3] }),
+                                                  yaxis: Object.assign(layoutBase(t).yaxis, { type: 'log', title: { text: 'decompression, ns per byte (log)' }, range: [0, 7.3] }) }), CONFIG);
+  }
+  function computePhases(key) {
+    // Mirrors plot_ltcb_phases.py: frontier points, maximal one-family runs, transitions, step gains.
+    const front = frontier(rows, key, r => r.bpb9);
+    const P = front.map((p, i) => ({ program: p.r.program, family: p.r.family, speed: p.x, bpb: p.y,
+      step_gain_per_decade: i + 1 < front.length && front[i + 1].x > p.x ? (p.y - front[i + 1].y) / Math.log10(front[i + 1].x / p.x) : null }));
+    let n = 0;
+    P.forEach((p, i) => { if (i === 0 || P[i - 1].family !== p.family) { n += 1; if (i > 0) { p.transition_bpb_drop = P[i - 1].bpb - p.bpb; p.transition_time_ratio = p.speed / P[i - 1].speed; } } p.phase = n; });
+    const starts = {}; P.forEach(p => { if (!(p.phase in starts)) starts[p.phase] = p.speed; });
+    P.forEach(p => { p.phase_start = starts[p.phase]; p.phase_end = starts[p.phase + 1] != null ? starts[p.phase + 1] : P[P.length - 1].speed; });
+    return P;
+  }
+  function drawPhases(t) {
+    const key = state.time;
+    const P = computePhases(key);
+    const phases = []; for (const p of P) { const last = phases[phases.length - 1]; if (last && last.n === p.phase) last.points.push(p); else phases.push({ n: p.phase, family: p.family, start: p.phase_start, end: p.phase_end, points: [p] }); }
+    const shapes = [], ann = [], XMAX = 7.3, px = v => Math.log10(v) / XMAX;  // paper x on the fixed log range
+    phases.forEach((ph, i) => {
+      const end = Math.max(ph.end, ph.start * 1.15);
+      if (i % 2 === 0) shapes.push({ type: 'rect', xref: 'paper', yref: 'paper', x0: px(ph.start), x1: px(end), y0: 0.3, y1: 1, fillcolor: t.grid, opacity: 0.5, line: { width: 0 }, layer: 'below' });
+      const narrow = Math.log10(end / ph.start) < 0.42;
+      ann.push({ xref: 'paper', yref: 'paper', x: (px(ph.start) + px(end)) / 2, y: 0.995, yanchor: 'top', text: SHORT[ph.family] + ' · ' + ph.points.length, showarrow: false, textangle: narrow ? -90 : 0, font: { size: 11, color: t.ink } });
+    });
+    const front = P.map(p => ({ x: p.speed, y: p.bpb }));
+    const traces = [marks(rows, r => r[key], r => r.bpb9, 'all timed entries', t.context, 6, t),
+                    { type: 'scatter', mode: 'lines+markers', name: 'frontier', x: front.map(p => p.x).concat([2e7]), y: front.map(p => p.y).concat([front[front.length - 1].y]),
+                      line: { shape: 'hv', width: 2, color: t.blue }, marker: { size: 8, color: t.blue, line: { width: 1, color: t.surface } },
+                      text: P.map(p => '<b>' + esc(p.program) + '</b><br>phase ' + p.phase + ' · ' + FAMILIES[p.family] + '<br>' + fmt(p.speed) + ' ns/B · ' + p.bpb.toFixed(3) + ' bpb' + (p.transition_bpb_drop != null ? '<br>enters: −' + p.transition_bpb_drop.toFixed(2) + ' bpb for ×' + p.transition_time_ratio.toFixed(1) + ' time' : '') + (p.step_gain_per_decade != null ? '<br>next step gains ' + p.step_gain_per_decade.toFixed(3) + ' bpb/decade' : '') + '<extra></extra>').concat(['']), hovertemplate: '%{text}' }];
+    for (const p of P) if (p.transition_bpb_drop != null) {
+      const top = p.bpb + p.transition_bpb_drop;
+      shapes.push({ type: 'line', xref: 'paper', yref: 'y', x0: px(p.speed), x1: px(p.speed), y0: p.bpb, y1: top, line: { width: 1.5, color: t.ink2 } });
+      if (p.transition_bpb_drop >= 0.1) ann.push({ xref: 'paper', yref: 'y', x: px(p.speed) + 0.008, y: p.transition_bpb_drop >= 0.5 ? (top + p.bpb) / 2 : top + 0.35, xanchor: 'left', text: '−' + p.transition_bpb_drop.toFixed(2) + ' bpb for ×' + p.transition_time_ratio.toFixed(1) + ' time', showarrow: p.transition_bpb_drop < 0.5, ax: 0, ay: -22, arrowcolor: t.axis, arrowwidth: 1, font: { size: 11, color: t.ink2 } });
+    }
+    const steps = P.filter(p => p.step_gain_per_decade != null);
+    const gains = { type: 'scatter', mode: 'markers', name: 'gain per decade', xaxis: 'x', yaxis: 'y2', x: steps.map(p => p.speed), y: steps.map(p => p.step_gain_per_decade), marker: { size: 8, color: t.blue, line: { width: 1, color: t.surface } },
+                    text: steps.map(p => esc(p.program) + ' → next: ' + p.step_gain_per_decade.toFixed(3) + ' bpb per decade<extra></extra>'), hovertemplate: '%{text}' };
+    traces.push(gains);
+    const lm = localMarks(r => r[key], localRatio, t, localProvisional); if (lm) traces.push(lm);
+    const base = layoutBase(t, { shapes, annotations: ann, margin: { l: 56, r: 24, t: 16, b: 48 } });
+    base.xaxis = Object.assign(base.xaxis, { type: 'log', range: [0, XMAX], title: { text: timeName() }, anchor: 'y2' });
+    base.yaxis = Object.assign(base.yaxis, { domain: [0.3, 1], range: [0.6, 4.4], title: { text: 'enwik9, bits per byte' } });
+    base.yaxis2 = Object.assign({}, layoutBase(t).yaxis, { domain: [0, 0.22], type: 'log', range: [-3, 2], title: { text: 'gain / decade' } });
+    base.margin = { l: 72, r: 24, t: 16, b: 48 };
+    base.legend = { orientation: 'h', x: 0, y: 1.06, font: { color: t.ink2 } };
+    Plotly.react('phases', traces, base, CONFIG);
+  }
+  function drawRates(list, t) {
+    const key = state.time, sec = r => r[key];
+    const rate = r => sec(r) == null ? null : (1e9 - r.e9) / 1e6 / sec(r);
+    const traces = emphasisTraces(list, rate, r => r.bpb9, t);
+    const lp = local.filter(r => r.e9 != null && r[key] != null);
+    if (lp.length) traces.push({ type: 'scatter', mode: 'markers+text', name: 'cadapt (local)', x: lp.map(r => (1e9 - r.e9) / 1e6 / r[key]), y: lp.map(r => r.bpb9), customdata: lp.map(hoverLocal), hovertemplate: '%{customdata}', text: lp.map(r => r.program), textposition: 'top right', textfont: { size: 12, color: t.ink }, marker: { symbol: 'diamond', size: 13, color: t.diamond, line: { width: 2, color: t.diamond } } });
+    Plotly.react('rates', traces, layoutBase(t, { xaxis: Object.assign(layoutBase(t).xaxis, { type: 'log', title: { text: 'MB removed per second of ' + TIME_LABEL[state.time] + ' time (log)' } }),
+                                                yaxis: Object.assign(layoutBase(t).yaxis, { title: { text: 'enwik9, bits per byte' }, range: [0.5, 8.5] }) }), CONFIG);
+  }
+  function drawScaling(list, t) {
+    const S = D.analysis.scaling;
+    const traces = emphasisTraces(list, r => r.bpb8, r => r.bpb9, t);
+    const xs = []; for (let x = 0.7; x <= 8.5; x += 0.1) xs.push(x);
+    traces.push({ type: 'scatter', mode: 'lines', name: 'fit: ln y = ' + S.intercept.toFixed(3) + ' + ' + S.slope.toFixed(3) + ' ln x', x: xs, y: xs.map(x => Math.exp(S.intercept + S.slope * Math.log(x))), line: { width: 2, color: t.ink2 }, hoverinfo: 'skip' });
+    traces.push({ type: 'scatter', mode: 'lines', name: 'same ratio', x: [0.5, 8.5], y: [0.5, 8.5], line: { width: 1, color: t.axis }, hoverinfo: 'skip' });
+    for (const L of local) {
+      const a = D.analysis.local.find(x => x.label === L.label); if (!a || L.bpb8 == null) continue;
+      const [lo, hi] = a.predicted_enwik9_interval;
+      traces.push({ type: 'scatter', mode: 'markers', name: L.program + ' predicted', x: [L.bpb8], y: [a.predicted_enwik9_bpb], error_y: { type: 'data', symmetric: false, array: [hi - a.predicted_enwik9_bpb], arrayminus: [a.predicted_enwik9_bpb - lo], color: t.diamond, thickness: 1.5, width: 6 },
+                    marker: { symbol: 'diamond', size: 13, color: t.surface, line: { width: 2, color: t.diamond } }, text: ['<b>' + esc(L.label) + '</b><br>predicted enwik9 ' + a.predicted_enwik9_bpb.toFixed(3) + ' bpb (' + lo.toFixed(3) + '–' + hi.toFixed(3) + ')<br>from enwik8 ' + L.bpb8.toFixed(3) + ' by the scaling law<extra></extra>'], hovertemplate: '%{text}' });
+      if (L.bpb9 != null) traces.push({ type: 'scatter', mode: 'markers', name: L.program + ' measured', x: [L.bpb8], y: [L.bpb9], marker: { symbol: 'diamond', size: 13, color: t.diamond, line: { width: 2, color: t.diamond } }, text: ['<b>' + esc(L.label) + '</b><br>measured enwik9 ' + L.bpb9.toFixed(3) + ' bpb<extra></extra>'], hovertemplate: '%{text}' });
+    }
+    Plotly.react('scaling', traces, layoutBase(t, { xaxis: Object.assign(layoutBase(t).xaxis, { title: { text: 'enwik8, bits per byte' }, range: [0.5, 8.5] }),
+                                                  yaxis: Object.assign(layoutBase(t).yaxis, { title: { text: 'enwik9, bits per byte' }, range: [0.5, 8.5] }) }), CONFIG);
+  }
+
+  const cost = (r, a, b) => r.bpb9 * Math.pow(r.tt, a) * Math.pow(r.mem, b);
+  function drawWeighted(list, t) {
+    const a = state.alpha, b = state.beta;
+    const pool = list.filter(r => r.tt != null && r.mem > 0).map(r => ({ r, c: cost(r, a, b) })).sort((x, y) => x.c - y.c).slice(0, 15).reverse();
+    const traces = [{ type: 'bar', orientation: 'h', name: 'weighted cost', x: pool.map(p => p.c), y: pool.map(p => p.r.label), width: 0.62,
+      marker: { color: pool.map(p => isHit(p.r) ? t.orange : (state.family !== 'all' && p.r.family === state.family ? t.blue : t.context)), line: { width: 1, color: t.surface } },
+      customdata: pool.map(p => hover(p.r).replace('<extra></extra>', '<br>cost ' + p.c.toFixed(3) + '<extra></extra>')), hovertemplate: '%{customdata}' }];
+    const lp = local.filter(r => r.tt != null && r.bpb9 != null);
+    for (const L of lp) {
+      const c = cost(L, a, b), all = rows.filter(r => r.tt != null && r.mem > 0).map(r => cost(r, a, b));
+      const rank = 1 + all.filter(x => x < c).length;
+      traces.push({ type: 'scatter', mode: 'markers+text', name: L.program + ' (local) would rank #' + rank, x: [c], y: [pool.length ? pool[0].r.label : ''], yaxis: 'y', text: ['◆ ' + L.program + ' cost ' + c.toFixed(2) + ', rank #' + rank + ' of ' + all.length], textposition: 'middle right', textfont: { size: 12, color: t.ink }, marker: { symbol: 'diamond', size: 12, color: t.diamond }, hoverinfo: 'skip' });
+    }
+    const lay = layoutBase(t, { margin: { l: 220, r: 24, t: 16, b: 44 }, showlegend: false, bargap: 0.38 });
+    lay.xaxis = Object.assign(lay.xaxis, { title: { text: 'cost = bpb × time^' + a.toFixed(2) + ' × mem^' + b.toFixed(2) + ' (lower is better)' }, rangemode: 'tozero' });
+    lay.yaxis = Object.assign(lay.yaxis, { tickfont: { family: 'IBM Plex Sans, system-ui, sans-serif', size: 11, color: t.ink2 }, automargin: true, showgrid: false });
+    Plotly.react('weighted', traces, lay, CONFIG);
+  }
+  (function prefmap() {
+    const E = D.analysis.efficiency_index; if (!E) return;
+    const cell = (a, b) => (E.preference_map.find(g => g.alpha === a && g.beta === b) || {}).program || '—';
+    document.getElementById('prefmap').innerHTML = '<tr><th>α \\ β</th>' + E.betas.map(b => '<th>' + b + '</th>').join('') + '</tr>' +
+      E.alphas.map(a => '<tr><td class="num">' + a + '</td>' + E.betas.map(b => '<td style="text-align:left;font-family:IBM Plex Sans,system-ui,sans-serif">' + esc(cell(a, b)) + '</td>').join('') + '</tr>').join('') +
+      '<tr><td colspan="' + (E.betas.length + 1) + '" style="text-align:left;color:var(--muted)">Winner across all published entries with both times and memory; ' + E.distinct_winners.length + ' distinct winners on this grid.</td></tr>';
+  })();
+
+  // ---- readout ----------------------------------------------------------------------------
+  function readout() {
+    const A = D.analysis, S = A.scaling, C = A.correlations, E = A.elasticity;
+    const fam = Object.entries(A.families).map(([k, f]) => '<tr><td>' + esc(FAMILIES[k].split(' (')[0]) + '</td><td>' + f.n + '</td><td>' + f.bpb_median.toFixed(3) + '</td><td>' + f.bpb_q1.toFixed(2) + '–' + f.bpb_q3.toFixed(2) + '</td><td>' + fmt(f.comp_median) + '</td><td>' + fmt(f.mem_median) + '</td><td>' + (f.decomp_over_comp_median == null ? '—' : f.decomp_over_comp_median.toFixed(2)) + '</td></tr>').join('');
+    const corr = Object.entries(C).map(([k, c]) => '<tr><td>' + esc(k.replace(/_/g, ' ')) + '</td><td>' + c.spearman.toFixed(3) + '</td><td>' + c.pearson.toFixed(3) + '</td><td>' + c.n + '</td></tr>').join('');
+    const el = Object.entries(E).map(([k, e]) => e.error ? '<tr><td>' + esc(k) + '</td><td colspan="4">not estimable (' + esc(e.error) + ')</td></tr>' : '<tr><td>' + esc(k.replace(/_/g, ' ')) + '</td><td>' + e.n + '</td><td>' + e.r2.toFixed(3) + '</td><td>' + e.coef.log10_comp.toFixed(3) + ' ± ' + e.se.log10_comp.toFixed(3) + '</td><td>' + e.coef.log10_mem.toFixed(3) + ' ± ' + e.se.log10_mem.toFixed(3) + '</td></tr>').join('');
+    const ladder = A.cost_ladder.compression.map(s => '<tr><td>' + s.target + '</td><td>' + esc(s.program || 'not reached') + '</td><td>' + fmt(s.speed) + '</td><td>' + fmt(s.time_multiplier) + '</td></tr>').join('');
+    const rates = A.savings_rates.compression.top.slice(0, 6).map(x => '<tr><td>' + esc(x.program) + '</td><td>' + x.ratio.toFixed(3) + '</td><td>' + x.throughput_mb_per_s.toFixed(1) + '</td><td>' + x.saved_mb_per_s.toFixed(1) + '</td></tr>').join('');
+    const locals = A.local.map(a => '<h3>◆ ' + esc(a.label) + '</h3><ul>' +
+      (a.enwik8_rank != null ? '<li>enwik8 <span class="num">' + a.enwik8_bpb.toFixed(3) + '</span> bpb, rank <span class="num">#' + a.enwik8_rank + '</span> of ' + a.enwik8_rank_of + ' on that column.</li>' +
+        '<li><b>Predicted</b> enwik9 <span class="num">' + a.predicted_enwik9_bpb.toFixed(3) + '</span> bpb (95 % <span class="num">' + a.predicted_enwik9_interval[0].toFixed(3) + '–' + a.predicted_enwik9_interval[1].toFixed(3) + '</span>), about rank <span class="num">#' + a.predicted_total_rank + '</span> — a prediction from the scaling law, not a measurement.</li>' : '') +
+      (a.measured_enwik9 ? '<li><b>Measured</b> enwik9 <span class="num">' + a.enwik9_bpb.toFixed(3) + '</span> bpb, total rank <span class="num">#' + a.total_rank + '</span> of ' + a.total_rank_of + '.</li>' : '') +
+      (a.compression_saved_mb_per_s != null ? '<li>Removes <span class="num">' + a.compression_saved_mb_per_s.toFixed(2) + '</span> MB per second of compression time (rank #' + a.compression_saved_rank + ' on that measure).</li>' : '') +
+      (a.frontier_gap != null ? '<li><span class="num">' + a.frontier_gap.toFixed(3) + '</span> bpb above the compression frontier at its own speed (' + a.frontier_gap_basis + ' ratio).</li>' : '') +
+      (a.neighbours ? '<li>Nearest published entries in (log speed, log memory, ratio): ' + a.neighbours.map(n => esc(n.program) + ' (' + n.family + ', d=' + n.distance.toFixed(2) + ')').join(', ') + '.</li>' : '') + '</ul>').join('');
+    document.getElementById('readout').innerHTML =
+      '<div><h3>Families</h3><table class="stat-table"><tr><th>family</th><th>n</th><th>median bpb</th><th>Q1–Q3</th><th>median ns/B</th><th>median MB</th><th>decode/encode</th></tr>' + fam + '</table></div>' +
+      '<div><h3>Correlations with enwik9 ratio</h3><table class="stat-table"><tr><th>pair</th><th>Spearman ρ</th><th>Pearson r</th><th>n</th></tr>' + corr + '</table></div>' +
+      '<div><h3>enwik8 → enwik9 scaling</h3><p>ln(enwik9 bpb) = <span class="num">' + S.intercept.toFixed(3) + '</span> + <span class="num">' + S.slope.toFixed(3) + '</span> · ln(enwik8 bpb); slope SE <span class="num">' + S.se_slope.toFixed(3) + '</span>, R² <span class="num">' + S.r2.toFixed(3) + '</span>, residual SD <span class="num">' + S.resid_sd.toFixed(3) + '</span> (ln units), n = ' + S.n + '. A slope above 1: the stronger a model on enwik8, the more it gains from ten times the data.</p>' +
+      '<h3 style="margin-top:10px">Elasticity: bpb per decade of time and memory</h3><table class="stat-table"><tr><th>sample</th><th>n</th><th>R²</th><th>time</th><th>memory</th></tr>' + el + '</table></div>' +
+      '<div><h3>Cost of a bit (compression frontier)</h3><table class="stat-table"><tr><th>target bpb</th><th>fastest entry reaching it</th><th>ns/B</th><th>time ×</th></tr>' + ladder + '</table></div>' +
+      '<div><h3>Size removed per second, top six (compression)</h3><table class="stat-table"><tr><th>entry</th><th>ratio</th><th>MB/s in</th><th>MB/s removed</th></tr>' + rates + '</table><p style="margin-top:6px">Family medians: ' + Object.entries(A.savings_rates.compression.family_median).map(([k, v]) => esc(FAMILIES[k].split(' (')[0]) + ' <span class="num">' + v.toFixed(3) + '</span>').join(' · ') + ' MB/s.</p></div>' +
+      '<div>' + locals + '</div>';
+  }
+
+  // ---- table ------------------------------------------------------------------------------
+  const COLS = [['rank', '#', r => r.rank], ['label', 'program and options', r => r.label], ['family', 'family', r => FAMILIES[r.family].split(' (')[0]],
+                ['e8', 'enwik8 B', r => r.e8], ['e9', 'enwik9 B', r => r.e9], ['zip', 'decompressor B', r => r.zip], ['total', 'total B', r => r.total],
+                ['bpb9', 'enwik9 bpb', r => r.bpb9], ['comp', 'comp ns/B', r => r.comp], ['decomp', 'decomp ns/B', r => r.decomp], ['mem', 'mem MB', r => r.mem],
+                ['rate', 'MB/s removed (total time)', r => r.tt == null || r.e9 == null ? null : (1e9 - r.e9) / 1e6 / r.tt], ['rategb', 'per GB', r => r.tt == null || r.e9 == null || !r.mem ? null : (1e9 - r.e9) / 1e6 / r.tt / (r.mem / 1000)], ['note', 'note', r => r.note]];
+  function table(list) {
+    const [key, dir] = state.sort;
+    const col = COLS.find(c => c[0] === key);
+    const sorted = list.slice().sort((a, b) => { const x = col[2](a), y = col[2](b); if (x == null) return 1; if (y == null) return -1; return (x < y ? -1 : x > y ? 1 : 0) * dir; });
+    const head = '<thead><tr>' + COLS.map(c => '<th class="' + (c[0] === 'label' || c[0] === 'family' ? 'name' : '') + '" aria-sort="' + (c[0] === key ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"><button type="button" data-key="' + c[0] + '">' + esc(c[1]) + '</button></th>').join('') + '</tr></thead>';
+    const cell = (c, r) => { const v = c[2](r); if (c[0] === 'bpb9') return f3(v); if (c[0] === 'rate' || c[0] === 'rategb') return v == null ? '—' : v.toLocaleString('en-US', { maximumSignificantDigits: 3 }); if (typeof v === 'number') return fmt(v); return v == null ? '—' : esc(v); };
+    const body = '<tbody>' + local.map(r => '<tr class="local"><td>—</td><td class="name">' + esc(r.label) + ' <span class="flag">local</span></td><td class="name">' + esc(FAMILIES[r.family].split(' (')[0]) + '</td><td>' + fmt(r.e8) + '</td><td>' + fmt(r.e9) + '</td><td>' + fmt(r.zip) + '</td><td>' + fmt(r.total) + '</td><td>' + f3(r.bpb9) + '</td><td>' + fmt(r.comp) + '</td><td>' + fmt(r.decomp) + '</td><td>' + fmt(r.mem) + '</td><td>' + (r.tt != null && r.e9 != null ? ((1e9 - r.e9) / 1e6 / r.tt).toLocaleString('en-US', { maximumSignificantDigits: 3 }) : '—') + '</td><td>' + (r.tt != null && r.e9 != null ? ((1e9 - r.e9) / 1e6 / r.tt / (r.mem / 1000)).toLocaleString('en-US', { maximumSignificantDigits: 3 }) : '—') + '</td><td>' + esc(r.timed_on) + '</td></tr>').join('') +
+      sorted.map(r => '<tr class="' + (isHit(r) ? 'hit' : (state.family !== 'all' && r.family === state.family ? 'fam' : '')) + '">' + COLS.map(c => '<td class="' + (c[0] === 'label' || c[0] === 'family' ? 'name' : '') + '">' + cell(c, r) + (c[0] === 'zip' && r.flags ? ' <span class="flag">' + esc(r.flags) + '</span>' : '') + '</td>').join('') + '</tr>').join('') + '</tbody>';
+    const el = document.getElementById('entries'); el.innerHTML = head + body;
+    el.querySelectorAll('th button').forEach(b => b.addEventListener('click', () => { const k = b.dataset.key; state.sort = state.sort[0] === k ? [k, -state.sort[1]] : [k, 1]; table(visible()); }));
+  }
+
+  // ---- render -----------------------------------------------------------------------------
+  function render() {
+    const t = theme(), list = visible();
+    document.getElementById('count').textContent = list.length + ' of ' + rows.length + ' published entries shown' + (state.q.trim() ? ' · ' + list.filter(isHit).length + ' match "' + state.q.trim() + '"' : '');
+    drawMain(list, t); drawMemory(list, t); drawSymmetry(list, t); drawPhases(t); drawRates(list, t); drawScaling(list, t); drawWeighted(list, t); table(list);
+  }
+  readout();
+  render();
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  (mq.addEventListener ? mq.addEventListener('change', render) : mq.addListener(render));
+  new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>
