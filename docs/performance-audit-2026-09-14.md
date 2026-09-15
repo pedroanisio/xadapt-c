@@ -50,13 +50,25 @@ same bytes:
 Branch mispredictions fell from 15 to 6.9 per bit and IPC rose from 1.30
 to about 2.2. The whole-file check is under "Full enwik8" below.
 
-Two things measured and rejected on the way, kept here so they are not
-tried again: refreshing per-cell lane words (stretch and lanes) in the map
-update — every cell learns every bit, so it only moved work from `predict`
-to `update` and added 5 G instructions; and 24-lane planes to align the
-lane stores with the dot's loads — the same bytes, 8 % slower, since the
-extra lanes cost more than the forwarding stall they removed. Prefetching
-the arbiter sets toward L2 (`prefetcht1`) instead of L1 made no difference.
+Measured and rejected on the way, kept here so they are not tried again
+(each bytes-identical, each measured interleaved on the 8 MiB slice unless
+said otherwise):
+
+| Tried | Result |
+|---|---|
+| Per-cell lane words (stretch and lanes) refreshed in the map update | +5 G instructions: every cell learns every bit, so the work only moved from `predict` to `update` |
+| 24-lane planes so the lane stores align with the dot's loads | same bytes, 8 % slower: the extra lanes cost more than the forwarding stall |
+| Arbiter sets prefetched toward L2 (`prefetcht1`) instead of L1 | no difference |
+| Stretch and rate by scalar inserts instead of gathers | no difference, +12 G instructions |
+| The four first-layer trains fused into one pass over the inputs | no difference: the inner loop over the moving arbiters cost what the shared loads saved |
+| The eight predict/code/update steps of a byte fused into one function per profile | +7 %: the compiler's allocation across the fused body was worse than two calls |
+| Runs and recall retired in `update()` at the disagreeing bit, buckets fixed per byte | −1 % instructions, no measurable cycles |
+| Claim-line prefetches issued one bit later, or the next bit's sets prefetched a step earlier from the known bit | no difference on the 32 MiB slice (256 MiB table): the remaining claim cost is L2-hit latency, not DRAM |
+| A scout thread walking each block 256 bytes ahead, hashing with the same code and prefetching both nibbles' lines, the arbiter sets and estimation rows for every partial byte | bytes identical, wall unchanged on 8 MiB and on 32 MiB (64.8 s vs 64.7 s), +30 % CPU: the remaining time is core throughput, not memory latency |
+| No byte-level plan at all (control) | +25 % cycles — the plan is essential |
+
+The decoder shares the path and the gains: the 8 MiB container decodes in
+20.1 s against 29.6 s with HEAD, byte-exact either way.
 
 Corpus sources read for this work, by doc-ray ordinal: *C++ High
 Performance* on the line a fetch brings whole (ord. 1052) and on false
@@ -107,16 +119,25 @@ other on the same host while other agents' jobs shared it (load average
 | HEAD 815b7a3 | 18,564,510 B | 316.7 s | 315.9 s | 659 MB |
 | this build | 18,564,510 B (`cmp`: identical) | 194.0 s | 193.2 s | 659 MB |
 
-That is 61 % of HEAD's time on the full file — less than the 55 % on the
-8 MiB slice, because the 512 MiB table of the full run leaves more of the
-claims in DRAM. Against the goal of half the floor's time (131 s idle), the
-remaining gap is about 18 % of the full-file time; the profile at full table
-size puts `start_byte` at 11 % (its claims, still partly missing), the
-arbiters' weight loads and the estimation rows at ~10 %, the rest spread
-thin across the per-bit path (about 2,600 instructions a bit at IPC 2.2).
-The bytes-identical candidates left are a fused per-bit coder (no indirect
-calls, the intermediates in registers), the runs without their data-dependent
-branches, and a cheaper claim; none of them alone is more than a few percent.
+The repository's own gate, `tools/check_ratio_floor.py --baseline-binary
+<HEAD snapshot> --verify`, run last on the same host:
+
+```
+PASS enwik8 size: 18,564,510 B vs floor 18,564,510 B (+0 B, +0.0000 %)
+PASS enwik8 throughput: 528,060 B/s in 189.4 s vs baseline binary 287,918 B/s in 347.3 s on this host
+PASS enwik8 round trip verified byte for byte
+```
+
+That is 0.55 of the baseline's time in the gate's own run (the baseline's
+wall varies with the host's load: 316.7 s and 347.3 s in two runs an hour
+apart; the ratio held at 0.55–0.61). Against the goal of half the floor's
+time the remaining gap is 5–10 % of the full-file time. The profile at full
+table size puts `start_byte` at 11 % (its claims, now L2 hits rather than
+DRAM), the arbiters' weight loads and the estimation rows at ~10 %, the rest
+spread thin across the per-bit path (about 2,600 instructions a bit at IPC
+2.2); the table above lists what was tried against it. What is left is
+instruction count in the scalar remainder — the claims' tag test, the
+write-back loop, the estimation stages — a few percent each.
 
 ## Baseline
 
