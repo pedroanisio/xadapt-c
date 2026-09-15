@@ -3521,6 +3521,7 @@ static int info_command(int argc, char **argv) {
            sizes.lean ? " (compact side tables, lean contexts)" : sizes.compact ? " (compact side tables)" : "");
     printf("x86 transform   %s\n", sizes.x86 ? "yes" : "no");
     printf("text transform  %s\n", sizes.text == ADAPT_TEXT_ON ? "yes" : "no");
+    printf("arbiter start   %s\n", sizes.low_start ? "1/32" : "1/4");
     if (sizes.bmp) printf("bmp transform   %lu x %lu, pixel offset %lu\n", (unsigned long)sizes.bmp_width,
                           (unsigned long)sizes.bmp_rows, (unsigned long)sizes.bmp_offset);
     printf("holds           %s\n", sizes.archive ? "a folder (an adapt archive)" : "a file");

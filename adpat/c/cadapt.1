@@ -171,7 +171,12 @@ seconds; below 8 MiB it costs, which the rule is for. Not with
 .B \-\-adaptive
 or
 .BR "\-\-transform bmp" .
-Versions 62 to 66, 67 to 71 with metadata.
+Versions 62 and 63 ahead of the normal and fast profiles, 67 and 68 with
+metadata; the max profile under the transform is its sized version 58
+(61), the sizing byte naming the transform and the arbiters' 1/32
+starting weight, which the transform earns (3,336,047 to 3,330,628 bytes
+on the first 16 MiB of enwik8 at 128 MiB); 64 to 66 and 69 to 71 are
+read, no longer written.
 .SH MEMORY OPTIONS
 .TP
 .BR \-0 " .. " \-11
@@ -440,8 +445,10 @@ and as named files or folders; 25 to 52 are the experimental profiles;
 53 and 56 are the max profile with compact side tables, 54 and 57 with
 its lean context set as well; 58 and 61 the max profile sized to its
 budget, one byte after the header naming the side tables, the context
-set and the table's fraction; 62 to 66 are the text transform ahead of
-the normal, fast, max, compact and lean models, 67 to 71 with metadata.
+set, the table's fraction, the text transform and the arbiters' 1/32
+starting weight; 62 to 66 are the text transform ahead of the normal,
+fast, max, compact and lean models, 67 to 71 with metadata, of which the
+max ones (64 to 66, 69 to 71) are read and no longer written.
 .SH SEE ALSO
 .BR xz (1).
 .br

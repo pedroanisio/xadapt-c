@@ -15,8 +15,11 @@ causal adaptive predictors and a reversible BMP24 transform; the max
 profile with compact side tables uses 53 and 56, with its lean context
 set as well 54 and 57, and sized to its budget — a context table any
 eighth past a power of two, named by a sizing byte — 58 and 61; the text
-transform ahead of the normal, fast, max, compact and lean models uses
-62 to 66, 67 to 71 with metadata. The decoder reads every version ever
+transform ahead of the normal and fast models uses 62 and 63, 67 and 68
+with metadata, and ahead of the max profile it is the sized version 58
+or 61 again, its sizing byte naming the transform and the arbiters' 1/32
+starting weight (64 to 66 and 69 to 71, the transform's own max versions,
+are read and no longer written). The decoder reads every version ever
 published; versions 10–18 and the unused numbers (55, 59, 60) are
 refused. The CLI uses native filesystem APIs to
 restore metadata.
@@ -167,7 +170,11 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   BMP inputs; embedded images inside folders/PDF/EPUB are not transformed.
 - `--transform text` asks for the text transform and `--transform none`
   refuses it; a file of 8 MiB or more whose first block looks like text
-  takes it by itself (versions 62–66, 67–71 with metadata). A word both
+  takes it by itself (versions 62/63, 67/68 with metadata; under `--max`
+  the sized version 58/61, whose sizing byte names the transform and
+  starts every arbiter's trust in a context at 1/32 rather than 1/4,
+  measured on the first 16 MiB of enwik8 at 128 MiB as 3,336,047 →
+  3,330,628 bytes and at the default tier as 3,320,062 → 3,296,290). A word both
   sides have seen written out three times becomes, from then on, a code
   of one to three bytes the model reads as one symbol; each side builds
   the same bounded book as the file is coded, nothing is sent ahead and
@@ -414,12 +421,15 @@ stays readable (`DLV-1` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)):
 | 45–48 | max + `--transform bmp` | 49–52 | the transform over the max profile |
 | 53 | max, compact side tables | 56 | table 2^22 blocks or fewer |
 | 54 | max, compact and lean | 57 | as 53 without three contexts |
-| 58 | max, sized | 61 | a sizing byte: compact, lean, the table's eighths |
+| 58 | max, sized | 61 | a sizing byte: compact, lean, the table's eighths, the text transform, the arbiters' 1/32 start |
+| 62 / 63 | normal / fast, text transform | 67 / 68 | the book of words built as the file is coded |
+| 64–66 | max, compact, lean, text transform | 69–71 | read only: the max profile writes 58 (61) under the transform |
 | 55, 59, 60 | refused | — | no format |
 
 The encoder writes 19–24 by default, 53/54 (56/57) when a small tier under
-`--allocation context` earns them, and 58 (61) only when a fraction is
-taken; the ranges 25–52 are written only with `--adaptive` or `--transform`.
+`--allocation context` earns them, and 58 (61) when a fraction is taken or
+the max profile runs under the text transform; the ranges 25–52 are
+written only with `--adaptive` or `--transform`.
 Versions 22, 23 and 24 use the same predictors as 19–21 and append a
 32-byte extension after the record period (or fixed header when absent):
 

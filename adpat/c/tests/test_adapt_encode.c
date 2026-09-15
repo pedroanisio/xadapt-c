@@ -1502,28 +1502,61 @@ static void test_text_transform(void) {
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
     CHECK(back_len == len && memcmp(back, data, len) == 0);
     adapt_free(back);
+    /* the max profile under the transform is the sized version, its
+     * sizing byte naming the transform and the arbiters' 1/32 start with
+     * the tables and the set; the transform's own max versions 64 to 66
+     * are read, never written */
     s = adapt_sizes_max(s);
     s.text = ADAPT_TEXT_ON;
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
-    CHECK(coded[4] == ADAPT_TEXT_MAX_VERSION);
+    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START));
+    CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
+    CHECK(read.text == ADAPT_TEXT_ON && read.max && read.low_start && !read.compact && read.table_frac == 0);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
     CHECK(back_len == len && memcmp(back, data, len) == 0);
     adapt_free(back);
+    {
+        /* the encoder sets the start under the transform whatever the
+         * caller's field says; asked for without the transform it is the
+         * sized version with the bit alone, another stream that decodes */
+        size_t low_len = w.len;
+        adapt_sizes read_plain;
+        s.low_start = 0;
+        reset(&r, data, len, 4096, &w, again, len + 4096);
+        CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error),
+                     ADAPT_OK);
+        CHECK(w.len == low_len && memcmp(again, coded, low_len) == 0);
+        s.text = ADAPT_TEXT_OFF;
+        s.low_start = 1;
+        reset(&r, data, len, 4096, &w, again, len + 4096);
+        CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error),
+                     ADAPT_OK);
+        CHECK(again[4] == ADAPT_MAX_SIZED_VERSION && again[ADAPT_HEADER_BYTES] == ADAPT_SIZING_LOW_START);
+        CHECK_STATUS(adapt_read_header(again, w.len, &read_plain, &error), ADAPT_OK);
+        CHECK(read_plain.low_start == 1 && read_plain.text == 0);
+        CHECK_STATUS(adapt_decode(again, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+        CHECK(back_len == len && memcmp(back, data, len) == 0);
+        adapt_free(back);
+        s.text = ADAPT_TEXT_ON;
+        s.low_start = 0;
+    }
     s.compact = 1;
     s.table_log = 18;
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
-    CHECK(coded[4] == ADAPT_TEXT_MAX_COMPACT_VERSION);
+    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION &&
+          coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT));
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
     CHECK(back_len == len && memcmp(back, data, len) == 0);
     adapt_free(back);
     s.lean = 1;
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
-    CHECK(coded[4] == ADAPT_TEXT_MAX_LEAN_VERSION);
+    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION &&
+          coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
     CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
-    CHECK(read.text == ADAPT_TEXT_ON && read.max && read.compact && read.lean);
+    CHECK(read.text == ADAPT_TEXT_ON && read.max && read.compact && read.lean && read.low_start);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
     CHECK(back_len == len && memcmp(back, data, len) == 0);
     adapt_free(back);
@@ -1546,7 +1579,8 @@ static void test_text_transform(void) {
     /* the transform with a table fraction: valid, written as the sized
      * max version with the text bit in its sizing byte, read back with
      * both, and the container decodes; the same sizes without the
-     * fraction are the text max version, another container */
+     * fraction are the sized version still, its fraction 0, another
+     * container */
     {
         size_t sized_len;
         CHECK_STATUS(adapt_sizes_for_input_max(1, len, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
@@ -1562,9 +1596,11 @@ static void test_text_transform(void) {
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
         sized_len = w.len;
         CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION);
-        CHECK(coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | (3u << ADAPT_SIZING_FRAC_SHIFT)));
+        CHECK(coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN |
+                                            (3u << ADAPT_SIZING_FRAC_SHIFT)));
         CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
-        CHECK(read.text == ADAPT_TEXT_ON && read.table_frac == 3 && read.compact == 1 && read.lean == 1 && read.max == 1);
+        CHECK(read.text == ADAPT_TEXT_ON && read.table_frac == 3 && read.compact == 1 && read.lean == 1 && read.max == 1 &&
+              read.low_start == 1);
         CHECK(adapt_table_blocks(read) == (uint64_t)11 << 15);
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == len && memcmp(back, data, len) == 0);
@@ -1572,7 +1608,8 @@ static void test_text_transform(void) {
         s.table_frac = 0;
         reset(&r, data, len, 4096, &w, again, len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
-        CHECK(again[4] == ADAPT_TEXT_MAX_LEAN_VERSION && w.len != sized_len);
+        CHECK(again[4] == ADAPT_MAX_SIZED_VERSION && w.len != sized_len);
+        CHECK(again[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
         CHECK_STATUS(adapt_decode(again, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == len && memcmp(back, data, len) == 0);
         adapt_free(back);
