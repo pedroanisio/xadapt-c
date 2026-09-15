@@ -19,6 +19,9 @@ from pathlib import Path
 CADAPT = Path(__file__).resolve().parent.parent / "build" / "cadapt"
 VECTORS = Path(__file__).resolve().parent / "vectors"
 LOW_MEMORY = str(32 << 20)
+# Seconds one codec run may take: a bound against a hang, wide enough for
+# the coverage gate's unoptimised build on a slow host.
+TIMEOUT = 600
 SOURCE = b"optional verification\n" * 128
 
 
@@ -46,7 +49,7 @@ class CodecTest(unittest.TestCase):
             [str(CADAPT), *map(str, args)],
             input=data,
             capture_output=True,
-            timeout=60,
+            timeout=TIMEOUT,
             preexec_fn=None if umask is None else (lambda: os.umask(umask)),
         )
 
@@ -637,7 +640,7 @@ class FolderTest(unittest.TestCase):
             os.symlink("nowhere", self.folder / "dangling")
 
     def run_codec(self, *args, data=None):
-        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=60)
+        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=TIMEOUT)
 
     def test_folder_round_trip_preserves_every_entry(self) -> None:
         container = self.root / "tree.adpt"
@@ -811,7 +814,7 @@ class PresetTest(unittest.TestCase):
         self.source.write_bytes(" ".join(words).encode())
 
     def run_codec(self, *args, data=None):
-        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=60)
+        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=TIMEOUT)
 
     def table_log(self, container: Path) -> int:
         info = self.run_codec("info", container)
@@ -874,7 +877,7 @@ class SurfaceTest(unittest.TestCase):
         self.source.write_bytes(b"surface of the command line, every option once\n" * 300)
 
     def run_codec(self, *args, data=None):
-        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=60)
+        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=TIMEOUT)
 
     def test_help_version_and_unknown_commands(self) -> None:
         for args in (("--help",), ("-h",), ("help",)):
