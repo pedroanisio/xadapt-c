@@ -1008,6 +1008,229 @@ static void test_metadata_headers(void) {
     }
 }
 
+/* A hand-built segmented file of `count` one-byte segments, each one
+ * stored block, into `file` (which must hold segmented_len(count) bytes);
+ * the bytes it holds are 'a', 'b', ... into `raw`. */
+static size_t segmented_len(size_t count) {
+    return 8 + count * 10 + (count - 1) + adapt_segment_table_len(count) + ADAPT_TRAILER_BYTES;
+}
+
+static void build_segmented(uint8_t *file, uint8_t *raw, size_t count) {
+    size_t at = 8, k;
+    uint32_t crc;
+    memcpy(file, EMPTY_FILE, 8);
+    file[7] |= ADAPT_SEGMENT_FLAG;
+    for (k = 0; k < count; k++) {
+        if (k > 0) {
+            file[at++] = 4;
+        }
+        file[at++] = 2; /* stored, skipped */
+        file[at++] = 1;
+        file[at++] = 0;
+        file[at++] = 0;
+        file[at++] = 0;
+        file[at++] = 1;
+        file[at++] = 0;
+        file[at++] = 0;
+        file[at++] = 0;
+        file[at++] = (uint8_t)('a' + k % 26);
+        raw[k] = (uint8_t)('a' + k % 26);
+    }
+    file[at++] = 5;
+    for (k = 0; k < count; k++) {
+        file[at++] = 1;
+        file[at++] = 0;
+        file[at++] = 0;
+        file[at++] = 0;
+        file[at++] = k == 0 ? 10 : 11;
+        file[at++] = 0;
+        file[at++] = 0;
+        file[at++] = 0;
+    }
+    file[at++] = (uint8_t)count;
+    file[at++] = (uint8_t)(count >> 8);
+    file[at++] = 0;
+    file[at++] = 0;
+    file[at++] = 3;
+    file[at++] = (uint8_t)count;
+    file[at++] = (uint8_t)(count >> 8);
+    for (k = 0; k < 6; k++) {
+        file[at++] = 0;
+    }
+    crc = adapt_crc32(raw, count);
+    file[at++] = (uint8_t)crc;
+    file[at++] = (uint8_t)(crc >> 8);
+    file[at++] = (uint8_t)(crc >> 16);
+    file[at++] = (uint8_t)(crc >> 24);
+    CHECK(at == segmented_len(count));
+}
+
+static adapt_status decode_threads(const uint8_t *file, size_t len, adapt_limits limits, uint64_t threads, sink *s,
+                                   adapt_stats *stats, adapt_error *error) {
+    s->len = 0;
+    return adapt_decode_threads(file, len, limits, threads, sink_write, s, stats, error);
+}
+
+/* The segments of a file decoded on threads: the same bytes from any
+ * worker count, the workers as many as the budget and the segments
+ * allow, and every way the table or a segment can lie refused. */
+static void test_threads(void) {
+    size_t file_len, want_len;
+    uint8_t *file = read_file("segmented.adpt", &file_len);
+    uint8_t *want = read_file("segmented.bin", &want_len);
+    uint8_t *copy = malloc(file_len + 1);
+    uint8_t built[8 + 40 * 10 + 39 + 1 + 40 * 8 + 4 + 13];
+    uint8_t raw40[40];
+    adapt_error error;
+    adapt_stats stats;
+    adapt_limits limits = adapt_default_limits();
+    adapt_sizes sizes;
+    sink s;
+    uint64_t t, declared, raw_max;
+    size_t header_len, table_at, first_coded;
+    s.out = malloc(want_len + 1);
+    s.cap = want_len;
+    s.fail = 0;
+    CHECK_STATUS(adapt_read_header(file, file_len, &sizes, &error), ADAPT_OK);
+    header_len = adapt_header_len(file);
+    table_at = file_len - ADAPT_TRAILER_BYTES - adapt_segment_table_len(2);
+    CHECK(file[table_at] == 5);
+    first_coded = (size_t)file[table_at + 5] | (size_t)file[table_at + 6] << 8 | (size_t)file[table_at + 7] << 16;
+    /* the longer segment's bytes: the first, a whole block */
+    raw_max = (uint64_t)file[table_at + 1] | (uint64_t)file[table_at + 2] << 8 | (uint64_t)file[table_at + 3] << 16;
+    CHECK(raw_max == ADAPT_BLOCK_BYTES);
+    for (t = 1; t <= 4; t++) {
+        CHECK_STATUS(decode_threads(file, file_len, limits, t, &s, &stats, &error), ADAPT_OK);
+        CHECK(s.len == want_len && memcmp(s.out, want, want_len) == 0);
+        CHECK(stats.input_bytes == want_len && stats.output_bytes == file_len && stats.segments == 2);
+        CHECK(stats.crc32 == adapt_crc32(want, want_len));
+#ifdef ADAPT_THREADS
+        /* two segments: never more than two workers */
+        CHECK(stats.workers == (t < 2 ? 1 : 2));
+#else
+        CHECK(stats.workers == 1);
+#endif
+    }
+    /* the workers a budget holds */
+    {
+        uint64_t two = adapt_parallel_decode_memory_bound(sizes, 2, raw_max, file_len);
+        uint64_t three = adapt_parallel_decode_memory_bound(sizes, 3, raw_max, file_len);
+        adapt_sizes plain = sizes;
+        plain.segmented = 0;
+        CHECK(three > two && two > adapt_decode_memory_bound(sizes));
+#ifdef ADAPT_THREADS
+        CHECK(adapt_decode_workers(sizes, two, raw_max, file_len, 4) == 2);
+        CHECK(adapt_decode_workers(sizes, three - 1, raw_max, file_len, 4) == 2);
+        CHECK(adapt_decode_workers(sizes, three, raw_max, file_len, 4) == 3);
+        CHECK(adapt_decode_workers(sizes, ADAPT_DEFAULT_MAX_MEMORY, raw_max, file_len, 7) == 7);
+        CHECK(adapt_decode_workers(sizes, UINT64_MAX, raw_max, file_len, 1000) == ADAPT_WORKERS_MAX);
+#endif
+        CHECK(adapt_decode_workers(sizes, two - 1, raw_max, file_len, 4) == 1);
+        CHECK(adapt_decode_workers(plain, ADAPT_DEFAULT_MAX_MEMORY, raw_max, file_len, 4) == 1);
+        /* a budget for one worker: the stream decoder, and below its bound
+         * a refusal */
+        limits.max_memory = two - 1;
+        CHECK_STATUS(decode_threads(file, file_len, limits, 4, &s, &stats, &error), ADAPT_OK);
+        CHECK(s.len == want_len && memcmp(s.out, want, want_len) == 0 && stats.workers == 1);
+        limits.max_memory = adapt_decode_memory_bound(sizes) - 1;
+        CHECK_STATUS(decode_threads(file, file_len, limits, 4, &s, &stats, &error), ADAPT_ERROR_MEMORY_LIMIT);
+        limits = adapt_default_limits();
+    }
+    /* a file of one segment goes through the stream decoder */
+    {
+        size_t one_len;
+        uint8_t *one = read_file("hello.adpt", &one_len);
+        size_t hello_len;
+        uint8_t *hello = read_file("hello.bin", &hello_len);
+        CHECK_STATUS(decode_threads(one, one_len, limits, 4, &s, &stats, &error), ADAPT_OK);
+        CHECK(s.len == hello_len && memcmp(s.out, hello, hello_len) == 0 && stats.workers == 1 && stats.segments == 1);
+        free(one);
+        free(hello);
+    }
+    /* arguments */
+    CHECK_STATUS(adapt_decode_threads(NULL, 1, limits, 2, sink_write, &s, &stats, &error), ADAPT_ERROR_INVALID_ARGUMENT);
+    CHECK_STATUS(adapt_decode_threads(file, file_len, limits, 0, sink_write, &s, &stats, &error), ADAPT_ERROR_INVALID_ARGUMENT);
+    CHECK_STATUS(adapt_decode_threads(file, file_len, limits, 2, NULL, &s, &stats, &error), ADAPT_ERROR_INVALID_ARGUMENT);
+    CHECK_STATUS(decode_threads(file, 4, limits, 2, &s, NULL, &error), ADAPT_ERROR_TRUNCATED);
+    CHECK_STATUS(decode_threads(file, header_len + 5, limits, 2, &s, NULL, &error), ADAPT_ERROR_TRUNCATED);
+    /* the output cap, which the declared length is known against */
+    limits.max_output = want_len - 1;
+    CHECK_STATUS(decode_threads(file, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_TOO_LARGE);
+    CHECK(error.detail == want_len && error.limit == want_len - 1);
+    limits = adapt_default_limits();
+    /* a writer that fails */
+    s.fail = 1;
+    CHECK_STATUS(decode_threads(file, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_IO);
+    CHECK(error.detail == 7);
+    s.fail = 0;
+    /* the table: no segments, not a table, a length that is not the
+     * trailer's, coded lengths that do not add up to the file, a marker
+     * that is not there, and the checksum */
+    memcpy(copy, file, file_len);
+    memset(copy + file_len - ADAPT_TRAILER_BYTES - 4, 0, 4);
+    CHECK_STATUS(decode_threads(copy, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    memcpy(copy, file, file_len);
+    copy[table_at] = 1;
+    CHECK_STATUS(decode_threads(copy, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    memcpy(copy, file, file_len);
+    copy[table_at + 1] ^= 1;
+    CHECK_STATUS(decode_threads(copy, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    memcpy(copy, file, file_len);
+    copy[table_at + 5] ^= 1;
+    CHECK_STATUS(decode_threads(copy, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    /* a byte of the first segment's coded length given to the second: the
+     * sums hold, the first segment's last block is cut short */
+    memcpy(copy, file, file_len);
+    copy[table_at + 5] -= 1;
+    copy[table_at + 13] += 1;
+    CHECK_STATUS(decode_threads(copy, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    /* the other way: the first segment takes the marker, the second has none */
+    memcpy(copy, file, file_len);
+    copy[table_at + 5] += 1;
+    copy[table_at + 13] -= 1;
+    CHECK_STATUS(decode_threads(copy, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    memcpy(copy, file, file_len);
+    copy[header_len + first_coded] = 0;
+    CHECK_STATUS(decode_threads(copy, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    memcpy(copy, file, file_len);
+    copy[file_len - 1] ^= 1;
+    CHECK_STATUS(decode_threads(copy, file_len, limits, 2, &s, NULL, &error), ADAPT_ERROR_CHECKSUM);
+    /* a payload byte of the second segment: the model decodes other
+     * bytes, or the coder does not end where the block does */
+    memcpy(copy, file, file_len);
+    copy[header_len + first_coded + 20] ^= 0x55;
+    CHECK(decode_threads(copy, file_len, limits, 2, &s, NULL, &error) != ADAPT_OK);
+    /* the hand-built file: forty one-byte segments on up to five workers,
+     * then a segment that produces fewer bytes than its entry says, a
+     * block whose kind no segment holds, and one that is not a block */
+    build_segmented(built, raw40, 40);
+    s.out = realloc(s.out, 64);
+    s.cap = 64;
+    for (t = 1; t <= 5; t++) {
+        CHECK_STATUS(decode_threads(built, sizeof(built), limits, t, &s, &stats, &error), ADAPT_OK);
+        CHECK(s.len == 40 && memcmp(s.out, raw40, 40) == 0 && stats.segments == 40);
+#ifdef ADAPT_THREADS
+        CHECK(stats.workers == (t < 2 ? 1 : (uint32_t)t));
+#endif
+    }
+    CHECK_STATUS(adapt_declared_len(built, sizeof(built), &declared, &error), ADAPT_OK);
+    CHECK(declared == 40);
+    memcpy(copy = realloc(copy, sizeof(built)), built, sizeof(built));
+    copy[8 + 10 + 1 + 1] = 0; /* the second segment's block: raw 0 */
+    copy[8 + 10 + 1 + 5] = 0;
+    CHECK_STATUS(decode_threads(copy, sizeof(built) - 1, limits, 3, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    memcpy(copy, built, sizeof(built));
+    copy[8 + 10 + 1] = 5; /* a table where the second segment's block is */
+    CHECK_STATUS(decode_threads(copy, sizeof(built), limits, 3, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    memcpy(copy, built, sizeof(built));
+    copy[8 + 10 + 1] = 3; /* a trailer there */
+    CHECK_STATUS(decode_threads(copy, sizeof(built), limits, 3, &s, NULL, &error), ADAPT_ERROR_BAD_BLOCK);
+    free(s.out);
+    free(copy);
+    free(file);
+    free(want);
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: test_adapt_decode <vectors-dir>\n");
@@ -1031,6 +1254,7 @@ int main(int argc, char **argv) {
     test_stream_failures();
     test_framing();
     test_segmented_framing();
+    test_threads();
     test_limits();
     test_x86_flag();
     test_arguments_and_messages();

@@ -853,6 +853,94 @@ static void test_segments(void) {
                                                        2 * ADAPT_BLOCK_BYTES, &stats, &error),
                  ADAPT_OK);
     CHECK(w.len == k && memcmp(coded, again, k) == 0 && stats.segments == 3);
+    /* the segments on threads: the same bytes from any worker count, with
+     * and without the workers proving their own segments; the workers as
+     * many as the budget holds, and never for an unsegmented file or a
+     * bad segment length; under a budget for one, the in-order encoder,
+     * proven alongside when asked and refused below that budget */
+    {
+        uint64_t t, seg = 2 * ADAPT_BLOCK_BYTES, two = adapt_parallel_encode_memory_bound(sizes, 2, seg);
+        adapt_sizes plain = sizes;
+        plain.segmented = 0;
+        for (t = 1; t <= 4; t++) {
+            reset(&r, data, n, 4096, &w, coded, n + 256);
+            CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, t,
+                                                     0, &stats, &error),
+                         ADAPT_OK);
+            CHECK(w.len == k && memcmp(coded, again, k) == 0 && stats.segments == 3 && stats.input_bytes == n);
+            /* the workers that coded: the budget's, and no more than the
+             * three segments */
+            CHECK(stats.workers == (adapt_encode_workers(sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, t) < 3
+                                        ? adapt_encode_workers(sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, t)
+                                        : 3));
+            reset(&r, data, n, 1000, &w, coded, n + 256);
+            CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, t,
+                                                     1, &stats, &error),
+                         ADAPT_OK);
+            CHECK(w.len == k && memcmp(coded, again, k) == 0 && stats.output_bytes == k);
+        }
+#ifdef ADAPT_THREADS
+        CHECK(adapt_encode_workers(sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, 3) == 3);
+        CHECK(adapt_encode_workers(sizes, UINT64_MAX, seg, 1000) == ADAPT_WORKERS_MAX);
+        CHECK(adapt_encode_workers(sizes, two, seg, 3) == 2);
+#endif
+        CHECK(adapt_encode_workers(sizes, two - 1, seg, 3) == 1);
+        CHECK(adapt_encode_workers(sizes, ADAPT_DEFAULT_MAX_MEMORY, 100, 3) == 1);
+        CHECK(adapt_encode_workers(plain, ADAPT_DEFAULT_MAX_MEMORY, seg, 3) == 1);
+        reset(&r, data, n, 4096, &w, coded, n + 256);
+        CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, sizes, two - 1, seg, 3, 1, &stats, &error),
+                     ADAPT_OK);
+        CHECK(w.len == k && memcmp(coded, again, k) == 0 && stats.workers == 1);
+        reset(&r, data, n, 4096, &w, coded, n + 256);
+        CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, sizes, two - 1, seg, 3, 0, &stats, &error),
+                     ADAPT_OK);
+        CHECK(w.len == k && memcmp(coded, again, k) == 0 && stats.workers == 1);
+        reset(&r, data, n, 4096, &w, coded, n + 256);
+        CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, sizes, adapt_verified_memory_bound(sizes) - 1,
+                                                 seg, 3, 1, &stats, &error),
+                     ADAPT_ERROR_MEMORY_LIMIT);
+        /* a writer that fails on a segment, a reader that fails inside one,
+         * and the arguments */
+        reset(&r, data, n, 4096, &w, coded, n + 256);
+        w.fail_after = 2;
+        CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, 3, 0,
+                                                 &stats, &error),
+                     ADAPT_ERROR_IO);
+        CHECK(error.detail == 4);
+        reset(&r, data, n, 4096, &w, coded, n + 256);
+        w.fail_after = 1;
+        CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, 3, 0,
+                                                 &stats, &error),
+                     ADAPT_ERROR_IO);
+        reset(&r, data, n, 4096, &w, coded, n + 256);
+        r.fail_after = 70;
+        CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, 3, 0,
+                                                 &stats, &error),
+                     ADAPT_ERROR_IO);
+        CHECK(error.detail == 9);
+        reset(&r, data, n, 4096, &w, coded, n + 256);
+        CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, 0, 0,
+                                                 &stats, &error),
+                     ADAPT_ERROR_INVALID_ARGUMENT);
+        CHECK_STATUS(adapt_encode_stream_threads(NULL, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, seg, 2, 0, &stats,
+                                                 &error),
+                     ADAPT_ERROR_INVALID_ARGUMENT);
+        plain.table_log = 0;
+        CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, plain, ADAPT_DEFAULT_MAX_MEMORY, seg, 2, 0,
+                                                 &stats, &error),
+                     ADAPT_ERROR_BAD_HEADER);
+        /* an unsegmented file on threads is the plain encoder */
+        plain = sizes;
+        plain.segmented = 0;
+        reset(&r, data, n, 4096, &w, coded, n + 256);
+        CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, plain, ADAPT_DEFAULT_MAX_MEMORY, seg, 3, 0,
+                                                 &stats, &error),
+                     ADAPT_OK);
+        CHECK(stats.segments == 1 && stats.workers == 1 && (coded[7] & ADAPT_SEGMENT_FLAG) == 0);
+        /* the segmented stream back, for the corruptions below */
+        memcpy(coded, again, k);
+        w.len = k;
+    }
     /* a table that does not add up, and a marker where none may be */
     coded[w.len - ADAPT_TRAILER_BYTES - 1] ^= 1;
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_ERROR_BAD_BLOCK);

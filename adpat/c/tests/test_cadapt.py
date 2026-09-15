@@ -19,6 +19,9 @@ from pathlib import Path
 CADAPT = Path(__file__).resolve().parent.parent / "build" / "cadapt"
 VECTORS = Path(__file__).resolve().parent / "vectors"
 LOW_MEMORY = str(32 << 20)
+# Seconds one codec run may take: a bound against a hang, wide enough for
+# the coverage gate's unoptimised build on a slow host.
+TIMEOUT = 600
 SOURCE = b"optional verification\n" * 128
 
 
@@ -46,7 +49,7 @@ class CodecTest(unittest.TestCase):
             [str(CADAPT), *map(str, args)],
             input=data,
             capture_output=True,
-            timeout=60,
+            timeout=TIMEOUT,
             preexec_fn=None if umask is None else (lambda: os.umask(umask)),
         )
 
@@ -121,7 +124,9 @@ class AllocationTest(CodecTest):
         explicit = self.run_codec("encode", self.source, "-o", "-", "--allocation", "window")
         self.assertEqual(default.returncode, 0, default.stderr)
         self.assertEqual(explicit.returncode, 0, explicit.stderr)
-        self.assertEqual(default.stdout, explicit.stdout)
+        # the named input's metadata carries its access time, which the
+        # first run's read may move; the streams are what the policy decides
+        self.assertEqual(payload_stream(default.stdout), payload_stream(explicit.stdout))
 
 
 class AdaptiveTest(CodecTest):
@@ -635,7 +640,7 @@ class FolderTest(unittest.TestCase):
             os.symlink("nowhere", self.folder / "dangling")
 
     def run_codec(self, *args, data=None):
-        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=60)
+        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=TIMEOUT)
 
     def test_folder_round_trip_preserves_every_entry(self) -> None:
         container = self.root / "tree.adpt"
@@ -809,7 +814,7 @@ class PresetTest(unittest.TestCase):
         self.source.write_bytes(" ".join(words).encode())
 
     def run_codec(self, *args, data=None):
-        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=60)
+        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=TIMEOUT)
 
     def table_log(self, container: Path) -> int:
         info = self.run_codec("info", container)
@@ -824,7 +829,7 @@ class PresetTest(unittest.TestCase):
         for out, flags in ((plain, ()), (nine, ("-9",)), (small, ("-9", "--max-memory", LOW_MEMORY))):
             r = self.run_codec("encode", self.source, "-o", out, "--no-verify", *flags)
             self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(plain.read_bytes(), nine.read_bytes())
+        self.assertEqual(payload_stream(plain.read_bytes()), payload_stream(nine.read_bytes()))
         self.assertLess(self.table_log(small), self.table_log(nine))
         self.assertGreater(small.stat().st_size, nine.stat().st_size)
 
@@ -872,7 +877,7 @@ class SurfaceTest(unittest.TestCase):
         self.source.write_bytes(b"surface of the command line, every option once\n" * 300)
 
     def run_codec(self, *args, data=None):
-        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=60)
+        return subprocess.run([str(CADAPT), *map(str, args)], input=data, capture_output=True, timeout=TIMEOUT)
 
     def test_help_version_and_unknown_commands(self) -> None:
         for args in (("--help",), ("-h",), ("help",)):
@@ -957,11 +962,12 @@ class SurfaceTest(unittest.TestCase):
         original = self.source.read_bytes()
         r = self.run_codec("encode", self.source, "--threads", "2", "--segment-bytes", "262144", "--no-verify")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(b"segments on 1 thread", r.stderr)
+        # one segment: one worker, however many threads were offered
+        self.assertIn(b"1 segments on 1 thread\n", r.stderr)
         # decode strips .adpt, here back onto the source; a name without it gains .out
         r = self.run_codec("decode", container, "--force", "--threads", "2")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(b"segments on 1 thread", r.stderr)
+        self.assertIn(b"1 segments on 1 thread\n", r.stderr)
         self.assertEqual(self.source.read_bytes(), original)
         other = self.root / "renamed"
         other.write_bytes(container.read_bytes())
@@ -969,14 +975,14 @@ class SurfaceTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.root / "renamed.out").read_bytes(), original)
         self.assertEqual(self.run_codec("decode", other).returncode, 1)
-        # pipes both ways, with the thread note for a pipe
+        # pipes both ways, with the thread report for a pipe
         r = self.run_codec("decode", "-", "--threads", "2", data=container.read_bytes())
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(b"a pipe is read in order", r.stderr)
+        self.assertIn(b"1 segments on 1 thread\n", r.stderr)
         self.assertEqual(r.stdout, original)
         r = self.run_codec("encode", "-", "--threads", "2", "--no-verify", data=original)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(b"a pipe is read in order", r.stderr)
+        self.assertIn(b"1 segments on 1 thread\n", r.stderr)
         # info on a file, on a pipe, on every profile, on a segmented file
         for profile in ((), ("--fast",), ("--max",)):
             out = self.root / "p.adpt"
@@ -1060,14 +1066,14 @@ class CommandTest(CodecTest):
         run = self.run_codec("decode", "-", "-o", out, data=encoded.read_bytes())
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(out.read_bytes(), want)
-        # --threads is accepted and reported; this port decodes in order
+        # --threads is reported: two segments take two workers of the four
         run = self.run_codec("decode", VECTORS / "segmented.adpt", "-o", "-", "--threads", "4")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn(b"2 segments on 1 thread", run.stderr)
+        self.assertIn(b"2 segments on 2 threads", run.stderr)
         self.assertEqual(run.stdout, (VECTORS / "segmented.bin").read_bytes())
         run = self.run_codec("decode", "-", "--threads", "4", data=encoded.read_bytes())
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn(b"on 1 thread (a pipe is read in order)", run.stderr)
+        self.assertIn(b"1 segments on 1 thread\n", run.stderr)
 
     def test_decode_refuses_damage_limits_and_missing_files(self) -> None:
         encoded = (VECTORS / "text.adpt").read_bytes()
@@ -1152,11 +1158,11 @@ class CommandTest(CodecTest):
         # segments from a file and from a pipe, with their reports
         run = self.run_codec("encode", VECTORS / "segmented.bin", "-o", "-", "--threads", "2", "--segment-bytes", "262144")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn(b", 2 segments on 1 thread\n", run.stderr)
+        self.assertIn(b", 2 segments on 2 threads\n", run.stderr)
         self.assertEqual(payload_stream(run.stdout), (VECTORS / "segmented.adpt").read_bytes())
         run = self.run_codec("encode", "-", "--threads", "2", "--segment-bytes", "262144", data=(VECTORS / "segmented.bin").read_bytes())
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn(b"2 segments on 1 thread (a pipe is read in order)", run.stderr)
+        self.assertIn(b"2 segments on 2 threads", run.stderr)
         decoded = self.run_codec("decode", "-", data=run.stdout)
         self.assertEqual(decoded.stdout, (VECTORS / "segmented.bin").read_bytes())
         # a budget below the smallest model is refused before any output
@@ -1166,7 +1172,7 @@ class CommandTest(CodecTest):
         # the proof alongside with segments, and the empty input
         run = self.run_codec("encode", VECTORS / "segmented.bin", "-o", self.root / "seg.adpt", "--threads", "2", "--segment-bytes", "262144", "--verify")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn(b", verified, 2 segments on 1 thread", run.stderr)
+        self.assertIn(b", verified, 2 segments on 2 threads", run.stderr)
         empty = self.root / "empty.bin"
         empty.write_bytes(b"")
         run = self.run_codec("encode", empty, "-o", "-", "--verify")

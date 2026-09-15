@@ -434,7 +434,8 @@ static int sparse_map(const char *path, uint64_t size, adapt_extent **extents, u
 }
 
 /* Format numbers and memory defaults come from the codec constants.
- * Verification is opt-in, and segment coding runs on one thread. */
+ * Verification is opt-in; segments go on threads when the budget holds
+ * their workers. */
 static void print_usage(FILE *stream) {
     adapt_sizes minimum_sizes;
     adapt_error minimum_error, minimum_max_error;
@@ -490,8 +491,10 @@ static void print_usage(FILE *stream) {
             "caps the bytes written.\n"
             "--threads <n> (default 1) with n of two or more cuts the input into segments\n"
             "of --segment-bytes (default %llu, whole blocks of %llu) that start the\n"
-            "model afresh, the file the crate's threads write; this port codes and\n"
-            "decodes the segments in order, on one thread.\n",
+            "model afresh, the file the crate's threads write, and codes them at once on\n"
+            "as many of the n threads as the budget holds a model, a segment and a block's\n"
+            "workspace for; decode --threads <n> decodes a file's segments the same way.\n"
+            "The report says how many threads ran.\n",
             ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
             ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_METADATA_MAX_VERSION,
             (unsigned long long)ADAPT_DEFAULT_MAX_MEMORY,
@@ -2086,6 +2089,70 @@ static int read_replay(void *context, uint8_t *buf, size_t len, size_t *got) {
     return read_stream(r->in, buf, len, got);
 }
 
+/* The rest of the input after the replayed header, all of it, into one
+ * buffer: the parallel decoder reads a file's segment table from its end.
+ * Returns 0 with the buffer, or an errno. */
+static int read_whole(replay *r, uint8_t **buf, size_t *len) {
+    size_t cap = (size_t)1 << 20, at = 0, got;
+    uint8_t *b = malloc(cap);
+    if (b == NULL) {
+        return ENOMEM;
+    }
+    for (;;) {
+        int rc;
+        if (at == cap) {
+            uint8_t *grown;
+            if (cap > ((size_t)-1) / 2) {
+                free(b);
+                return ENOMEM;
+            }
+            cap *= 2;
+            grown = realloc(b, cap);
+            if (grown == NULL) {
+                free(b);
+                return ENOMEM;
+            }
+            b = grown;
+        }
+        rc = read_replay(r, b + at, cap - at, &got);
+        if (rc != 0) {
+            free(b);
+            return rc;
+        }
+        if (got == 0) {
+            break;
+        }
+        at += got;
+    }
+    *buf = b;
+    *len = at;
+    return 0;
+}
+
+/* Decode through the stream decoder, or — for a segmented file on two or
+ * more threads — the whole input read into memory and its segments
+ * decoded at once; `stats->workers` says which. */
+static adapt_status decode_input(replay *ahead, uint64_t threads, adapt_sizes sizes, adapt_limits limits,
+                                 adapt_write_fn write, void *write_context, adapt_stats *stats, adapt_error *error) {
+    uint8_t *whole;
+    size_t whole_len;
+    adapt_status status;
+    int rc;
+    if (threads < 2 || !sizes.segmented) {
+        return adapt_decode_stream(read_replay, ahead, write, write_context, limits, stats, error);
+    }
+    rc = read_whole(ahead, &whole, &whole_len);
+    if (rc != 0) {
+        ahead->in->error = rc;
+        memset(error, 0, sizeof(*error));
+        error->status = ADAPT_ERROR_IO;
+        return ADAPT_ERROR_IO;
+    }
+    status = adapt_decode_threads(whole, whole_len, limits, threads, write, write_context, stats, error);
+    free(whole);
+    return status;
+}
+
 /* ------------------------------------------------------------------------
  * decode
  * --------------------------------------------------------------------- */
@@ -2272,7 +2339,7 @@ static int decode_command(int argc, char **argv) {
             return rc;
         }
         adapt_archive_set_metadata_callback(unpacker, restore_metadata);
-        status = adapt_decode_stream(read_replay, &ahead, adapt_archive_unpack, unpacker, limits, &stats, &error);
+        status = decode_input(&ahead, threads, sizes, limits, adapt_archive_unpack, unpacker, &stats, &error);
         if (status == ADAPT_OK) {
             status = adapt_archive_finish(unpacker, &error);
         }
@@ -2343,7 +2410,7 @@ static int decode_command(int argc, char **argv) {
         }
         out.file = stage.file;
     }
-    status = adapt_decode_stream(read_replay, &ahead, write_stream, &out, limits, &stats, &error);
+    status = decode_input(&ahead, threads, sizes, limits, write_stream, &out, &stats, &error);
     if (status == ADAPT_OK && out.file == stdout && fflush(stdout) != 0) {
         out.error = errno;
         error.status = ADAPT_ERROR_IO;
@@ -2366,15 +2433,11 @@ static int decode_command(int argc, char **argv) {
         }
     }
     free(output);
-    /* The crate's line: on threads for a file, in order for a pipe; this
-     * port decodes in order either way and says so. */
-    if (threads >= 2 && in.file != stdin) {
-        fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified, %lu segments on 1 thread\n",
+    /* The crate's line, with the workers that ran. */
+    if (threads >= 2) {
+        fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified, %lu segments on %u thread%s\n",
                 (unsigned long long)stats.output_bytes, (unsigned long long)stats.input_bytes,
-                (unsigned long)stats.segments);
-    } else if (threads >= 2) {
-        fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified on 1 thread (a pipe is read in order)\n",
-                (unsigned long long)stats.output_bytes, (unsigned long long)stats.input_bytes);
+                (unsigned long)stats.segments, stats.workers, stats.workers == 1 ? "" : "s");
     } else {
         fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified\n", (unsigned long long)stats.output_bytes,
                 (unsigned long long)stats.input_bytes);
@@ -2539,6 +2602,7 @@ static int encode_command(int argc, char **argv) {
     int bmp_transform_requested = 0, context_first = 0;
     uint64_t profile_memory;
     uint64_t max_memory = ADAPT_DEFAULT_MAX_MEMORY, length = 0, hundredths, threads, segment_bytes = ADAPT_SEGMENT_BYTES;
+    uint64_t workers = 1;
     char segments[96];
     adapt_sizes sizes;
     stream in = {NULL, 0}, out = {NULL, 0};
@@ -2750,12 +2814,16 @@ static int encode_command(int argc, char **argv) {
     sizes.bmp = (uint8_t)bmp_transform_requested;
     if (threads >= 2) {
         /* The crate cuts a file's segments on threads and a pipe's in
-         * order; this port cuts them in order either way, to the same
-         * bytes: every segment starts a fresh model, so the order the
-         * segments are coded in changes nothing. */
+         * order; this port cuts both on threads when the budget allows, to
+         * the same bytes: every segment starts a fresh model, so the order
+         * the segments are coded in changes nothing. */
         sizes.segmented = 1;
     }
-    alongside = verify && adaptive != 4 && adapt_verified_memory_bound(sizes) <= max_memory;
+    /* Segments go on threads when the budget holds a model, a segment
+     * and a block's workspace for two or more of them; the workers then
+     * prove their own segments, so the proof needs no second budget. */
+    workers = threads >= 2 && adaptive != 4 ? adapt_encode_workers(sizes, max_memory, segment_bytes, threads) : 1;
+    alongside = verify && adaptive != 4 && (workers >= 2 || adapt_verified_memory_bound(sizes) <= max_memory);
     if (verify && adaptive != 4 && !alongside && (in.file == stdin || !known_length || strcmp(output, "-") == 0)) {
         snprintf(message, sizeof(message),
                  "proving the output here needs a memory budget of %llu bytes for two models, "
@@ -2792,6 +2860,9 @@ static int encode_command(int argc, char **argv) {
         if (adaptive == 4) {
             status = encode_search(source, source_context, &out, metadata_output.metadata, &sizes,
                                    known_length, length, max_memory, threads, segment_bytes, verify, context_first, &stats, &error);
+        } else if (workers >= 2) {
+            status = adapt_encode_stream_threads(source, source_context, write_metadata_stream, &metadata_output, sizes,
+                                                 max_memory, segment_bytes, threads, verify, &stats, &error);
         } else if (alongside) {
             status = adapt_encode_stream_verified_segments(source, source_context, write_metadata_stream, &metadata_output, sizes, max_memory,
                                                            segment_bytes, &stats, &error);
@@ -2909,8 +2980,9 @@ static int encode_command(int argc, char **argv) {
     hundredths = stats.input_bytes == 0 ? 0 : (stats.output_bytes * 10000 + stats.input_bytes / 2) / stats.input_bytes;
     segments[0] = '\0';
     if (threads >= 2) {
-        snprintf(segments, sizeof(segments), ", %lu segments on 1 thread%s", (unsigned long)stats.segments,
-                 known_length ? "" : " (a pipe is read in order)");
+        unsigned on = adaptive == 4 ? 1u : stats.workers;
+        snprintf(segments, sizeof(segments), ", %lu segments on %u thread%s", (unsigned long)stats.segments, on,
+                 on == 1 ? "" : "s");
     }
     if (is_folder) {
         fprintf(stderr, "%llu entries, %llu bytes -> %llu bytes (%llu.%02llu%%), %s%s\n", (unsigned long long)dir.count,
