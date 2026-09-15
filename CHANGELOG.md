@@ -15,6 +15,15 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Security
 
+- Enforce `decode --max-output` on the combined logical sizes of restored
+  files, including sparse holes and each hard-link alias. Refuse an entry
+  before creating or extending it when the remaining budget is too small,
+  and discard the staging tree on refusal.
+- Restore modeled-path coverage in the decoder fuzzer: allow a 128 MiB
+  model working-memory bound and reserve 32 KiB separately for output.
+  Regression tests run the real harness on modeled normal, fast and max
+  fixtures; `make -C adpat/c fuzz-smoke` runs mutations on build-local copies
+  of the committed vectors.
 - Refuse archive entries whose parent components are symbolic links, and
   hard-link targets outside the extraction root or of a non-file kind.
   POSIX extraction resolves parents through directory descriptors with

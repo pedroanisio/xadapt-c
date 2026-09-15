@@ -1,0 +1,223 @@
+"""Hostile archive paths and bounded threaded input buffering.
+
+Source: OpenAI GPT-6 via Codex. Fixtures exercise the compiled command,
+including its filesystem sink and refusal cleanup, without a model encoder.
+"""
+
+import os
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+import zlib
+from pathlib import Path
+
+CADAPT = Path(__file__).resolve().parent.parent / "build/cadapt"
+HAS_THREADS = os.environ.get("ADAPT_TEST_THREADS", "1") != "0"
+HEADER = b"ADPT" + bytes((19, 10, 10, 16))
+BLOCK = b"R" * (256 << 10)
+
+
+def name(value):
+    value = str(value).encode()
+    return struct.pack("<H", len(value)) + value
+
+
+def entry(kind, path, value=b"", *, size=4096, extents=()):
+    prefix = bytes((kind,)) + name(path)
+    if kind in (3, 4):
+        prefix += name(value)
+    elif kind == 2:
+        prefix += struct.pack("<Q", len(value))
+    elif kind == 5:
+        prefix += struct.pack("<QI", size, len(extents))
+    if kind == 4:
+        return prefix
+    mode = 0o777 if kind in (1, 3) else 0o600
+    prefix += struct.pack("<IqIqI", mode, 1700000000, 0, 1700000000, 0)
+    data = value if kind == 2 else b""
+    if kind == 5:
+        data = b"".join(struct.pack("<QQ", offset, len(chunk)) + chunk for offset, chunk in extents)
+    return prefix + data + b"\0\0"
+
+
+def archive(entries, corrupt=False):
+    raw = b"ADPTARC3" + b"".join(entries) + b"\0"
+    header = HEADER[:5] + bytes((HEADER[5] | 128,)) + HEADER[6:]
+    return (header + struct.pack("<BII", 2, len(raw), len(raw)) + raw
+            + struct.pack("<BQI", 3, len(raw), zlib.crc32(raw) ^ corrupt))
+
+
+def segmented_file(path, blocks):
+    checksum = 0
+    with path.open("wb") as out:
+        out.write(HEADER[:7] + bytes((HEADER[7] | 64,)))
+        for segment in range(2):
+            if segment:
+                out.write(b"\x04")
+            for _ in range(blocks):
+                out.write(struct.pack("<BII", 2, len(BLOCK), len(BLOCK)))
+                out.write(BLOCK)
+                checksum = zlib.crc32(BLOCK, checksum)
+        raw, coded = blocks * len(BLOCK), blocks * (len(BLOCK) + 9)
+        out.write(b"\x05" + struct.pack("<IIIII", raw, coded, raw, coded + 1, 2))
+        out.write(struct.pack("<BQI", 3, 2 * raw, checksum))
+
+
+class SafetyTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    def decode(self, source="-", data=None, *options, memory_limit=None):
+        def constrain():
+            import resource
+            resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
+
+        return subprocess.run(
+            [str(CADAPT), "decode", str(source), *map(str, options)], input=data,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=60,
+            preexec_fn=constrain if memory_limit is not None else None,
+        )
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlinks and hard links")
+    def test_archive_refuses_symlink_parents_for_every_entry_kind(self):
+        for kind in (1, 2, 3, 4, 5):
+            for corrupt in (False, True):
+                with self.subTest(kind=kind, corrupt=corrupt):
+                    case = self.root / f"{kind}-{corrupt}"
+                    case.mkdir()
+                    outside = case / "outside"
+                    outside.mkdir()
+                    payload = b"test bytes" if kind == 2 else "safe"
+                    entries = [entry(2, "safe", b"source"), entry(3, "escape", outside),
+                               entry(kind, "escape/created", payload)]
+                    run = self.decode("-", archive(entries, corrupt), "-o", case / "restored")
+                    self.assertNotEqual(run.returncode, 0)
+                    self.assertEqual(list(outside.iterdir()), [], run.stderr)
+                    self.assertFalse((case / "restored").exists())
+                    self.assertEqual(list(case.glob(".cadapt-*.part")), [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlinks and hard links")
+    def test_hardlink_target_must_be_a_regular_file_inside_the_archive(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        anchor = outside / "anchor"
+        anchor.write_bytes(b"untouched")
+        for target in ("escape/anchor", "escape"):
+            with self.subTest(target=target):
+                destination = self.root / target.replace("/", "-")
+                run = self.decode("-", archive([entry(3, "escape", outside),
+                                               entry(4, "alias", target)]), "-o", destination)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertFalse(destination.exists())
+                self.assertEqual(anchor.stat().st_nlink, 1)
+                self.assertEqual(anchor.read_bytes(), b"untouched")
+                self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlinks and hard links")
+    def test_safe_nested_files_and_links_still_restore(self):
+        destination = self.root / "restored"
+        run = self.decode("-", archive([entry(1, "dir"), entry(2, "dir/data", b"source"),
+                                       entry(4, "alias", "dir/data"), entry(3, "link", "dir/data"),
+                                       entry(3, "outside-link", "../../elsewhere")]), "-o", destination)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual((destination / "dir/data").read_bytes(), b"source")
+        self.assertEqual((destination / "dir/data").stat().st_ino, (destination / "alias").stat().st_ino)
+        self.assertEqual(os.readlink(destination / "outside-link"), "../../elsewhere")
+
+    @unittest.skipIf(os.name == "nt", "POSIX path-length and cleanup behavior")
+    def test_paths_too_long_for_metadata_and_cleanup_leave_no_staging_tree(self):
+        limit = os.pathconf(self.root, "PC_PATH_MAX")
+        entries = []
+        path = ""
+        while len(path) < limit:
+            path = path + "/" + "d" * 120 if path else "d" * 120
+            entries.append(entry(1, path))
+        destination = self.root / "deep"
+        run = self.decode("-", archive(entries), "-o", destination)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertFalse(destination.exists())
+        self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux address-space limit")
+    def test_large_segmented_file_falls_back_without_buffering_the_container(self):
+        source = self.root / "large.adpt"
+        segmented_file(source, 80)
+        for piped in (False, True):
+            with self.subTest(piped=piped):
+                run = self.decode("-" if piped else source, source.read_bytes() if piped else None,
+                                  "-o", "-", "--threads", "2", "--max-memory", 32 << 20,
+                                  memory_limit=48 << 20)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertIn(b"checksum verified, 2 segments on 1 thread", run.stderr)
+
+    def test_buffered_file_decodes_with_one_or_two_workers_within_budget(self):
+        source = self.root / "small.adpt"
+        segmented_file(source, 1)
+        for budget, workers in ((32 << 20, 1), (96 << 20, 2)):
+            with self.subTest(budget=budget):
+                run = self.decode(source, None, "-o", "-", "--threads", "2", "--max-memory", budget)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                expected = workers if HAS_THREADS else 1
+                self.assertIn(f"checksum verified, 2 segments on {expected} thread".encode(), run.stderr)
+
+    def test_memory_limit_is_checked_before_reading_segment_payload(self):
+        data = HEADER[:7] + bytes((HEADER[7] | 64,)) + b"invalid payload"
+        run = self.decode("-", data, "--threads", "2", "--max-memory", "1")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn(b"memory budget exceeded", run.stderr)
+
+    def test_sparse_restoration_cannot_exceed_output_limit(self):
+        for limit, size in ((None, (1 << 30) + 1), (1024, 1025), (1024, (1 << 64) - 1)):
+            with self.subTest(limit=limit, size=size):
+                destination = self.root / f"restored-{size}"
+                options = () if limit is None else ("--max-output", limit)
+                run = self.decode("-", archive([entry(5, "holes", size=size)]),
+                                  "-o", destination, *options)
+                self.assertEqual(run.returncode, 1, run.stderr)
+                self.assertIn(b"restored file sizes exceed --max-output", run.stderr)
+                self.assertFalse(destination.exists())
+                self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    def test_restoration_limit_counts_files_holes_and_hardlink_aliases_together(self):
+        cases = [
+            [entry(5, "a", size=512), entry(5, "b", size=513)],
+            [entry(2, "a", b"a" * 256), entry(5, "b", size=769)],
+            [entry(5, "a", size=900), entry(2, "b", b"b" * 125)],
+            [entry(5, "a", size=512), entry(4, "b", "a"), entry(4, "c", "a")],
+        ]
+        for index, entries in enumerate(cases):
+            with self.subTest(case=index):
+                destination = self.root / "existing"
+                destination.mkdir(exist_ok=True)
+                sentinel = destination / "keep"
+                sentinel.write_bytes(b"unchanged")
+                run = self.decode("-", archive(entries), "-o", destination,
+                                  "--force", "--max-output", 1024)
+                self.assertEqual(run.returncode, 1, run.stderr)
+                self.assertIn(b"restored file sizes exceed --max-output", run.stderr)
+                self.assertEqual(list(destination.iterdir()), [sentinel])
+                self.assertEqual(sentinel.read_bytes(), b"unchanged")
+                self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    def test_restoration_accepts_exact_output_limit_without_counting_extents_twice(self):
+        cases = [
+            ([entry(2, "a", b"abc"), entry(5, "b", size=1021, extents=((1018, b"xyz"),))], 1021),
+            ([entry(5, "a", size=512), entry(4, "b", "a")], 512),
+            ([entry(5, "a", size=0), entry(5, "b", size=1024)], 1024),
+        ]
+        for index, (entries, length) in enumerate(cases):
+            destination = self.root / str(index)
+            run = self.decode("-", archive(entries), "-o", destination, "--max-output", 1024)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual((destination / "b").stat().st_size, length)
+        self.assertEqual((self.root / "0/b").read_bytes(), bytes(1018) + b"xyz")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        CADAPT = Path(sys.argv.pop(1)).resolve()
+    unittest.main()

@@ -1,19 +1,19 @@
 {
   "schema": "cadapt.build-manifest.v1",
   "version": "0.12.0",
-  "commit": "a849c6a360fd959ddf5313376536c76c7aabcf14",
-  "generated_at": "2026-09-15T05:50:27+00:00",
+  "commit": "ebc4d8ea5d7eaae3f91cd87b5fafb889edef3074",
+  "generated_at": "2026-09-15T07:07:43+00:00",
   "sources": {
     "adpat/c/adapt.h": "dcb851bd2a394947e28ac9dc22813a3596917971b94e27be0ab5a96e6c0e6594",
     "adpat/c/adapt_adaptive.h": "d21a75f99b8d19400819a538becd7b459673de4fef8e2b889e5423fdb17fb5c7",
     "adpat/c/adapt_archive.c": "089f77084f6fde6d824e2946cb494912daf52909ea3fe8ef389061778d04339f",
     "adpat/c/adapt_bmp.h": "1c2517ba6a05ee609afde4292c1afabb94452f23d97aac90531d31dcca083d96",
-    "adpat/c/adapt_decode.c": "6b4ff57e6a800a3fad110b764fdb00c1517e596eeb1556d377e5be0e9992110a",
+    "adpat/c/adapt_decode.c": "0468e049f0c136cc5d5d0db6b775550ac5666a1ea81e7f2f7ce8489e24549121",
     "adpat/c/adapt_encode.c": "471bb58e3b1f9067c8c71ac771e3e227509417db45755d51daee8e957f08b473",
     "adpat/c/adapt_model.h": "7f5f7dd1ecb6066c490544a5f3db74c7612ab81ae666a114d3a8dcd5b02e2fe8",
-    "adpat/c/cadapt.c": "3f49965bb3437d46ca4c2faeb751981d5fe65b73dec692aaa12c5d980a6c5a07"
+    "adpat/c/cadapt.c": "8525dd01c9f268b2d427f462cb72c7e0cbb11cb79f975b9f4e9bf54f5395cd3b"
   },
-  "makefile_sha256": "5e424bc9d53ff62bb13aa93dbc46fc908fab9b9cc039ebaff88d4ef1134e179b",
+  "makefile_sha256": "855be6509ff943e047a12323e2a1dc2967ac4e3daae5e58f3530291e871f7aaa",
   "toolchain": {
     "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
     "cc_command": "cc",
@@ -27,12 +27,12 @@
   },
   "outputs": {
     "adpat/c/build/cadapt": {
-      "sha256": "2ca0b8fdc6652c9f9ab90073cd548847a3d830b9a3d9fba265433e122a007887",
-      "bytes": 408680
+      "sha256": "8489b331ca978bb4516e4ca0c9a3ce4b2cc2e91b3468c3861a99cab193f81534",
+      "bytes": 409040
     },
     "adpat/c/build/libadapt.a": {
-      "sha256": "e920ec81b24464c20bbc379aab8cdd5a481bdeebcb7567a067ffe7cb8adba0ee",
-      "bytes": 367148
+      "sha256": "65acc2406a47647d59d661f29a700a4a70b9d2e8b52078abb507765596366551",
+      "bytes": 367308
     }
   }
 }

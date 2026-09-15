@@ -33,10 +33,11 @@ THREADS ?= -DADAPT_THREADS -pthread
 CFLAGS  ?= -std=c99 -O3 -Wall -Wextra -Wpedantic -Werror $(THREADS)
 LDFLAGS ?=
 BUILD   ?= build
+TEST_THREADS = $(if $(findstring -DADAPT_THREADS,$(CFLAGS)),1,0)
 
 LIB   = $(BUILD)/libadapt.a
 BIN   = $(BUILD)/cadapt
-TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive
+TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode
 
 all: $(LIB) $(BIN)
 
@@ -82,15 +83,24 @@ $(BUILD)/test_adapt_archive: $(BUILD)/test_adapt_archive.o $(LIB)
 $(BUILD)/test_adapt_adaptive: tests/test_adapt_adaptive.c adapt.h adapt_adaptive.h adapt_bmp.h $(LIB)
 	$(CC) $(CFLAGS) -o $@ tests/test_adapt_adaptive.c $(LIB) $(LDFLAGS)
 
+$(BUILD)/test_decode_budget: tests/test_decode_budget.c adapt.h $(LIB)
+	$(CC) $(CFLAGS) -o $@ tests/test_decode_budget.c $(LIB) $(LDFLAGS)
+
+$(BUILD)/test_fuzz_decode: tests/test_fuzz_decode.c fuzz/fuzz_decode.c fuzz/fuzz_decode.h adapt.h $(LIB)
+	$(CC) $(CFLAGS) -o $@ tests/test_fuzz_decode.c fuzz/fuzz_decode.c $(LIB) $(LDFLAGS)
+
 test: $(TESTS)
 	$(BUILD)/test_adapt_adaptive
 	$(BUILD)/test_adapt_decode tests/vectors
 	$(BUILD)/test_adapt_encode tests/vectors
 	$(BUILD)/test_adapt_archive
+	$(BUILD)/test_decode_budget tests/vectors
+	$(BUILD)/test_fuzz_decode tests/vectors
 
 check: all test
 	$(PYTHON) -B tests/test_check_gcov.py
 	$(PYTHON) -B tests/test_cadapt.py "$(BIN)"
+	ADAPT_TEST_THREADS=$(TEST_THREADS) $(PYTHON) -B tests/test_cadapt_safety.py "$(BIN)"
 	$(PYTHON) -B tests/test_allocation_probe.py "$(BIN)"
 	$(MAKE) coverage
 
@@ -105,12 +115,15 @@ COVUNITS = adapt_decode adapt_encode adapt_archive cadapt
 coverage:
 	rm -rf $(COV)
 	$(MAKE) BUILD=$(COV) CFLAGS="$(COVFLAGS)" LDFLAGS="--coverage" all $(COV)/test_adapt_decode \
-	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive $(COV)/test_adapt_adaptive
+	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive $(COV)/test_adapt_adaptive $(COV)/test_decode_budget $(COV)/test_fuzz_decode
 	$(COV)/test_adapt_decode tests/vectors
 	$(COV)/test_adapt_encode tests/vectors
 	$(COV)/test_adapt_archive
 	$(COV)/test_adapt_adaptive
+	$(COV)/test_decode_budget tests/vectors
+	$(COV)/test_fuzz_decode tests/vectors
 	$(PYTHON) -B tests/test_cadapt.py "$(abspath $(COV))/cadapt"
+	ADAPT_TEST_THREADS=$(if $(findstring -DADAPT_THREADS,$(COVFLAGS)),1,0) $(PYTHON) -B tests/test_cadapt_safety.py "$(abspath $(COV))/cadapt"
 	cd $(COV) && for u in $(COVUNITS); do gcov -b -c --json-format -o . $$u.o > /dev/null && gunzip -f $$u.gcov.json.gz; done
 	$(PYTHON) -B check-gcov.py $(foreach u,$(COVUNITS),$(COV)/$(u).gcov.json)
 
@@ -126,7 +139,23 @@ sanitize:
 	rm -rf $(SANITIZE_BUILD)
 	$(MAKE) BUILD=$(SANITIZE_BUILD) CC=$(SANITIZER_CC) CFLAGS="$(SANITIZE_CFLAGS)" test
 
+# Mutations go to a build-local corpus, never to the committed vectors.
+FUZZ_CC ?= clang
+FUZZ_RUNS ?= 1000
+FUZZ_CFLAGS ?= -std=c99 -O1 -g -DADAPT_NO_MULTIVERSION -fsanitize=fuzzer,address,undefined \
+               -fno-sanitize-recover=all -Wall -Wextra -Wpedantic -Werror
+
+$(BUILD)/fuzz_decode: fuzz/fuzz_decode.c fuzz/fuzz_decode.h adapt_decode.c adapt_encode.c adapt_archive.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h | $(BUILD)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) adapt_decode.c adapt_encode.c adapt_archive.c fuzz/fuzz_decode.c -o $@
+
+fuzz: $(BUILD)/fuzz_decode
+
+fuzz-smoke: fuzz
+	mkdir -p $(BUILD)/fuzz-corpus
+	cp tests/vectors/*.adpt $(BUILD)/fuzz-corpus/
+	$(BUILD)/fuzz_decode $(BUILD)/fuzz-corpus -runs=$(FUZZ_RUNS) -max_len=65536 -seed=1 -print_final_stats=1
+
 clean:
 	rm -rf $(BUILD) $(COV) $(SANITIZE_BUILD)
 
-.PHONY: all test coverage sanitize check clean
+.PHONY: all test coverage sanitize fuzz fuzz-smoke check clean
