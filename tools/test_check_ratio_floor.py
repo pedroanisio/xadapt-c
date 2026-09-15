@@ -191,9 +191,14 @@ class FloorCheckTest(unittest.TestCase):
         self.assertEqual(by_name["enwik8"].input_md5, "a1fa5ffddb56f4953e226637dabbb36a")
         self.assertEqual(by_name["enwik9"].input_md5, "e206c3450ac99950df65bf70ef61a12d")
         self.assertEqual(locked.arguments, ["encode", "--max", "--allocation", "context"])
-        self.assertEqual(by_name["enwik8"].wall_seconds, 263.0)
+        # raised 2026-09-14 with the per-bit path (LOCKS.md); enwik9 not re-measured
+        self.assertEqual(by_name["enwik8-8MiB"].wall_seconds, 17.9)
+        self.assertEqual(by_name["enwik8-16MiB"].wall_seconds, 33.8)
+        self.assertEqual(by_name["enwik8"].wall_seconds, 189.4)
         self.assertEqual(by_name["enwik9"].wall_seconds, 3123.0)
-        self.assertAlmostEqual(by_name["enwik8"].min_bytes_per_second, 100_000_000 / 263, places=3)
+        self.assertAlmostEqual(by_name["enwik8-8MiB"].min_bytes_per_second, 8 * 1024 * 1024 / 17.9, places=3)
+        self.assertAlmostEqual(by_name["enwik8-16MiB"].min_bytes_per_second, 16 * 1024 * 1024 / 33.8, places=3)
+        self.assertAlmostEqual(by_name["enwik8"].min_bytes_per_second, 100_000_000 / 189.4, places=3)
         self.assertAlmostEqual(by_name["enwik9"].min_bytes_per_second, 1_000_000_000 / 3123, places=3)
         self.assertEqual(locked.throughput_tolerance, 0.10)
 

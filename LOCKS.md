@@ -13,6 +13,48 @@ below identify retained historical snapshots. `make gate` and `make ratio-floor`
 use the canonical tools. Allocation and adaptive-search correctness stay with
 the codec. No historical measurements or plots are removed by this separation.
 
+## 2026-09-14 — enwik8 throughput floors raised: the per-bit path at 0.55 of its time, the same bytes
+
+**Decision.** The three enwik8 floors below are raised to what the per-bit
+path landed in `085dff0` measured with the floor checker; the containers are
+the ones already locked, byte for byte. enwik9 is not re-measured (a
+52-minute run) and keeps its entry.
+
+| Input | Container | Wall time (was) | Throughput (was) |
+|---|---:|---:|---:|
+| enwik8 (100,000,000 B) | **18,564,510 B** | 189.4 s (263 s) | 527,983 B/s (380,228) |
+| enwik8, first 16 MiB | **3,340,447 B** | 33.8 s (62.76 s) | 496,367 B/s (267,323) |
+| enwik8, first 8 MiB | **1,716,715 B** | 17.9 s (36.58 s) | 468,637 B/s (229,322) |
+
+**The run.** `tools/check_ratio_floor.py --baseline-binary <build of 815b7a3>
+--verify`, binary sha256 `fb4ff848…4b26c` (`cadapt 0.12.0`, format version
+19), 2026-09-14 22:31–23:10 local on the reference host while other agents'
+jobs shared it (load average about 3 for the full file, 1.2 for the proxies).
+The locked-commit binary in the same jobs took 347.3 s, 59.1 s and 31.7 s —
+the new binary is at 0.55–0.57 of its time on every fixture, and each container
+decoded byte for byte. On the operator's quiet run the old binary took 263 s;
+the new times are from a loaded host, so they are lenient floors in the
+sense of the entry below, to be re-locked from a quiet run.
+
+**Why.** The path is instruction-bound, not memory-bound; the gains came from
+removing branches, an explicit vector dot product, running the memories as
+vectors, and exact prefetches planned from the byte the encoder is coding.
+`docs/performance-audit-2026-09-14.md` ("Results") has the step-by-step
+measurements and the variants that measured as no gain.
+
+**Consequences.**
+- The gate's tolerance stays 10 %: a build must reach 475,185 B/s on full
+  enwik8 on the reference host (or 90 % of a locked-commit build's rate in the
+  same job elsewhere), and 421,773 / 446,731 B/s on the proxies.
+- `ADAPT_ISA=baseline` runs the portable per-bit path; it is held to the same
+  bytes by the CLI tests but not to these throughput floors.
+- The halving the operator asked for (131 s against the 263 s run) is not
+  reached: the gate's own paired run puts the new binary at 0.55 of the old
+  one's time, a 1.83× speed-up.
+
+**Status.** Locked 2026-09-14, `tools/ratio_floor.json` and its test updated
+in the same commit.
+
 ## 2026-09-14 — enwik8 and enwik9 with `--max --allocation context` are floors: size and throughput may only improve
 
 **Decision.** The operator's measurements of `cadapt encode --max --allocation
