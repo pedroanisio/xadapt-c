@@ -37,17 +37,20 @@ refuses versions 10–18. The header of
 
 | Path | What |
 |---|---|
-| [adpat/c/](adpat/c/) | The codec: `adapt.h` (public interface), `adapt_model.h` (the predictor, coder and framing, shared by both units), `adapt_decode.c`, `adapt_encode.c`, `adapt_archive.c` (the folder archive stream), `cadapt.c` (the command line), `Makefile` |
+| [adpat/c/](adpat/c/) | The codec: `adapt.h` (public interface), `adapt_model.h` (the predictor, coder and framing, shared by both units), `adapt_text.h` (the text transform), `adapt_bmp.h` and `adapt_adaptive.h` (the BMP transform and the adaptive predictors), `adapt_decode.c`, `adapt_encode.c`, `adapt_archive.c` (the folder archive stream), `cadapt.c` (the command line) and its manual `cadapt.1`, `Makefile` |
 | [adpat/c/tests/](adpat/c/tests/) | C unit tests for both units, the CLI's Python tests, the coverage gate's tests, and the committed vectors |
 | [adpat/c/fuzz/](adpat/c/fuzz/) | A libFuzzer harness for the two decoders |
 | [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |
 | [bench/](bench/README.md) | Retained historical benchmark scripts, measurements and plots |
-| [research/](research/arxiv-compression-review.md) | A review of the compression literature against this codec, the enwik8 baseline, and the [per-script measurements](research/scripts-measurement.md) |
+| [docs/](docs/CONSTRAINTS.md) | What the codec is held to ([CONSTRAINTS.md](docs/CONSTRAINTS.md)) and the dated performance audits |
+| [LOCKS.md](LOCKS.md) | The decisions that are settled, each with the measurements that settled it |
+| [research/](research/README.md) | Dated research notes — the literature, the byte-only strategy, the adaptive experiments, the LTCB tables — indexed with their dates |
 | [static/corpus/](static/corpus/scripts/manifest.json) | The benchmark's fixtures: enwik8, text8, and the six per-script rows with their manifest |
-| [tools/](tools/provenance.py) | The provenance tool: the SPDX SBOM, the build manifest, and the rebuild that confirms it |
+| [tools/](tools/provenance.py) | The provenance tool (the SPDX SBOM, the build manifest, and the rebuild that confirms it), the floor gate [check_ratio_floor.py](tools/check_ratio_floor.py) with its [ratio_floor.json](tools/ratio_floor.json) and [render_floors.py](tools/render_floors.py), and the [LTCB tooling](tools/ltcb/) |
 | [sbom.spdx.json](sbom.spdx.json), [build-manifest.json](build-manifest.json) | What the codec is made of, and the build it reproduces |
 | [LICENSE](LICENSE), [SECURITY.md](SECURITY.md), [SUPPORT.md](SUPPORT.md), [CHANGELOG.md](CHANGELOG.md) | The terms, the security policy, what support exists, and what changed |
 | [CLAUDE.md](CLAUDE.md) | Working rules for contributors and agents |
+| [Makefile](Makefile) | The root targets: build, `test`, `check`, `gate`, `ratio-floor`, `sbom`, `manifest`, `reproduce`, `ltcb` |
 
 ## Build
 
@@ -82,8 +85,8 @@ strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
 
 ```
 cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -11]
-              [--allocation window|context] [--threads <n>] [--segment-bytes <bytes>]
-              [--adaptive rates|sparse|retained|auto] [--transform bmp]
+              [--threads <n>] [--segment-bytes <bytes>]
+              [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation window|context]
 cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
 cadapt info   <file>
 cadapt --version
@@ -322,7 +325,10 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   root Makefile; it runs under `timeout` and fails when exceeded — LOCKS.md,
   2026-09-15). Every suite runs at once under `make -j`; the CLI suite's
   megabyte cases run only in `make check-long` (`ADAPT_LONG_TESTS=1`).
-- `make check` adds the Python tests — the CLI command by command
+- `make check` adds the Python tests — the documents against the code
+  (`tools/test_docs.py`: the usage block and flags against `--help`, the
+  version map against `adapt.h`, the floors block, the layout table, every
+  link), the CLI command by command
   (`tests/test_cadapt.py`), the coverage gate's own tests
   (`tests/test_check_gcov.py`), and the allocation SDK probe
   (`tests/test_allocation_probe.py`) — then runs the coverage gate. The root
@@ -440,6 +446,15 @@ and the two corpus floor files, rendered here by
 `tools/render_floors.py` (`make check` fails when this block is stale):
 
 <!-- floors:start -->
+Locked 2026-09-15 on AMD Ryzen 5 5600X 6-Core Processor, `cadapt encode --max --allocation context`; a change may only
+improve on these (`make gate` checks the first, `make ratio-floor` the rest):
+
+| Fixture | Input | Container floor | Time floor |
+|---|---:|---:|---:|
+| enwik8-8MiB | 8,388,608 B | 1,713,845 B | 13.3 s |
+| enwik8-16MiB | 16,777,216 B | 3,320,094 B | 24.4 s |
+| enwik8 | 100,000,000 B | 18,207,203 B | 130.5 s |
+| enwik9 | 1,000,000,000 B | 150,063,628 B | 1,385.4 s |
 <!-- floors:end -->
 
 Their thresholds and verification behavior

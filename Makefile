@@ -21,12 +21,14 @@ CHECK_SECONDS ?= 120
 check:
 	rm -rf _tmp/check && mkdir -p _tmp/check
 	timeout $(CHECK_SECONDS) $(MAKE) -j check-parts || { echo "make check exceeded $(CHECK_SECONDS) s or failed (see _tmp/check/*.log)"; exit 1; }
-	@for p in codec provenance floor-tool fetch-corpus; do grep -hE "^ok |^OK$$|checks passed$$" _tmp/check/$$p.log | tail -3; done
-check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus
+	@for p in codec provenance floor-tool fetch-corpus docs; do grep -hE "^ok |^OK$$|checks passed$$" _tmp/check/$$p.log | tail -3; done
+check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus _tmp/check/docs
 _tmp/check/codec: ; @$(MAKE) -C adpat/c check > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/provenance: ; @$(PYTHON) -B tools/test_provenance.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/floor-tool: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_check_ratio_floor.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/fetch-corpus: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_fetch_corpus.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+# the documents against the code: tools/test_docs.py needs the built codec, which the codec part builds first
+_tmp/check/docs: _tmp/check/codec ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_docs.py' > $@.log 2>&1 && $(PYTHON) -B tools/render_floors.py check >> $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
 # Locked floors (LOCKS.md, 2026-09-14). gate: the CI proxy, the first 8 MiB of
 # enwik8 cut from the tracked zip, encode + decode, well under 120 s.

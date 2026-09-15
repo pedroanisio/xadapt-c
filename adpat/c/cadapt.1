@@ -228,30 +228,56 @@ Ceilings
 The context table stops growing at 2^26 blocks (1 GiB), the recall table
 at 2^24 entries (64 MiB), the window at 2^30 bytes; the fast profile's
 table at 2 MiB.
-On enwik8 the max profile is saturated at 1 GiB (18,563,312 bytes against
-18,564,510 at 674 MiB).
+On enwik8 (100 MB) the max profile is saturated at
+.BR \-9 :
+.B \-10
+and
+.B \-11
+write the same bytes, the table being at the input's target.
 .TP
-What memory buys
+What a tier buys
 Measured on enwik8 (100 MB) with
-.BR "\-\-max \-\-allocation context" :
+.BR "\-\-max \-\-allocation context" ,
+commit 89e2486, 2026-09-15 (a dated table; the locked floors below are the
+figures a run verifies):
 .TS
 l r r r.
-budget	context table	container	vs 674 MiB
+tier	context table	container	vs \-9
 _
-128 MiB	64 MiB	19,657,760	+5.9 %
-192 MiB	128 MiB	19,284,703	+3.9 %
-256 MiB	128 MiB	19,185,877	+3.3 %
-674 MiB	512 MiB	18,564,510	\(em
-1 GiB	1 GiB	18,563,312	\-0.01 %
+\-5, \-6	36 MiB	19,252,902	+5.7 %
+\-7	128 MiB	18,744,782	+3.0 %
+\-8	256 MiB	18,451,834	+1.3 %
+\-9	512 MiB	18,207,203	\(em
+\-10, \-11	512 MiB	18,207,203	0
 .TE
 .IP
-At 128 and 192 MiB the table is bought with the compact side tables
-(versions 53 and 56), and at 128 MiB the lean context set as well
-(54 and 57); at 256 MiB the table is 9/8 of 128 MiB, the budget's slack
-past the window (58 and 61); see
-.BR "\-\-allocation" .
-Speed hardly depends on the budget: interleaved on the first 8 MiB, the
-128 MiB and 674 MiB runs took the same user cycles with the full tables.
+At
+.B \-5
+(raised to the smallest max model) and
+.B \-6
+the table is bought with the compact side tables, the lean context set
+and a fraction past 2^21 blocks, under the text transform (the sized
+version 58, 61 with metadata, its sizing byte carrying all four); at
+.B \-7
+with the compact tables (the text version 65, 70 with metadata); from
+.B \-8
+the full tables win (64, 69).
+.TP
+Locked floors
+.\" floors:start
+Locked 2026-09-15 on AMD Ryzen 5 5600X 6-Core Processor,
+.BR "cadapt encode --max --allocation context" ;
+a change may only improve on these:
+.TS
+l r r r.
+fixture	input	container floor	time floor
+_
+enwik8-8MiB	8,388,608	1,713,845	13.3 s
+enwik8-16MiB	16,777,216	3,320,094	24.4 s
+enwik8	100,000,000	18,207,203	130.5 s
+enwik9	1,000,000,000	150,063,628	1,385.4 s
+.TE
+.\" floors:end
 .TP
 .BR \-\-allocation " " window | context
 How a budget is spent once the smallest model fits:
@@ -268,11 +294,13 @@ budget still holds once the window has grown goes to the table an eighth
 of its next doubling at a time (58/61), never at the window's expense.
 A table at the input's target takes no fraction, so the default budget's
 containers are unchanged.
-Either can win depending on the input; on enwik8 at 674 MiB
+Either can win depending on the input; on enwik8 at
+.B \-9
+(commit 89e2486)
 .B context
-writes 18,564,510 bytes and
+writes 18,207,203 bytes and
 .B window
-18,831,629.
+18,393,652.
 .TP
 Decoding memory
 .B decode

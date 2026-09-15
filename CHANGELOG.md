@@ -35,6 +35,18 @@ The binary reports `0.12.0`; the tag is pending.
   worker as well as when it decodes in parallel.
 
 ### Added
+- The documents are checked against the code by `make check`
+  (`tools/test_docs.py`): the README's usage block and the flags of the
+  manual against `cadapt --help`, the container versions of `adapt.h`
+  against the README and the manual, every relative link, the README's
+  layout table against the tracked tree, and the locked floors, which
+  `tools/render_floors.py` renders from `tools/ratio_floor.json` into a
+  marked block of the README and the manual — the prose no longer restates
+  a number a re-lock would leave behind. `make ltcb` builds the LTCB
+  renderings `research/ltcb-tables.md` links; `research/README.md` indexes
+  the dated notes and `research/current-baseline.md` is
+  `baseline-2026-09-14.md`, marked as the record it is. The audit that
+  found what these fix is `docs/doc-hygiene-report-2026-09-15.md`.
 - The text transform, container versions 62 to 66 (67 to 71 with
   metadata), ahead of the normal, fast, max, compact and lean models: a
   word both sides have seen written out three times becomes, from then
