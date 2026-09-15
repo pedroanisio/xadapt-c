@@ -450,8 +450,11 @@ and as named files or folders; 25 to 52 are the experimental profiles;
 53 and 56 are the max profile with compact side tables, 54 and 57 with
 its lean context set as well; 58 and 61 the max profile sized to its
 budget, one byte after the header naming the side tables, the context
-set, the table's fraction, the text transform and the arbiters' 1/32
-starting weight; 62 to 66 are the text transform ahead of the normal,
+set, the table's fraction, the text transform, the arbiters' 1/32
+starting weight and, in bit 7, the second max model (int16 arbiters,
+four re-purposed context slots, four-way recall buckets, a fifth
+arbiter), which every max encode writes now, so 21, 24, 53, 54, 56 and
+57 are read and no longer written; 62 to 66 are the text transform ahead of the normal,
 fast, max, compact and lean models, 67 to 71 with metadata, of which the
 max ones (64 to 66, 69 to 71) are read and no longer written.
 .SH SEE ALSO

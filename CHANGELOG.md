@@ -13,6 +13,24 @@ and announced as [SECURITY.md](SECURITY.md) describes.
 
 The binary reports `0.12.0`; the tag is pending.
 
+### Performance
+
+- The second max model, bit 7 of the sized max profile's sizing byte
+  (`adapt_sizes.model2`, `ADAPT_SIZING_MODEL2`), written by every `--max`
+  encode: the first-layer arbiters' weights as int16 in 1/32768 with a
+  rounded train step (`vpmulhrsw`) and sixteen-lane dot products
+  (`vpmaddwd`), four context slots re-purposed (o5 carries the 21-byte
+  class history, o8 the order-1 indirect context, word3 recall's expected
+  byte, sparse2 its next two), recall buckets of four positions, and a
+  fifth arbiter keyed by the bytes since a space and the previous byte's
+  class. On the first 8 MiB of enwik8 (`--max --allocation context`)
+  1,700,354 → 1,686,110 bytes with 4.9 % fewer instructions and a decode
+  5 % faster; on the first 32 MiB 6,351,878 → 6,297,375. The int16 tables
+  halve the arbiters' 36.5 MiB, so a small tier reaches its table sooner.
+  Versions 21, 24, 53, 54, 56 and 57 are read and no longer written; every
+  file decodes as written. The cast intrinsic that leaves a vector's upper
+  half undefined is not used: gcc and clang builds write the same bytes.
+
 ### Security
 
 - Anchor POSIX folder restoration, metadata, cleanup and publication to

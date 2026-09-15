@@ -2,6 +2,99 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — The second max model: int16 arbiters, four re-purposed context slots, four-way recall, a fifth arbiter
+
+**Decision.** Bit 7 of the sized max profile's sizing byte
+(`adapt_sizes.model2`, `ADAPT_SIZING_MODEL2`) names a second max model,
+and every `--max` encode that is neither adaptive nor BMP writes it, so
+the max profile is always version 58 (61) now and 21, 24, 53, 54, 56 and
+57 are read and no longer written. The model keeps every table, context
+kind, run memory, estimation stage and the 1/32 start of the first and
+changes four things, each measured on its own on the first 8 MiB of
+enwik8 with `--max --allocation context` at the default tier (the CI
+proxy, 1,700,354 B and 125.4 G instructions before; bytes by `cmp`,
+instructions by `perf stat -e instructions:u`, round trips verified):
+
+1. *The first-layer arbiters' weights are int16* in units of 1/32768,
+   saturating at ±1, with the train step rounded to nearest —
+   `vpmulhrsw` of the input times sixteen by the error is
+   round(x·err / 2048) in one instruction for sixteen lanes — and the dot
+   products by `vpmaddwd`, sixteen lanes an instruction, their eight
+   int32 sums widened to 64 bits before they meet. −0.11 % bytes against
+   the int32 arbiters at −10.4 % instructions, −9.5 % cycles interleaved,
+   decode −9 %; the two side tables halve (36.5 → 18.3 MiB). The
+   floor-shifted int16 forms lost bytes (1/16384: +0.92 %; 1/32768
+   without rounding: +0.24 %; 1/65536 saturating at ±0.5: +0.52 %, its
+   arbiters over-confident), so the rounding is what makes int16 pay.
+2. *Four context slots carry other contexts.* Dropping a kind at a time
+   showed three that cost more than they gave at this table load (80
+   claims per block): without o5 −427 B, without o8 −999 B, without
+   word3 −1,131 B, and sparse2 worth only +161 B. In their slots, at no
+   change in claims or lanes: o5 the 21-byte class history (−2,390 B
+   alone), o8 the order-1 indirect context — what followed the previous
+   byte the last two times (−2,711 B), word3 recall's expected byte with
+   its length bucket and the previous byte (−3,184 B), sparse2 recall's
+   next two expected bytes (−542 B); −7,863 B (−0.46 %) for the first
+   three together, the first-block trial then declining the 8-byte class
+   history the 21-byte one makes redundant.
+3. *A recall bucket holds the four most recent positions* of its key and
+   the longest verified candidate wins, in the same table: −960 B for
+   two ways, −1,794 B for four.
+4. *A fifth first-layer arbiter* keyed by the bytes since the last space
+   or newline (at most 15) and the previous byte's class, with the
+   partial byte, 128 × 256 sets: −2,171 B (−0.13 %) for +4.6 %
+   instructions. Two other keys lost or added nothing beside it
+   (recall's length and expected bit; eight bits of the order-3 hash).
+
+Together, this binary against the tree before it:
+
+| Input | Before | After | Change |
+|---|---:|---:|---:|
+| enwik8-8MiB (`--max --allocation context`, the CI proxy) | 1,700,354 B, 125.4 G instr. | 1,686,110 B, 120.0 G instr. | −0.84 % bytes, −4.3 % instructions, decode 11.8 → 11.5 s |
+| enwik8, first 32 MiB (the same command) | 6,351,878 B, 428.9 G instr. | 6,297,375 B, 410.4 G instr. | −0.86 % bytes, −4.3 % instructions, decode 45.9 → 44.4 s |
+| codecbench `enwik8-8mib`, 3 repeats, encode + decode | 1,700,354 B, 23.8 s | 1,689,657 B*, 22.0 s | −0.63 %, 0.92× the time (*the state before the fourth change) |
+
+The bytes are the same on the baseline and the x86-64-v3 paths and in
+gcc and clang builds; a first clang build differed until the cast
+intrinsic that leaves a vector's upper half undefined
+(`_mm256_castsi128_si256`) was replaced by a zero-extension.
+
+Measured on the proxy and not taken, each a format change of its own:
+the estimation stages' update weighted by the interpolation (+92 to
++856 B), a 16-bit final probability into the coder (−24 B), the map
+limit per kind (all worse) and a 10-bit map count with limits 511 and
+1,023 (−109 B, +1 B), recall following its pointer through a miss (+220
+to +344 B), the miss history as a confidence context (−17 B), the
+highest order that hit as an arbiter key (+1,495 B on the first
+arbiter; −2,335 B on the second and final, but +3,259 B once the slots
+above were re-purposed), a 21st context kind (−2,153 B for +6.7 %
+instructions: the lanes leave the sixteen-lane multiple), the last bit
+in the small mixed states (+27 B: the run memories carry it), a
+word-keyed third estimation stage (+524 B), the transform's codes
+classed as letters (+1,224 B), a direct order-1 memory under the max
+profile (−20 B), and the final blend at 1:1 or 1:7 (+1,072 B, +62 B).
+
+**Consequences.**
+- `RUN-5` holds: the scalar train and dot form the same integers as the
+  vector ones (`train16_delta`, `dot16_scalar`), checked by the
+  `ADAPT_ISA=baseline` cases and a clang build.
+- The memory bound of a max model falls by about 13 MiB, so the tiers
+  a max encode is raised to fall with it and the context policy reaches
+  a table doubling sooner (the sizing tests name the new outcomes).
+- The `ADAPT_SHADOW_CHECK` build exempts the two recall-derived slots:
+  their lines are guessed after a byte that breaks a match, a wasted
+  prefetch at match boundaries and never a bytes fault.
+- `tools/ratio_floor.json` is not re-locked here: the proxy and 32 MiB
+  measurements above are the evidence; the full enwik8 and enwik9 rows
+  are landing runs for the operator (`make ratio-floor`), not
+  development runs.
+- The encoder's max vectors are `text-max2.adpt` and `abc-max2.adpt`;
+  `text-max.adpt` and `abc-max.adpt` stay as decode fixtures of 21.
+
+**Status.** Landed 2026-09-15 on branch `ratio-speed` with the model,
+the sizing bit, decoder, encoder, C and CLI tests, the man page, README
+and CHANGELOG; the SBOM regenerated.
+
 ## 2026-09-15 — Throughput floors are CPU seconds, checked as the median of runs; a shared host gates relatively
 
 **Decision.** The floors of `tools/ratio_floor.json` are seconds of CPU

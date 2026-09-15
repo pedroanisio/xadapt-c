@@ -19,9 +19,13 @@ transform ahead of the normal and fast models uses 62 and 63, 67 and 68
 with metadata, and ahead of the max profile it is the sized version 58
 or 61 again, its sizing byte naming the transform and the arbiters' 1/32
 starting weight (64 to 66 and 69 to 71, the transform's own max versions,
-are read and no longer written). The decoder reads every version ever
-published; versions 10–18 and the unused numbers (55, 59, 60) are
-refused. The CLI uses native filesystem APIs to
+are read and no longer written). Every `--max` encode is now the sized
+version 58 (61), its sizing byte's bit 7 naming the second max model —
+int16 arbiters, four re-purposed context slots, four-way recall buckets
+and a fifth arbiter (the `Second max model` entry in `LOCKS.md`) — so
+21, 24, 53, 54, 56 and 57 are read and no longer written. The decoder
+reads every version ever published; versions 10–18 and the unused
+numbers (55, 59, 60) are refused. The CLI uses native filesystem APIs to
 restore metadata.
 
 The [experimental implementation report](research/causal-byte-implementation.md)
@@ -439,7 +443,7 @@ stays readable (`DLV-1` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)):
 | 45–48 | max + `--transform bmp` | 49–52 | the transform over the max profile |
 | 53 | max, compact side tables | 56 | table 2^22 blocks or fewer |
 | 54 | max, compact and lean | 57 | as 53 without three contexts |
-| 58 | max, sized | 61 | a sizing byte: compact, lean, the table's eighths, the text transform, the arbiters' 1/32 start |
+| 58 | max, sized | 61 | a sizing byte: compact, lean, the table's eighths, the text transform, the arbiters' 1/32 start, the second max model (bit 7; every `--max` encode) |
 | 62 / 63 | normal / fast, text transform | 67 / 68 | the book of words built as the file is coded |
 | 64–66 | max, compact, lean, text transform | 69–71 | read only: the max profile writes 58 (61) under the transform |
 | 55, 59, 60 | refused | — | no format |
