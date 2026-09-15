@@ -931,6 +931,11 @@ typedef struct model {
      * of one nibble's fifteen binary decisions. */
     uint8_t *table;
     size_t table_mask;
+    /* The table's lines (blocks / WAYS) when its block count is not a
+     * power of two (a fraction, see adapt_table_blocks): a hash then maps
+     * to a line by a range multiply; 0 for a power of two, where the mask
+     * above does it and the bytes are those of the unsized formats. */
+    size_t table_lines;
     uint8_t o0[32][BLOCK];
     /* The fast profile's direct order-1 memory; untouched under the normal
      * profile. */
@@ -1098,6 +1103,12 @@ static inline void model_free(model *m) {
     free(m);
 }
 
+/* Blocks of the context table: a power of two, or with a fraction
+ * (8 + f) << (table_log - 3); the public adapt_table_blocks. */
+static inline uint64_t table_blocks(adapt_sizes sizes) {
+    return ((uint64_t)8 + sizes.table_frac) << (sizes.table_log - 3);
+}
+
 /* Place the tables in an arena starting at `base`, largest and most
  * randomly accessed first, each on its own page, and return the bytes
  * they span; with base NULL it only measures. */
@@ -1109,7 +1120,7 @@ static inline size_t model_layout(model *m, uint8_t *base, adapt_sizes sizes) {
         m->field = (type)(base == NULL ? NULL : (void *)(base + at));                               \
         at += (bytes);                                                                              \
     } while (0)
-    ADAPT_PLACE(table, uint8_t *, ((size_t)1 << sizes.table_log) * BLOCK, 4096);
+    ADAPT_PLACE(table, uint8_t *, (size_t)table_blocks(sizes) * BLOCK, 4096);
     ADAPT_PLACE(apm, uint16_t(*)[APM_BUCKETS], APM_CONTEXTS * sizeof(*m->apm), 4096);
     ADAPT_PLACE(apm2, uint16_t(*)[APM_BUCKETS], APM2_CONTEXTS(sizes.max, sizes.compact) * sizeof(*m->apm2), 4096);
     ADAPT_PLACE(mtab, uint32_t *, ((size_t)1 << sizes.match_log) * sizeof(uint32_t), 4096);
@@ -1156,8 +1167,18 @@ static inline int model_arena(model *m, adapt_sizes sizes) {
 
 /* Find or claim the block for hash h: WAYS blocks of one cache line, a
  * miss evicting the candidate whose first node has seen the least. */
+/* The first block of the line hash h selects: for a power-of-two table
+ * the masked low bits, for any other size the low 32 bits scaled to the
+ * line count (a multiply and a shift, uniform over the lines). */
+static inline size_t block_line(const model *m, uint64_t h) {
+    if (m->table_lines != 0) {
+        return (size_t)(((uint64_t)(uint32_t)h * (uint64_t)m->table_lines) >> 32) * WAYS;
+    }
+    return ((size_t)h & m->table_mask) & ~(size_t)(WAYS - 1);
+}
+
 static inline size_t claim(model *m, uint64_t h) {
-    size_t base = ((size_t)h & m->table_mask) & ~(size_t)(WAYS - 1);
+    size_t base = block_line(m, h);
     uint8_t tag = (uint8_t)(h >> 56);
     uint8_t *line = m->table + base * BLOCK;
     /* The four tags at once, then one branch on the line: the way loop
@@ -1581,7 +1602,7 @@ static inline void prefetch_byte(model *m, uint8_t b, int fast, int now) {
      * the core's fill buffers hold, and the rest of a burst is lost. */
     for (i = 0; i < m->hashed; i++) {
         uint64_t h = hk[m->kind[i]];
-        m->planned[i] = m->table + (((size_t)h & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK;
+        m->planned[i] = m->table + block_line(m, h) * BLOCK;
         if (now) {
             ADAPT_PREFETCH(m->planned[i]);
         }
@@ -2042,7 +2063,7 @@ static inline void nibble_plan(model *m, uint64_t hi) {
     size_t i;
     for (i = 0; i < m->hashed; i++) {
         uint64_t x = (m->h[i] + salt) * 0x9E3779B97F4A7C15ull;
-        m->planned[i] = m->table + (((size_t)(x ^ (x >> 29)) & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK;
+        m->planned[i] = m->table + block_line(m, x ^ (x >> 29)) * BLOCK;
     }
 }
 
@@ -2203,8 +2224,8 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
             for (i = 0; i < m->hashed; i++) {
                 uint64_t x0 = (m->h[i] + salt0) * 0x9E3779B97F4A7C15ull;
                 uint64_t x1 = (m->h[i] + salt1) * 0x9E3779B97F4A7C15ull;
-                ADAPT_PREFETCH(m->table + (((size_t)(x0 ^ (x0 >> 29)) & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK);
-                ADAPT_PREFETCH(m->table + (((size_t)(x1 ^ (x1 >> 29)) & m->table_mask) & ~(size_t)(WAYS - 1)) * BLOCK);
+                ADAPT_PREFETCH(m->table + block_line(m, x0 ^ (x0 >> 29)) * BLOCK);
+                ADAPT_PREFETCH(m->table + block_line(m, x1 ^ (x1 >> 29)) * BLOCK);
             }
         } else if (m->bitpos == 7) {
             uint8_t low = (uint8_t)((m->c0 << 1) & 0xFE);
@@ -2307,12 +2328,13 @@ static inline model *model_new(adapt_sizes sizes) {
     for (i = 0; i < HASHED + 1; i++) {
         state_map_init(m->maps[i], &m->states);
     }
-    blocks = (size_t)1 << sizes.table_log;
+    blocks = (size_t)table_blocks(sizes);
     if (!model_arena(m, sizes)) {
         model_free(m);
         return NULL;
     }
     m->table_mask = blocks - 1;
+    m->table_lines = sizes.table_frac != 0 ? blocks / WAYS : 0;
     m->class_bits = 3 * CLASS_WIDTHS[sizes.class_code];
     m->fast = sizes.fast != 0;
     m->max = sizes.max != 0;
@@ -2558,7 +2580,8 @@ static inline int sizes_valid(adapt_sizes s) {
            (!s.fast || s.period == 0) && s.segmented <= 1 && s.max <= 1 && !(s.fast && s.max) && s.x86 <= 1 &&
            s.archive <= 1 && s.adaptive <= 3 && (!s.adaptive || !s.fast) &&
            s.bmp <= 1 && (!s.bmp || (!s.fast && !s.x86 && !s.archive)) &&
-           s.compact <= 1 && (!s.compact || (s.max && !s.adaptive && !s.bmp)) && s.lean <= 1 && (!s.lean || s.compact);
+           s.compact <= 1 && (!s.compact || (s.max && !s.adaptive && !s.bmp)) && s.lean <= 1 && (!s.lean || s.compact) &&
+           s.table_frac <= ADAPT_SIZING_FRAC_MAX && (s.table_frac == 0 || (s.max && !s.adaptive && !s.bmp));
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {

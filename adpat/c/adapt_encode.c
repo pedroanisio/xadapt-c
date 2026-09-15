@@ -387,6 +387,19 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
         if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
         s = next;
     }
+    /* What the budget still holds goes to the table as a fraction of its
+     * next doubling, an eighth at a time (ADAPT_MAX_SIZED_VERSION): the
+     * window keeps what it has — measured on enwik8 at 256 MiB, the
+     * table's next 32 MiB was worth 0.62 % and a window halved for it was
+     * not — and a table at its target takes none. */
+    if (s.max && !s.adaptive && !s.bmp && s.table_log < target) {
+        while (s.table_frac < ADAPT_SIZING_FRAC_MAX) {
+            next = s;
+            next.table_frac++;
+            if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
+            s = next;
+        }
+    }
     *sizes = s;
     return fail(error, ADAPT_OK, 0, 0);
 }
@@ -1589,9 +1602,10 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     header[3] = 'T';
     header[4] = sizes.adaptive ? (uint8_t)((sizes.max ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + sizes.adaptive - 1) :
                 (sizes.fast ? ADAPT_FAST_VERSION
-                            : (sizes.max ? (sizes.lean      ? ADAPT_MAX_LEAN_VERSION
-                                            : sizes.compact ? ADAPT_MAX_COMPACT_VERSION
-                                                            : ADAPT_MAX_VERSION)
+                            : (sizes.max ? (sizes.table_frac ? ADAPT_MAX_SIZED_VERSION
+                                            : sizes.lean     ? ADAPT_MAX_LEAN_VERSION
+                                            : sizes.compact  ? ADAPT_MAX_COMPACT_VERSION
+                                                             : ADAPT_MAX_VERSION)
                                          : ADAPT_FORMAT_VERSION));
     if (sizes.bmp) header[4] = (uint8_t)((sizes.max ? ADAPT_MAX_BMP_VERSION : ADAPT_BMP_VERSION) + sizes.adaptive);
     header[5] = (uint8_t)(sizes.table_log | sizes.class_code << 5 | (sizes.archive ? ADAPT_ARCHIVE_FLAG : 0));
@@ -1603,6 +1617,11 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         header[8] = (uint8_t)sizes.period;
         header[9] = (uint8_t)(sizes.period >> 8);
         header_len += ADAPT_PERIOD_BYTES;
+    }
+    if (header[4] == ADAPT_MAX_SIZED_VERSION) {
+        header[header_len] = (uint8_t)((sizes.compact ? ADAPT_SIZING_COMPACT : 0) | (sizes.lean ? ADAPT_SIZING_LEAN : 0) |
+                                       (unsigned)sizes.table_frac << ADAPT_SIZING_FRAC_SHIFT);
+        header_len += ADAPT_SIZING_BYTES;
     }
     if (sizes.bmp) {
         bmp_store32(header + header_len, sizes.bmp_offset);
@@ -1961,7 +1980,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);

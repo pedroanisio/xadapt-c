@@ -213,7 +213,8 @@ _
 .IP
 At 128 and 192 MiB the table is bought with the compact side tables
 (versions 53 and 56), and at 128 MiB the lean context set as well
-(54 and 57); see
+(54 and 57); at 256 MiB the table is 9/8 of 128 MiB, the budget's slack
+past the window (58 and 61); see
 .BR "\-\-allocation" .
 Speed hardly depends on the budget: interleaved on the first 8 MiB, the
 128 MiB and 674 MiB runs took the same user cycles with the full tables.
@@ -228,7 +229,11 @@ grows the table first; under
 it also halves the side tables (versions 53/56) when the budget would
 otherwise stop the table at 2^22 blocks or fewer, short of the input's
 target, and spends the difference on a table twice the size, with a lean
-context set (54/57) while the table stays at that size.
+context set (54/57) while the table stays at that size; and what the
+budget still holds once the window has grown goes to the table an eighth
+of its next doubling at a time (58/61), never at the window's expense.
+A table at the input's target takes no fraction, so the default budget's
+containers are unchanged.
 Either can win depending on the input; on enwik8 at 674 MiB
 .B context
 writes 18,564,510 bytes and
@@ -360,7 +365,9 @@ version it does not implement.
 Versions 13 to 18 are refused; 19 to 24 are the three profiles as streams
 and as named files or folders; 25 to 52 are the experimental profiles;
 53 and 56 are the max profile with compact side tables, 54 and 57 with
-its lean context set as well.
+its lean context set as well; 58 and 61 the max profile sized to its
+budget, one byte after the header naming the side tables, the context
+set and the table's fraction.
 .SH SEE ALSO
 .BR xz (1).
 .br

@@ -118,6 +118,45 @@ class AllocationTest(CodecTest):
         back = self.run_codec("decode", "-", data=compact.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual(back.stdout, big.read_bytes())
+        # A budget with slack past the power of two the table reaches sizes
+        # the table in eighths: this input at 100 MiB takes the compact tables,
+        # the lean set and a fraction, written as version 58 (61 with metadata)
+        # whose sizing byte names all three, and the container decodes through
+        # both instruction-set paths.
+        sized = self.run_codec("encode", "-", "--max", "--allocation", "context", "--max-memory", str(100 << 20),
+                               data=big.read_bytes())
+        self.assertEqual(sized.returncode, 0, sized.stderr)
+        self.assertEqual(sized.stdout[4], 58)
+        self.assertEqual(sized.stdout[8] & 3, 3, "the compact tables and the lean set were not both taken at 100 MiB")
+        self.assertNotEqual(sized.stdout[8] >> 2 & 7, 0, "no fraction was taken at 100 MiB")
+        self.assertLess(len(sized.stdout), len(compact.stdout) + 64)
+        back = self.run_codec("decode", "-", data=sized.stdout)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertEqual(back.stdout, big.read_bytes())
+        env = dict(os.environ)
+        env["ADAPT_ISA"] = "baseline"
+        back = subprocess.run([str(CADAPT), "decode", "-"], input=sized.stdout, capture_output=True, timeout=120, env=env)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertEqual(back.stdout, big.read_bytes())
+        # The named file's length is known, so its table stops at the input's
+        # target (2^21 at 80 MiB and above, no fraction: the version-57 file
+        # above); at 76 MiB the table is short of it and the slack past the
+        # 4 MiB window is spent in eighths, version 61 with metadata.
+        named_sized = self.root / "big-sized.adpt"
+        run = self.run_codec("encode", big, "-o", named_sized, "--max", "--allocation", "context", "--max-memory", str(76 << 20))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(named_sized.read_bytes()[4], 61)
+        self.assertEqual(named_sized.read_bytes()[8] & 3, 3)
+        self.assertNotEqual(named_sized.read_bytes()[8] >> 2 & 7, 0, "no fraction was taken at 76 MiB")
+        run = self.run_codec("info", named_sized)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b"adapt container version 61", run.stdout)
+        self.assertIn(b"/8 past 2^", run.stdout)
+        self.assertIn(b"profile         max (compact side tables, lean contexts)\n", run.stdout)
+        restored_sized = self.root / "big-sized.restored"
+        run = self.run_codec("decode", named_sized, "-o", restored_sized)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(restored_sized.read_bytes(), big.read_bytes())
         named = self.root / "big.adpt"
         run = self.run_codec("encode", big, "-o", named, "--max", "--allocation", "context", "--max-memory", str(80 << 20))
         self.assertEqual(run.returncode, 0, run.stderr)

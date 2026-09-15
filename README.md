@@ -12,9 +12,10 @@ threads for the encoder's optional proof). Byte streams use format versions
 22, 23 and 24 respectively to carry filesystem metadata. The decoder reads
 all six versions. Experimental profiles also use versions 25–52 for
 causal adaptive predictors and a reversible BMP24 transform; the max
-profile with compact side tables uses 53 and 56, and with its lean
-context set as well 54 and 57. The CLI uses native filesystem APIs to
-restore metadata.
+profile with compact side tables uses 53 and 56, with its lean context
+set as well 54 and 57, and sized to its budget — a context table any
+eighth past a power of two, named by a sizing byte — 58 and 61. The CLI
+uses native filesystem APIs to restore metadata.
 
 The [experimental implementation report](research/causal-byte-implementation.md)
 specifies the new algorithms, format versions, limits and measurement protocol.
@@ -132,7 +133,10 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   Under `--max`, a budget that would stop the table at 2^22 blocks or fewer,
   short of the input's target, buys a table twice the size with compact side
   tables (versions 53/56) and, while the table stays at that size, a lean
-  context set (54/57): on enwik8, 19,657,760 bytes in 128 MiB.
+  context set (54/57): on enwik8, 19,657,760 bytes in 128 MiB. What the
+  budget still holds past the window goes to the table an eighth of its
+  next doubling at a time (versions 58/61): on enwik8, 18,780,150 bytes
+  in 512 MiB against 18,831,629 with the table stopped at 256 MiB.
   Either allocation can produce a larger file; choose from measured complete
   containers. More of the allowed memory can be used by the context policy.
 - `--adaptive rates|sparse|retained` selects experimental causal predictors:
