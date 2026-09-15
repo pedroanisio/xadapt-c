@@ -41,10 +41,10 @@
       "fixture": "enwik9",
       "input_bytes": 1000000000,
       "input_md5": "e206c3450ac99950df65bf70ef61a12d",
-      "max_container_bytes": 155906798,
-      "wall_seconds": 3123.0,
-      "min_bytes_per_second": 320204.9311559398,
-      "measured_with": "same binary; operator run 2026-09-14 18:53:50-19:45:54 local (52m03s) on AMD Ryzen 5 5600X with a paq8px job sharing the host; archive sha256 6f972eefe0fc85431d4c0cc1a89b7fa6d63f68b4f75b96d74d1f97481a379211; decode verification in progress at lock time"
+      "max_container_bytes": 150063628,
+      "wall_seconds": 1385.4,
+      "min_bytes_per_second": 721813.1947451999,
+      "measured_with": "same binary; operator run 2026-09-14 18:53:50-19:45:54 local (52m03s) on AMD Ryzen 5 5600X with a paq8px job sharing the host; archive sha256 6f972eefe0fc85431d4c0cc1a89b7fa6d63f68b4f75b96d74d1f97481a379211; decode verification in progress at lock time | re-locked 2026-09-15 on the merged text-transform binary (a1ed995, sha256 bde96bcb61c0d077…): tools/check_ratio_floor.py --verify on AMD Ryzen 5 5600X, load average 2-4 with other agents' jobs, round trip verified byte for byte; size and throughput both re-locked at 150,063,628 B in 1,385.4 s"
     }
   ]
 }

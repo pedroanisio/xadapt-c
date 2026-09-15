@@ -16,7 +16,7 @@ spare budget, the memory tiers) measures with the locked command
 | enwik8-8MiB | 1,713,845 B | 13.3 s | 1,715,521 B, 17.9 s |
 | enwik8-16MiB | 3,320,094 B | 24.4 s | 3,337,011 B, 33.8 s |
 | enwik8 | 18,207,203 B | 130.5 s | 18,529,513 B, 189.4 s |
-| enwik9 | measured on this binary next, in a following entry | | 155,906,798 B, 3,123 s |
+| enwik9 | 150,063,628 B | 1,385.4 s | 155,906,798 B, 3,123 s |
 
 **Why.** The operator's rule: the floors are only ever improved from. The
 transform made every fixture smaller and faster at once (the model codes
@@ -30,8 +30,9 @@ old rate would let the transform's speed be given back unnoticed. The
 - A change that turns the transform off for the proxy — a stricter length
   rule, a stricter detector — now fails the gate unless it pays otherwise.
 
-**Status.** Locked 2026-09-15; the operator asked for this lock ahead of
-every other session's work.
+**Status.** Locked 2026-09-15, enwik8 first (c279849) and enwik9 after
+its measured round trip (decoded byte for byte in 1,748 s); the operator
+asked for this lock ahead of every other session's work.
 
 ## 2026-09-15 — The memory tier is encode's only memory setting; `-10`/`-11`; decode's caps apply only when given
 
