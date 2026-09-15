@@ -44,8 +44,8 @@ Release of 2026-09-15, `dist/ltcb-0.12.0-7c3d238/`:
 |---|---:|---|
 | `cadapt` (stripped, Linux x86-64) | 465,120 | `415f9ec3782d07249c955aa70af3961ad20a308bbcb26eedd80c279ac594a6fa` |
 | `cadapt-0.12.0-linux-x86_64.zip` (the binary, `README-ltcb.txt`, `LICENSE`) — **the decompressor the ranking counts** | 209,893 | `f3c59cbe2743d2368715bbe2ebca45f00072510ab6c6c11fee751144b8a6e200` |
-| `containers/enwik8.adpt` | 18,207,203 | `58a73a9b188ed8164405caca9caba5a64c89ee56b8bf4afdec9f1428946ca9ac` |
-| `containers/enwik9.adpt` | 150,063,628 | `d7404c8160ffe095f105a9dd5beccdd5f0279d35e07d7a52f3ae0690165ab30c` |
+| `dist/ltcb-0.12.0-7c3d238/containers/enwik8.adpt` — the compressed enwik8 | 18,207,203 | `58a73a9b188ed8164405caca9caba5a64c89ee56b8bf4afdec9f1428946ca9ac` |
+| `dist/ltcb-0.12.0-7c3d238/containers/enwik9.adpt` — the compressed enwik9 | 150,063,628 | `d7404c8160ffe095f105a9dd5beccdd5f0279d35e07d7a52f3ae0690165ab30c` |
 
 Both containers were decoded by this binary and compared byte for byte with
 the inputs (`floor-check.txt`). The sizes equal the locked floors of
@@ -62,12 +62,17 @@ rows transcribed in `research/ltcb-main-table.csv`.
 
 ## Before sending
 
-1. Put `cadapt-0.12.0-linux-x86_64.zip` at a public URL that will stay up
-   (the rule is free download and public verification; a private repository
-   does not satisfy it, a release asset or any plain file host does).
-2. Keep the URL, the zip's SHA-256 above and the two container hashes in
-   the email, so a verifier can confirm both the program and the result.
-3. Do not attach or link the sources, the repository, or anything under
+1. Put `dist/ltcb-0.12.0-7c3d238/cadapt-0.12.0-linux-x86_64.zip` at a
+   public URL that will stay up (the rule is free download and public
+   verification; a private repository does not satisfy it, a release asset
+   or any plain file host does).
+2. Put the two containers beside it, `containers/enwik8.adpt` (18.2 MB)
+   and `containers/enwik9.adpt` (150.1 MB): with them a verifier decodes
+   in 30 minutes and compares hashes instead of encoding for an hour, and
+   the enwik9 figure is checked directly against the file that produced it.
+3. Keep the three URLs and the SHA-256s above in the email, so program and
+   result can both be confirmed.
+4. Do not attach or link the sources, the repository, or anything under
    `_tmp/`.
 
 ## The email
@@ -82,16 +87,22 @@ a new entry for the Large Text Compression Benchmark.
 Program and version: cadapt 0.12.0 (build 7c3d238), a context-mixing
 compressor in C; Linux x86-64 executable, no runtime files, MIT licence.
 
-Download: <URL of cadapt-0.12.0-linux-x86_64.zip>
+Download: <URL>/cadapt-0.12.0-linux-x86_64.zip
   zip 209,893 bytes, SHA-256
   f3c59cbe2743d2368715bbe2ebca45f00072510ab6c6c11fee751144b8a6e200
   (the binary alone is published; it contains the decompressor)
 
+Compressed files, for verification by decoding:
+  <URL>/containers/enwik8.adpt   18,207,203 bytes, SHA-256
+    58a73a9b188ed8164405caca9caba5a64c89ee56b8bf4afdec9f1428946ca9ac
+  <URL>/containers/enwik9.adpt  150,063,628 bytes, SHA-256
+    d7404c8160ffe095f105a9dd5beccdd5f0279d35e07d7a52f3ae0690165ab30c
+  ./cadapt decode enwik9.adpt -o enwik9   (md5 of the output:
+    e206c3450ac99950df65bf70ef61a12d, the published enwik9)
+
 Compressed sizes:
   enwik8: 18,207,203 bytes
   enwik9: 150,063,628 bytes
-  (SHA-256 of the enwik9 container:
-   d7404c8160ffe095f105a9dd5beccdd5f0279d35e07d7a52f3ae0690165ab30c)
 
 Options (the same for both, -9 is the default memory tier):
   ./cadapt encode --max --allocation context enwik9 -o enwik9.adpt
@@ -119,5 +130,6 @@ Thank you,
 <name>
 ```
 
-Fill in the URL and the name; nothing else in the text depends on anything
-outside `dist/ltcb-0.12.0-7c3d238/manifest.json`.
+Fill in `<URL>` (the directory holding the zip and `containers/`) and the
+name; nothing else in the text depends on anything outside
+`dist/ltcb-0.12.0-7c3d238/manifest.json` and `SHA256SUMS`.
