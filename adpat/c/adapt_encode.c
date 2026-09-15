@@ -367,6 +367,13 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
     if (s.fast && target > ADAPT_FAST_TABLE_LOG_MAX) target = ADAPT_FAST_TABLE_LOG_MAX;
     cap = length_known ? clamp_u8(bits(length > 0 ? length - 1 : 0), WINDOW_LOG_MIN, WINDOW_LOG_MAX) : WINDOW_LOG_MAX;
     s.window_log = WINDOW_LOG_MIN;
+    /* the recall index back at its usual cap, as the window is at its
+     * floor: what the plain sizing grew from spare budget is re-spent
+     * here, on the table and the window first */
+    if (length_known) {
+        uint8_t usual = clamp_u8(bits(length), MATCH_LOG_MIN, 20);
+        if (s.match_log > usual) s.match_log = usual;
+    }
     while (s.table_log < target) {
         next = s;
         next.table_log++;

@@ -1,15 +1,15 @@
 {
   "schema": "cadapt.build-manifest.v1",
   "version": "0.12.0",
-  "commit": "6acd0387da9936347ff769062f31a4ac668b7981",
-  "generated_at": "2026-09-15T07:17:59+00:00",
+  "commit": "e153bfa314521f764ad1f7ea66257955fb243c43",
+  "generated_at": "2026-09-15T07:27:55+00:00",
   "sources": {
     "adpat/c/adapt.h": "37c60eb1f92db2f68caefe0e8932b33435d6013c324b7849e47b281b15ba30f4",
     "adpat/c/adapt_adaptive.h": "d21a75f99b8d19400819a538becd7b459673de4fef8e2b889e5423fdb17fb5c7",
     "adpat/c/adapt_archive.c": "089f77084f6fde6d824e2946cb494912daf52909ea3fe8ef389061778d04339f",
     "adpat/c/adapt_bmp.h": "1c2517ba6a05ee609afde4292c1afabb94452f23d97aac90531d31dcca083d96",
     "adpat/c/adapt_decode.c": "6893971902ce2627b6bf6d43c6e29e143fc70061491f8312e9870cb844ff9e0b",
-    "adpat/c/adapt_encode.c": "cc2d5c0141eb867501e944bc4729b809c43cbe78dc13d3cf2fab3a4133f3a7c7",
+    "adpat/c/adapt_encode.c": "c3a99b173fd1002a30cac8a23b39dae4fa30618f16e7c3a236d6eb681aac2636",
     "adpat/c/adapt_model.h": "2f289084dc0ef25228596bc9f28bd040c430c05192f3e1658f7a5d3f28f060be",
     "adpat/c/cadapt.c": "9396d51770c073072664884c6b98ae42eb79c2d95af6101a83fdc80e115e4083"
   },
@@ -27,12 +27,12 @@
   },
   "outputs": {
     "adpat/c/build/cadapt": {
-      "sha256": "3e4f0143d7c4aa7a2220e0eca7ea81280ba39a06ed7d9916ea7ca3fa23e87ca3",
+      "sha256": "6032b9390b05d34989b208b6c8435ab440ab03304d33d556f96a54f388a66fcb",
       "bytes": 421368
     },
     "adpat/c/build/libadapt.a": {
-      "sha256": "aed12e9823fed75a3b3cdf4206f997a620f42df0768d81766b41078554fe34a8",
-      "bytes": 379802
+      "sha256": "d52858e8753d63037708b05a4a4f6cab3f2c7c81b544d5834413d1e5872175aa",
+      "bytes": 379674
     }
   }
 }
