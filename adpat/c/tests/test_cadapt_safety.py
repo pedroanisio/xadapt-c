@@ -5,6 +5,7 @@ including its filesystem sink and refusal cleanup, without a model encoder.
 """
 
 import os
+import random
 import select
 import signal
 import struct
@@ -27,7 +28,7 @@ def name(value):
     return struct.pack("<H", len(value)) + value
 
 
-def entry(kind, path, value=b"", *, size=4096, extents=()):
+def entry(kind, path, value=b"", *, size=4096, extents=(), mode=None):
     prefix = bytes((kind,)) + name(path)
     if kind in (3, 4):
         prefix += name(value)
@@ -37,7 +38,8 @@ def entry(kind, path, value=b"", *, size=4096, extents=()):
         prefix += struct.pack("<QI", size, len(extents))
     if kind == 4:
         return prefix
-    mode = 0o777 if kind in (1, 3) else 0o600
+    if mode is None:
+        mode = 0o777 if kind in (1, 3) else 0o600
     prefix += struct.pack("<IqIqI", mode, 1700000000, 0, 1700000000, 0)
     data = value if kind == 2 else b""
     if kind == 5:
@@ -89,11 +91,241 @@ class SafetyTest(unittest.TestCase):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             staged = list(self.root.glob(f".cadapt-{process.pid}-*.part"))
-            if staged and (child is None or (staged[0] / child).exists()):
+            if staged and (child is None or (staged[0] / child).exists()
+                           or (staged[0] / "contents" / child).exists()):
                 return staged[0]
             self.assertIsNone(process.poll(), "codec exited before staging")
             time.sleep(0.01)
         self.fail("codec did not create staging")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "POSIX staging identity and Linux xattrs")
+    def test_replaced_staging_name_cannot_redirect_restore_cleanup_or_publication(self):
+        attribute = name("user.identity") + struct.pack("<I", 8) + b"archived"
+        first = (b"ADPTARC4\x01\x00" + attribute + entry(1, "nested")
+                 + entry(2, "nested/first", b"first"))
+        last_file = entry(2, "nested/last", b"last")[:-2] + b"\x01\x00" + attribute
+        last = last_file + b"\x00"
+        header = b"ADPT" + bytes((22, 10 | 128, 10, 16))
+        header += struct.pack("<IqIqI", 0o500, 1700000000, 0, 1700000000, 0)
+        header += struct.pack("<I", zlib.crc32(header))
+        for corrupt in (False, True):
+            for replacement in ("symlink", "directory"):
+                with self.subTest(corrupt=corrupt, replacement=replacement):
+                    victim = self.root / f"victim-{corrupt}-{replacement}"
+                    victim.mkdir(mode=0o750)
+                    (victim / "keep").write_bytes(b"untouched")
+                    (victim / "nested").mkdir()
+                    (victim / "nested/last").write_bytes(b"also untouched")
+                    os.setxattr(victim, "user.identity", b"original")
+                    before = victim.stat()
+                    target = self.root / f"restored-{corrupt}-{replacement}"
+                    options = ["--force"] if replacement == "directory" else []
+                    if options:
+                        target.write_bytes(b"existing target")
+                    with subprocess.Popen([str(CADAPT), "decode", "-", "-o", str(target), *options],
+                                          stdin=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                        process.stdin.write(header + struct.pack("<BII", 2, len(first), len(first)) + first)
+                        process.stdin.flush()
+                        stage = self.wait_for_stage(process, "nested/first")
+                        self.assertEqual(stage.stat().st_mode & 0o777, 0o700)
+                        moved = stage.with_name(stage.name + ".moved")
+                        stage.rename(moved)
+                        if replacement == "symlink":
+                            stage.symlink_to(victim, target_is_directory=True)
+                        else:
+                            victim.rename(stage)
+                            victim = stage
+                        process.stdin.write(struct.pack("<BII", 2, len(last), len(last)) + last)
+                        process.stdin.write(struct.pack("<BQI", 3, len(first + last),
+                                                        zlib.crc32(first + last) ^ corrupt))
+                        process.stdin.close()
+                        process.wait(timeout=10)
+                        diagnostic = process.stderr.read()
+                    self.assertEqual((victim / "keep").read_bytes(), b"untouched", diagnostic)
+                    self.assertEqual((victim / "nested/last").read_bytes(), b"also untouched", diagnostic)
+                    self.assertEqual(victim.stat().st_mode, before.st_mode)
+                    self.assertEqual(victim.stat().st_mtime_ns, before.st_mtime_ns)
+                    self.assertEqual(os.getxattr(victim, "user.identity"), b"original")
+                    self.assertEqual(process.returncode, int(corrupt), diagnostic)
+                    if corrupt:
+                        if options:
+                            self.assertEqual(target.read_bytes(), b"existing target")
+                        else:
+                            self.assertFalse(target.exists())
+                    else:
+                        self.assertEqual(target.stat().st_mode & 0o777, 0o500)
+                        self.assertEqual((target / "nested/first").read_bytes(), b"first")
+                        self.assertEqual((target / "nested/last").read_bytes(), b"last")
+                        self.assertEqual(os.getxattr(target, "user.identity"), b"archived")
+                        self.assertEqual(os.getxattr(target / "nested/last", "user.identity"), b"archived")
+                    # The renamed private wrapper may remain, but its contents
+                    # must have been removed or published via the retained handle.
+                    self.assertEqual(list(moved.iterdir()), [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX restrictive metadata and cleanup")
+    def test_failed_publication_cleans_directories_after_permissions_are_applied(self):
+        raw = b"ADPTARC3" + entry(1, "locked", mode=0) + entry(2, "locked/file", b"data", mode=0) + b"\0"
+        header = b"ADPT" + bytes((22, 10 | 128, 10, 16))
+        header += struct.pack("<IqIqI", 0, 1700000000, 0, 1700000000, 0)
+        header += struct.pack("<I", zlib.crc32(header))
+        target = self.root / "existing"
+        with subprocess.Popen([str(CADAPT), "decode", "-", "-o", str(target), "--force"],
+                              stdin=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            process.stdin.write(header + struct.pack("<BII", 2, len(raw), len(raw)) + raw)
+            process.stdin.flush()
+            self.wait_for_stage(process, "locked/file")
+            target.mkdir()
+            (target / "keep").write_bytes(b"keep")
+            process.stdin.write(struct.pack("<BQI", 3, len(raw), zlib.crc32(raw)))
+            process.stdin.close()
+            process.wait(timeout=10)
+            self.assertEqual(process.returncode, 1, process.stderr.read())
+        self.assertEqual((target / "keep").read_bytes(), b"keep")
+        self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux inherited ACLs")
+    def test_destination_default_acl_does_not_add_restored_permissions(self):
+        parent = self.root / "acl-parent"
+        parent.mkdir()
+        acl = struct.pack("<I", 2) + b"".join(
+            struct.pack("<HHI", tag, permissions, uid)
+            for tag, permissions, uid in ((1, 7, 0xffffffff), (2, 7, os.getuid()),
+                                          (4, 5, 0xffffffff), (16, 7, 0xffffffff),
+                                          (32, 0, 0xffffffff))
+        )
+        os.setxattr(parent, "system.posix_acl_default", acl)
+        for kind in ("file", "folder", "empty-folder"):
+            with self.subTest(kind=kind):
+                source = self.root / kind
+                if kind == "file":
+                    source.write_bytes(b"private contents")
+                    source.chmod(0o640)
+                    paths = [""]
+                else:
+                    source.mkdir(mode=0o750)
+                    paths = [""]
+                    if kind == "folder":
+                        (source / "nested").mkdir(mode=0o750)
+                        (source / "nested/secret").write_bytes(b"private contents")
+                        (source / "nested/secret").chmod(0o640)
+                        paths += ["nested", "nested/secret"]
+                encoded_path = self.root / f"{kind}.adpt"
+                encoded = subprocess.run([str(CADAPT), "encode", str(source), "--fast", "-3", "--verify",
+                                          "-o", str(encoded_path)], capture_output=True, timeout=30)
+                self.assertEqual(encoded.returncode, 0, encoded.stderr)
+                output = parent / kind
+                decoded = self.decode(encoded_path, None, "-o", output)
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                for path in paths:
+                    original = source / path if path else source
+                    restored = output / path if path else output
+                    self.assertEqual(restored.stat().st_mode, original.stat().st_mode)
+                    self.assertEqual(os.listxattr(restored), os.listxattr(original), str(restored))
+                self.assertEqual(os.getxattr(parent, "system.posix_acl_default"), acl)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux access ACLs")
+    def test_entry_acl_can_remove_owner_read_access(self):
+        acl = struct.pack("<I", 2) + b"".join(
+            struct.pack("<HHI", tag, permissions, uid)
+            for tag, permissions, uid in ((1, 0, 0xffffffff), (2, 5, os.getuid()),
+                                          (4, 0, 0xffffffff), (16, 5, 0xffffffff),
+                                          (32, 0, 0xffffffff))
+        )
+        attribute = name("system.posix_acl_access") + struct.pack("<I", len(acl)) + acl
+        for kind in (0, 1, 2):
+            with self.subTest(kind=kind):
+                output = self.root / str(kind)
+                restored = output / "restricted" if kind else output
+                if kind:
+                    item = entry(kind, "restricted", b"bytes", mode=0o050)[:-2] + b"\x01\x00" + attribute
+                    data = archive([item])
+                else:
+                    raw = b"ADPTARC4\x01\x00" + attribute + b"\x00"
+                    header = b"ADPT" + bytes((22, 10 | 128, 10, 16))
+                    header += struct.pack("<IqIqI", 0o050, 1700000000, 0, 1700000000, 0)
+                    header += struct.pack("<I", zlib.crc32(header))
+                    data = (header + struct.pack("<BII", 2, len(raw), len(raw)) + raw
+                            + struct.pack("<BQI", 3, len(raw), zlib.crc32(raw)))
+                try:
+                    result = self.decode("-", data, "-o", output)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(restored.stat().st_mode & 0o777, 0o050)
+                    self.assertEqual(os.getxattr(restored, "system.posix_acl_access"), acl)
+                finally:
+                    if restored.exists():
+                        restored.chmod(0o700)
+
+    @unittest.skipIf(os.name == "nt", "POSIX umask and restored modes")
+    def test_restrictive_umask_preserves_recorded_and_legacy_folder_modes(self):
+        for legacy, root_mode in ((False, 0o750), (False, 0o500), (False, 0), (True, None)):
+            for mask in (0o022, 0o777):
+                with self.subTest(legacy=legacy, root_mode=root_mode, umask=oct(mask)):
+                    if legacy:
+                        raw = (b"ADPTARC1" + b"\x01" + name("nested")
+                               + b"\x02" + name("nested/file") + struct.pack("<Q", 5) + b"first"
+                               + b"\x02" + name("second") + struct.pack("<Q", 6) + b"second"
+                               + b"\x03" + name("link") + name("nested/file") + b"\x00")
+                        header = HEADER[:5] + bytes((HEADER[5] | 128,)) + HEADER[6:]
+                    else:
+                        raw = (b"ADPTARC3" + entry(1, "nested", mode=0o750)
+                               + entry(2, "nested/file", b"first", mode=0o640)
+                               + entry(2, "second", b"second", mode=0o640)
+                               + entry(4, "alias", "nested/file")
+                               + entry(5, "nested/sparse", size=8192, extents=((8190, b"ok"),), mode=0o640)
+                               + entry(3, "link", "nested/file") + b"\x00")
+                        header = b"ADPT" + bytes((22, 10 | 128, 10, 16))
+                        header += struct.pack("<IqIqI", root_mode, 1700000000, 0, 1700000000, 0)
+                        header += struct.pack("<I", zlib.crc32(header))
+                    data = (header + struct.pack("<BII", 2, len(raw), len(raw)) + raw
+                            + struct.pack("<BQI", 3, len(raw), zlib.crc32(raw)))
+                    target = self.root / f"restored-{legacy}-{root_mode}-{mask}"
+                    result = subprocess.run([str(CADAPT), "decode", "-", "-o", str(target)], input=data,
+                                            capture_output=True, timeout=30, umask=mask)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    wanted_dir = 0o777 & ~mask if legacy else 0o750
+                    wanted_file = 0o666 & ~mask if legacy else 0o640
+                    # Inspect each recorded mode, then grant the test process
+                    # access to examine descendants and clean up a mode-000 tree.
+                    for rel, wanted in (("", wanted_dir if legacy else root_mode), ("nested", wanted_dir),
+                                        ("nested/file", wanted_file), ("second", wanted_file)):
+                        path = target / rel
+                        self.assertEqual(path.stat().st_mode & 0o777, wanted, rel)
+                        path.chmod(0o700)
+                    self.assertEqual((target / "nested/file").read_bytes(), b"first")
+                    self.assertEqual((target / "second").read_bytes(), b"second")
+                    self.assertEqual(os.readlink(target / "link"), "nested/file")
+                    if not legacy:
+                        self.assertEqual((target / "alias").stat().st_ino, (target / "nested/file").stat().st_ino)
+                        self.assertEqual((target / "nested/sparse").stat().st_mode & 0o777, wanted_file)
+                        self.assertEqual((target / "nested/sparse").read_bytes(), bytes(8190) + b"ok")
+                    self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipUnless(hasattr(signal, "SIGXFSZ"), "POSIX file-size limit signal")
+    def test_file_size_limit_discards_encode_and_decode_staging(self):
+        def limit_file_size():
+            import resource
+            resource.setrlimit(resource.RLIMIT_FSIZE, (1024, 1024))
+
+        raw = random.Random(7).randbytes(32 << 10)
+        file_data = (HEADER + struct.pack("<BII", 2, len(raw), len(raw)) + raw
+                     + struct.pack("<BQI", 3, len(raw), zlib.crc32(raw)))
+        folder = self.root / "source-folder"
+        folder.mkdir()
+        (folder / "data").write_bytes(raw)
+        cases = (("encode-file", ["encode", "-", "--fast", "-3"], raw),
+                 ("encode-folder", ["encode", str(folder), "--fast", "-3"], None),
+                 ("decode-file", ["decode", "-"], file_data),
+                 ("decode-folder", ["decode", "-"], archive([entry(2, "data", raw)])),
+                 ("decode-sparse", ["decode", "-"], archive([entry(5, "hole", size=8192)])))
+        for label, args, data in cases:
+            with self.subTest(case=label):
+                target = self.root / label
+                target.write_bytes(b"keep target")
+                result = subprocess.run([str(CADAPT), *args, "-o", str(target), "--force"], input=data,
+                                        capture_output=True, timeout=30, preexec_fn=limit_file_size)
+                self.assertEqual(result.returncode, 128 + signal.SIGXFSZ, result.stderr)
+                self.assertEqual(target.read_bytes(), b"keep target")
+                self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
 
     @unittest.skipIf(os.name == "nt", "POSIX directory publication")
     def test_folder_publication_refuses_a_destination_created_during_decode(self):
@@ -236,7 +468,12 @@ class SafetyTest(unittest.TestCase):
         encoded = subprocess.run([str(CADAPT), "encode", str(folder), "--fast", "-3", "--verify",
                                   "-o", str(self.root / "folder.adpt")], capture_output=True, timeout=30)
         self.assertEqual(encoded.returncode, 0, encoded.stderr)
-        restored = self.root / "restored"
+        parent = self.root / "different-acl"
+        parent.mkdir()
+        inherited = bytearray(acl)
+        struct.pack_into("<H", inherited, 14, 7)  # different named-user permissions
+        os.setxattr(parent, "system.posix_acl_default", inherited)
+        restored = parent / "restored"
         decoded = self.decode(self.root / "folder.adpt", None, "-o", restored)
         self.assertEqual(decoded.returncode, 0, decoded.stderr)
         actual = restored.stat()

@@ -242,7 +242,9 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
     `trusted.*` belong to the kernel and to root and are left alone. A
     directory's attributes are applied after its children, with its
     metadata, so a default ACL is not inherited by children the archive
-    records differently. On macOS the attributes `listxattr` reports are
+    records differently. Linux restoration removes inherited access and default
+    ACLs before creating children, so destination ACLs cannot add permissions
+    absent from the archive. On macOS the attributes `listxattr` reports are
     packed and restored; macOS ACLs are not attributes there and are not
     preserved. Windows packs no attributes and refuses to restore an archive
     that carries any. Attribute values are limited to 64 KiB.
@@ -258,13 +260,21 @@ complete, so an interrupted run leaves no partial target. Without
 meanwhile but is unavailable on filesystems without hard links (FAT, exFAT,
 some network mounts); pass `--force` there.
 
+On POSIX, folders are restored inside a private `0700` wrapper. Retained
+directory handles anchor restoration, metadata, cleanup and publication even
+if another process replaces the staging name. A wrapper renamed by another
+process may remain as an empty directory after completion.
+Temporary entries retain owner access under restrictive umasks; final modes
+match the archive, or the original umask for legacy entries. Read-only root
+modes are restored through the retained handle immediately after publication.
+
 Folder publication without `--force` uses an atomic no-replace rename on
 Linux and macOS; Windows rename also refuses existing destinations. If the
 platform or filesystem lacks the operation, the command fails and asks for
 `--force` rather than risking replacement after a separate existence check.
 
-On POSIX, `SIGINT`, `SIGTERM`, `SIGHUP` and `SIGPIPE` cancel encoding or
-decoding through the normal cleanup path. Blocked stream I/O wakes to discard
+On POSIX, `SIGINT`, `SIGTERM`, `SIGHUP`, `SIGPIPE` and `SIGXFSZ` (file-size
+limit) cancel encoding or decoding through the normal cleanup path. Blocked stream I/O wakes to discard
 staging; active codec work reaches its next I/O boundary first. The command
 exits with status `128 + signal number`. Uncatchable termination (`SIGKILL`)
 or machine failure can still leave staging files behind.

@@ -15,11 +15,18 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Security
 
+- Anchor POSIX folder restoration, metadata, cleanup and publication to
+  retained directory handles inside a private wrapper. Replacing the staging
+  pathname cannot redirect writes or delete unrelated files during rollback.
+- Remove inherited Linux access/default ACLs from folder roots before creating
+  children, and from staged files before applying final permissions. Preserve
+  archived ACLs without adding permissions inherited from the destination.
 - Publish folders without `--force` using atomic no-replace operations, so
   a destination created during decoding is preserved. Unsupported platforms
   refuse the operation instead of using a racy existence check.
 - Clean up staged file and folder outputs on POSIX `SIGINT`, `SIGTERM`,
-  `SIGHUP` and `SIGPIPE`, including blocked pipe I/O. Signal handlers only
+  `SIGHUP`, `SIGPIPE` and `SIGXFSZ`, including blocked pipe I/O and file-size
+  limits during encoding, decoding and sparse-file creation. Signal handlers only
   notify the command thread; cleanup runs through the ordinary failure path.
 - Store CPU dispatch selection in each model, removing concurrent writes to
   shared dispatch state. Add model-isolation and concurrent prediction tests.
@@ -52,6 +59,12 @@ The binary reports `0.12.0`; the tag is pending.
   worker as well as when it decodes in parallel.
 
 ### Fixed
+- Restore nested folders under restrictive umasks, including `0777`. Keep
+  temporary entries accessible to the owner, then apply recorded permissions
+  or the saved umask for legacy archives. Publish read-only roots with their
+  exact final modes restored through the retained directory handle.
+- Add an SDK regression for the merged fast-profile conversion fix: fractional
+  max configurations remain valid after conversion and encode/decode correctly.
 - The folder walker's hard-link table is a hash table over (device,
   inode). It was a flat list scanned for every name of a shared inode,
   quadratic in the hard-linked inodes: 0.3 s over 30,000 and 6.3 s over

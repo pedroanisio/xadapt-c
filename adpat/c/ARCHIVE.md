@@ -52,10 +52,41 @@ Version-3 entry helpers also write version-4 entries; use
 Older decoders reject the new archive magic. Root attributes omitted by an
 older encoder cannot be recovered from its container.
 
+## Private folder staging
+
+On POSIX, a folder is restored into `contents` inside a private `0700`
+staging wrapper. The CLI retains handles to the output parent, wrapper and
+archive root. Entry creation, metadata, attributes and rollback use those
+handles; publication renames `contents` out of the wrapper. The wrapper's
+permissions never change, including while the root and entries receive their
+recorded permissions. Replacing the wrapper's pathname with a symlink or
+another directory cannot redirect restoration, cleanup or publication.
+
+Temporary entries retain owner access even under umask `0777`. Once their
+contents are complete, entries receive their recorded modes; version-1 files
+and directories receive `0666 & ~umask` and `0777 & ~umask`, respectively.
+Directory modes are deferred until all children are restored.
+
+Moving a read-only root between directories can require owner-write permission.
+The CLI temporarily adds only that bit for the move and restores the validated
+mode through the retained root handle immediately after publication. If that
+final permission operation fails, the command reports that the folder was
+published and retains it; it does not recursively delete an exposed output.
+
+Cleanup only traverses the retained archive root. If another process renamed
+the wrapper, its empty directory may remain under that new name; replacement
+entries at the original staging name are left alone.
+
+On Linux, inherited access and default ACLs are removed from the archive root
+before any children are created. Archived ACLs are then restored in the usual
+deferred order. An archive without ACLs therefore acquires none from the
+destination parent, including when the archive is empty.
+
 ## Private file staging
 
 On POSIX, temporary output files are created with owner-only access and kept
-at mode `0600` during processing and verification. Successful publication
+at mode `0600` during processing and verification. Linux staging files also
+have inherited ACLs removed before final permissions are applied. Successful publication
 applies the recorded source mode, or `0666 & ~umask` when no metadata is present.
 Failure removes the temporary file. This protects decoded plaintext while
 validation is still pending, including when the destination directory is
@@ -66,8 +97,10 @@ readable by other users.
 The C archive suite checks fragmented version-4 prefixes, truncation, invalid
 attributes, callback failures, missing callback support and versions 1–3.
 The CLI safety suite checks root xattrs, Linux ACLs, deferred ACL application,
-empty and segmented folders, failure cleanup, and private staging before the
-trailer arrives. The decoder suite exercises malformed worker results with
+empty and segmented folders, destination ACL inheritance, staging-name
+replacement, cleanup after restrictive metadata, and private staging before
+the trailer arrives. It also checks restrictive umasks, legacy modes and
+cleanup on file-size limits (`SIGXFSZ`). The decoder suite exercises malformed worker results with
 null diagnostic pointers.
 
 Source: implemented by OpenAI GPT-6 via Codex from the existing archive
