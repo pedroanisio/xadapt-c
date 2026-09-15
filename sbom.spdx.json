@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "adapt-0.12.0",
-  "documentNamespace": "urn:uuid:07cd285a-a7d3-5b34-a4a2-fa4933b236e6",
+  "documentNamespace": "urn:uuid:a8bdafad-c82c-51a8-991a-19d5901f0821",
   "creationInfo": {
-    "created": "2026-09-15T03:29:19Z",
+    "created": "2026-09-15T04:32:27Z",
     "creators": [
       "Tool: tools/provenance.py",
       "Person: Pedro Anisio de Luna e Silva (pedroanisio@faz.ai)"
@@ -22,7 +22,7 @@
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": true,
       "packageVerificationCode": {
-        "packageVerificationCodeValue": "47805e89f1abb250d7fc9a0fb5dd018fab1f460d"
+        "packageVerificationCodeValue": "e698421efd5211635f2e3a463a3b2aeacbcabfab"
       },
       "hasFiles": [
         "SPDXRef-File-adapt-h",
@@ -111,11 +111,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "0a490e04f27d16d5a4449f1c9854d4a5ec5a5316"
+          "checksumValue": "8b6d3a6422eb64b614e6d521d1c3d2d20672290e"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "626676183db9566dd4b0f615cf382bf7d848ff94054f98332acf8da199027390"
+          "checksumValue": "dcb851bd2a394947e28ac9dc22813a3596917971b94e27be0ab5a96e6c0e6594"
         }
       ],
       "licenseConcluded": "MIT",
@@ -199,11 +199,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "c2d16233d46de26679d2d0dde07356c6a0fc7dfa"
+          "checksumValue": "a47f15ebe088b901c3ec6282ad872333dd85bb15"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "96e4d029caebec57c9d4a0e8de69f6c006c452ac3e0876b2b2e4c193c3955f8f"
+          "checksumValue": "6b4ff57e6a800a3fad110b764fdb00c1517e596eeb1556d377e5be0e9992110a"
         }
       ],
       "licenseConcluded": "MIT",
@@ -221,11 +221,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "5978cdad35089a54470a06633d8e2df63f02e4d1"
+          "checksumValue": "aa1d3de923572e81d59c49edc0a757327449edff"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "e2761a4bfc02bbc61e417c9203846210e167925eec3897d8fa7163c56090c428"
+          "checksumValue": "0fff28cb0b73f71f70dc0b6e50c2a3a296287a83ab934f7a8c3d722be7f57398"
         }
       ],
       "licenseConcluded": "MIT",
@@ -243,11 +243,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "a845d20a8c4085d4ea245d7fe3ce13afa0ffcac6"
+          "checksumValue": "387ad2a385f144f57fd5dbd7da85156e92247103"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "7b6904f1781625f58b9d44d2adc77acba0cf7ee3b7f959831ab29dd0450f590f"
+          "checksumValue": "7f5f7dd1ecb6066c490544a5f3db74c7612ab81ae666a114d3a8dcd5b02e2fe8"
         }
       ],
       "licenseConcluded": "MIT",
@@ -265,11 +265,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "c6aa8ca2878e9b343e599dee4ebc042cd17816bd"
+          "checksumValue": "4b0ec559d0810dc9cce18a624f41b77f15104fc2"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "942be5d930d1927861d53cefe6e15a96de72dbe9c245fdf093dbd02a3610e7f4"
+          "checksumValue": "3f49965bb3437d46ca4c2faeb751981d5fe65b73dec692aaa12c5d980a6c5a07"
         }
       ],
       "licenseConcluded": "MIT",

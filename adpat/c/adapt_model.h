@@ -275,6 +275,8 @@ static const uint32_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
 static const uint32_t CLASS_WIDTHS[3] = {0, 8, 21};
 /* The bit of a context-set mask that leaves out both run models as well. */
 #define NO_RUNS (1u << 31)
+/* The contexts a lean compact model leaves out (adapt_sizes.lean). */
+#define LEAN_DROPPED (1u << H_O8 | 1u << H_WORD3 | 1u << H_WORDC)
 /* The context sets a file may choose, by header code: a mask of hashed
  * contexts the model leaves out (see CONTEXT_SETS in model.rs). */
 static const uint32_t CONTEXT_SETS[ADAPT_CONTEXT_SETS] = {
@@ -2321,7 +2323,8 @@ static inline model *model_new(adapt_sizes sizes) {
     {
         uint32_t set = m->fast ? FAST_SETS[sizes.set_code] : CONTEXT_SETS[sizes.set_code];
         /* the max profile's kinds run only under it */
-        uint32_t dropped = set | (sizes.class_code == 0 ? (1u << H_CLASS) : 0) | (m->max ? 0 : MAX_KINDS);
+        uint32_t dropped = set | (sizes.class_code == 0 ? (1u << H_CLASS) : 0) | (m->max ? 0 : MAX_KINDS) |
+                           (sizes.lean ? LEAN_DROPPED : 0);
         m->hashed = 0;
         for (i = 0; i < HASHED; i++) {
             m->on[i] = (dropped >> i & 1) == 0;
@@ -2555,7 +2558,7 @@ static inline int sizes_valid(adapt_sizes s) {
            (!s.fast || s.period == 0) && s.segmented <= 1 && s.max <= 1 && !(s.fast && s.max) && s.x86 <= 1 &&
            s.archive <= 1 && s.adaptive <= 3 && (!s.adaptive || !s.fast) &&
            s.bmp <= 1 && (!s.bmp || (!s.fast && !s.x86 && !s.archive)) &&
-           s.compact <= 1 && (!s.compact || (s.max && !s.adaptive && !s.bmp));
+           s.compact <= 1 && (!s.compact || (s.max && !s.adaptive && !s.bmp)) && s.lean <= 1 && (!s.lean || s.compact);
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {

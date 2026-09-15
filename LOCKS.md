@@ -2,6 +2,45 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — Lean context set for compact tables of 2^22 blocks or fewer (versions 54/57)
+
+**Decision.** A compact model whose context table is at most 2^22 blocks
+leaves out three of its twenty hashed contexts — order-8, the third word
+back, the word with its classes. The context policy sets `lean` with
+`compact` at that table size; the container carries version 54 (57 with
+metadata); a decoder sets `lean` from the version, so a version-53 file,
+which the compact tables' first release wrote with every context, decodes
+as it was written. `tests/vectors/text-compact.adpt` was written by that
+release and `text-lean.adpt` by this one; both are pinned.
+
+**Why.** At that table size the three contexts' claims evict more than
+they predict. Measured on enwik8 with the compact tables, same binary,
+same command but for the budget:
+
+| Budget | Table | Every context | Lean set | Change |
+|---:|---:|---:|---:|---:|
+| 94 MiB | 2^21 | 20,258,968 B | 20,150,130 B | −0.54 % |
+| 128 MiB | 2^22 | 19,715,577 B | 19,657,760 B | −0.29 % |
+| 192 MiB | 2^23 | 19,284,703 B | 19,293,827 B (not chosen) | +0.05 % |
+
+Leaving out order-8 alone gained 0.06 % at 128 MiB; order-8 with the
+indirect and nesting contexts lost 0.33 %; so the set is those three, and
+the bound is the compact tables' own (`ADAPT_COMPACT_TABLE_LOG`).
+
+**Consequences.**
+- The locked floors (enwik8 at 674 MiB, enwik9) keep the full tables and
+  every context and are byte-identical; `make gate` was run on this build.
+- The lean set has its own wire versions rather than a rule over the
+  header's fields: the compact versions 53/56 are on `main` and a file
+  they wrote must not decode under another context set.
+- Changing the set, or applying it to the full tables, is a new entry with
+  the enwik8 runs that justify it.
+
+**Status.** Landed 2026-09-15 with `adapt_sizes.lean`, versions 54/57,
+decoder support, the two vectors, C and CLI tests (round trips of the lean
+and the compact model at the same sizes, the version-byte checks, the
+sizing boundaries, `cadapt info`) and the gate run above.
+
 ## 2026-09-15 — Small max budgets buy context table with compact side tables (versions 53/56)
 
 **Decision.** Under `--allocation context`, when the budget stops the max

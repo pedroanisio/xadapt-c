@@ -466,7 +466,8 @@ static void print_usage(FILE *stream) {
             "from the base and these three profiles that fit the memory budget. Search\n"
             "also tries BMP24 color/row residuals on eligible files. Experiment formats occupy versions 25--52;\n"
             "the max profile's compact side tables, chosen by --allocation context when the budget\n"
-            "would otherwise leave the context table at 2^22 blocks or fewer, are versions 53/56.\n"
+            "would otherwise leave the context table at 2^22 blocks or fewer, are versions 53/56, and\n"
+            "with the lean context set they take at a table of 2^22 blocks or fewer, 54/57.\n"
             "--transform bmp explicitly selects that reversible transform. Search\n"
             "uses up to eight encodes, temporary disk of input plus two containers, and\n"
             "verifies only with --verify (one model, also for pipes).\n"
@@ -3157,7 +3158,8 @@ static int info_command(int argc, char **argv) {
             printf("contexts        all but %s\n", dropped);
         }
     }
-    printf("profile         %s%s\n", sizes.max && sizes.adaptive ? "max-" : "", sizes.adaptive ? adaptive_name(sizes.adaptive) : (sizes.fast ? "fast" : (sizes.max ? "max" : "normal")));
+    printf("profile         %s%s%s\n", sizes.max && sizes.adaptive ? "max-" : "", sizes.adaptive ? adaptive_name(sizes.adaptive) : (sizes.fast ? "fast" : (sizes.max ? "max" : "normal")),
+           sizes.lean ? " (compact side tables, lean contexts)" : sizes.compact ? " (compact side tables)" : "");
     printf("x86 transform   %s\n", sizes.x86 ? "yes" : "no");
     if (sizes.bmp) printf("bmp transform   %lu x %lu, pixel offset %lu\n", (unsigned long)sizes.bmp_width,
                           (unsigned long)sizes.bmp_rows, (unsigned long)sizes.bmp_offset);

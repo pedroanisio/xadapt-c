@@ -13,6 +13,18 @@ and announced as [SECURITY.md](SECURITY.md) describes.
 
 The binary reports `0.12.0`; the tag is pending.
 
+### Security
+
+- Refuse archive entries whose parent components are symbolic links, and
+  hard-link targets outside the extraction root or of a non-file kind.
+  POSIX extraction resolves parents through directory descriptors with
+  symlink following disabled and keeps the staging root private. A failed
+  checksum can no longer leave files outside the extraction directory.
+- Enforce the decoder's memory budget before buffering a segmented input.
+  Inputs that cannot fit alongside a decoder, and pipes, use streaming
+  decoding. The library counts retained input when it falls back to one
+  worker as well as when it decodes in parallel.
+
 ### Added
 - Container versions 53 and 56 (with metadata): the max profile with
   compact side tables — the third and fourth first-layer arbiters keep
@@ -26,6 +38,17 @@ The binary reports `0.12.0`; the tag is pending.
   the full tables are kept and every byte is unchanged, the locked floors
   included. Every earlier max container decodes as before, with its full
   tables. `adapt_sizes` gains `compact`.
+- Container versions 54 and 57 (with metadata): the compact model with a
+  lean context set, leaving out its three costliest hashed contexts
+  (order-8, the third word back, the word with its classes). The context
+  policy chooses it with the compact tables while the table stays at 2^22
+  blocks or fewer, where those contexts evict more than they predict.
+  Measured on enwik8: 20,258,968 → 20,150,130 bytes at 94 MiB and
+  19,715,577 → 19,657,760 at 128 MiB (peak RSS 124 MB), with seventeen
+  table claims a nibble instead of twenty; at 192 MiB the table is 2^23
+  and the full set is kept (the lean one lost 0.05 % there). A version-53 file keeps every
+  context; `cadapt info` names the compact tables and the lean set.
+  `adapt_sizes` gains `lean`.
 
 ### Changed
 - The per-bit path of the normal and max profiles is faster and writes the

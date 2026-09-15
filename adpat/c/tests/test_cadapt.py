@@ -103,24 +103,25 @@ class AllocationTest(CodecTest):
                 decoded = self.run_codec("decode", "-", data=run.stdout)
                 self.assertEqual(decoded.returncode, 0, decoded.stderr)
                 self.assertEqual(decoded.stdout, data)
-        # The compact side tables: a max budget that stops the context table
-        # short of a 4 MiB input's target under --allocation context (80 MiB:
-        # the full tables reach 2^19 blocks, the compact ones 2^20) writes
-        # version 53 (56 with metadata), the same reader decodes it, and the
-        # default budget still writes version 21 for this input.
+        # The compact side tables with the lean context set: a max budget
+        # that stops the context table short of a 4 MiB input's target under
+        # --allocation context (80 MiB: the full tables reach 2^19 blocks,
+        # the compact ones 2^20, within the lean set's 2^22) writes version
+        # 54 (57 with metadata), the same reader decodes it, and the default
+        # budget still writes version 21 for this input.
         big = self.root / "big.bin"
         big.write_bytes((SOURCE * ((4 << 20) // len(SOURCE) + 1))[: 4 << 20])
         compact = self.run_codec("encode", "-", "--max", "--allocation", "context", "--max-memory", str(80 << 20),
                                  data=big.read_bytes())
         self.assertEqual(compact.returncode, 0, compact.stderr)
-        self.assertEqual(compact.stdout[4], 53)
+        self.assertEqual(compact.stdout[4], 54)
         back = self.run_codec("decode", "-", data=compact.stdout)
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual(back.stdout, big.read_bytes())
         named = self.root / "big.adpt"
         run = self.run_codec("encode", big, "-o", named, "--max", "--allocation", "context", "--max-memory", str(80 << 20))
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(named.read_bytes()[4], 56)
+        self.assertEqual(named.read_bytes()[4], 57)
         restored = self.root / "big.restored"
         run = self.run_codec("decode", named, "-o", restored)
         self.assertEqual(run.returncode, 0, run.stderr)
@@ -1131,7 +1132,9 @@ class CommandTest(CodecTest):
         expectations = {
             "text.adpt": (b"format          adapt container version 19", b"declared bytes  49152", b"class history   8 bytes", b"contexts        all but field, record", b"profile         normal"),
             "text-fast.adpt": (b"format          adapt container version 20", b"contexts        o2, o4", b"profile         fast"),
-            "text-max.adpt": (b"format          adapt container version 21", b"profile         max"),
+            "text-max.adpt": (b"format          adapt container version 21", b"contexts        all but word, field\n", b"profile         max\n"),
+            "text-compact.adpt": (b"format          adapt container version 53", b"contexts        all but word, field\n", b"profile         max (compact side tables)\n"),
+            "text-lean.adpt": (b"format          adapt container version 54", b"contexts        all but word, field, o8, word3, wordc\n", b"profile         max (compact side tables, lean contexts)\n"),
             "records.adpt": (b"record period   192 bytes", b"class history   21 bytes", b"contexts        all"),
             "segmented.adpt": (b"segments        2", b"declared bytes  300000"),
             "empty.adpt": (b"declared bytes  0", b"file bytes      21"),

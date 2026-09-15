@@ -90,6 +90,7 @@ adapt_sizes adapt_sizes_fast(adapt_sizes sizes) {
     sizes.fast = 1;
     sizes.max = 0;
     sizes.compact = 0;
+    sizes.lean = 0;
     sizes.adaptive = 0;
     sizes.bmp = 0;
     sizes.bmp_offset = sizes.bmp_width = sizes.bmp_rows = 0;
@@ -374,6 +375,10 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
                 if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
                 s = next;
             }
+            /* and, while the table stays at that size, the lean context
+             * set (ADAPT_MAX_LEAN_VERSION): 0.3-0.5 % smaller again at
+             * 94-128 MiB, 0.05 % larger once the table is 2^23 */
+            s.lean = (uint8_t)(s.table_log <= ADAPT_COMPACT_TABLE_LOG);
         }
     }
     while (s.window_log < cap) {
@@ -1584,7 +1589,9 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     header[3] = 'T';
     header[4] = sizes.adaptive ? (uint8_t)((sizes.max ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + sizes.adaptive - 1) :
                 (sizes.fast ? ADAPT_FAST_VERSION
-                            : (sizes.max ? (sizes.compact ? ADAPT_MAX_COMPACT_VERSION : ADAPT_MAX_VERSION)
+                            : (sizes.max ? (sizes.lean      ? ADAPT_MAX_LEAN_VERSION
+                                            : sizes.compact ? ADAPT_MAX_COMPACT_VERSION
+                                                            : ADAPT_MAX_VERSION)
                                          : ADAPT_FORMAT_VERSION));
     if (sizes.bmp) header[4] = (uint8_t)((sizes.max ? ADAPT_MAX_BMP_VERSION : ADAPT_BMP_VERSION) + sizes.adaptive);
     header[5] = (uint8_t)(sizes.table_log | sizes.class_code << 5 | (sizes.archive ? ADAPT_ARCHIVE_FLAG : 0));
@@ -1954,7 +1961,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);

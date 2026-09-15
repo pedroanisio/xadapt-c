@@ -1,5 +1,5 @@
 /*
- * adapt.h — the adapt codec, format versions 19 through 56, in C99 with
+ * adapt.h — the adapt codec, format versions 19 through 57, in C99 with
  * nothing beyond the C standard library (and POSIX threads for the
  * encoder's proof, when built with ADAPT_THREADS).
  *
@@ -141,6 +141,17 @@ extern "C" {
 #define ADAPT_MAX_COMPACT_VERSION 53u
 #define ADAPT_MAX_COMPACT_METADATA_VERSION 56u
 #define ADAPT_COMPACT_TABLE_LOG 22u
+/* The compact model with its lean context set (ADAPT_MAX_LEAN_VERSION, 57
+ * with metadata): it leaves out the three costliest hashed contexts
+ * (order-8, the third word back, the word with its classes), which at a
+ * table of ADAPT_COMPACT_TABLE_LOG blocks or fewer evict more than they
+ * predict — measured on enwik8 with the compact tables, 20,258,968 ->
+ * 20,150,130 bytes at 94 MiB and 19,715,577 -> 19,657,760 at 128 MiB,
+ * and a loss of 0.05 % once the table is 2^23. The context policy
+ * chooses it with the compact tables at that table size; a decoder sets
+ * `lean` from the version, so a version-53 file keeps every context. */
+#define ADAPT_MAX_LEAN_VERSION 54u
+#define ADAPT_MAX_LEAN_METADATA_VERSION 57u
 #define ADAPT_BMP_BYTES 12u
 #define ADAPT_METADATA_BYTES 28u
 #define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)
@@ -315,10 +326,15 @@ typedef struct adapt_sizes {
     uint32_t bmp_offset, bmp_width, bmp_rows;
     /* 1 when the max profile runs its compact side tables
      * (ADAPT_MAX_COMPACT_VERSION); never with `fast`, `adaptive` or `bmp`.
-     * adapt_sizes_for_input_max and adapt_sizes_prioritize_context set it
-     * from the budget (see ADAPT_COMPACT_TABLE_LOG); a decoder sets it
-     * from the version, so an older max file keeps its full tables. */
+     * adapt_sizes_prioritize_context sets it from the budget (see
+     * ADAPT_COMPACT_TABLE_LOG); a decoder sets it from the version, so an
+     * older max file keeps its full tables. */
     uint8_t compact;
+    /* 1 when a compact model also leaves out its lean set's three contexts
+     * (ADAPT_MAX_LEAN_VERSION); never without `compact`. The context
+     * policy sets it with `compact` at a table of ADAPT_COMPACT_TABLE_LOG
+     * blocks or fewer; a decoder sets it from the version. */
+    uint8_t lean;
 } adapt_sizes;
 
 /* Probe a BMP24 header without decoding text or modifying sizes on failure. */

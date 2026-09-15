@@ -3,7 +3,9 @@
  * toolchain: the library's contract on the committed vectors, every
  * framing error on hand-built bytes, the limits, the stream callbacks, and
  * the messages. The larger vectors pin the decoder to files this
- * implementation wrote across the paths a short input never takes; the
+ * implementation wrote across the paths a short input never takes
+ * (text-compact.adpt by the compact side tables' first release, with
+ * every context; text-lean.adpt with the lean set); the
  * battery against the Rust encoder belonged to the crate, and no longer
  * applies since format 13.
  *
@@ -518,20 +520,20 @@ static void test_framing(void) {
     file[4] = 4;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
-    file[4] = ADAPT_MAX_COMPACT_METADATA_VERSION + 1;
+    file[4] = ADAPT_MAX_LEAN_METADATA_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_MAX_COMPACT_METADATA_VERSION + 1);
-    /* the two numbers between the compact max profile and its metadata
-     * variant name no format and are refused */
-    file[4] = ADAPT_MAX_COMPACT_VERSION + 1;
+    CHECK(error.detail == ADAPT_MAX_LEAN_METADATA_VERSION + 1);
+    /* the number between the lean max profile and the compact one's
+     * metadata variant names no format and is refused */
+    file[4] = ADAPT_MAX_LEAN_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    file[4] = ADAPT_MAX_COMPACT_VERSION + 2;
-    CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    /* the compact max profile reads as max with compact set, and its
-     * model is smaller than the full one by the side tables it halves */
+    CHECK(error.detail == ADAPT_MAX_LEAN_VERSION + 1);
+    /* the compact max profile reads as max with compact set and every
+     * context, and its model is smaller than the full one by the side
+     * tables it halves */
     file[4] = ADAPT_MAX_COMPACT_VERSION;
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
-    CHECK(sizes.max == 1 && sizes.compact == 1 && sizes.fast == 0);
+    CHECK(sizes.max == 1 && sizes.compact == 1 && sizes.lean == 0 && sizes.fast == 0);
     {
         adapt_sizes full = sizes;
         full.compact = 0;
@@ -539,9 +541,22 @@ static void test_framing(void) {
         CHECK(adapt_model_bytes(full) - adapt_model_bytes(sizes) ==
               (uint64_t)(1u << 15) * 2 * (uint64_t)(3 * 21 + 6 + 2 + 1 + 1) * 4 + (uint64_t)(1u << 17) * 33 * 2);
     }
+    /* the lean one reads as compact with lean set; the metadata variants
+     * of both carry a metadata record, the numbers between do not */
+    file[4] = ADAPT_MAX_LEAN_VERSION;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.max == 1 && sizes.compact == 1 && sizes.lean == 1 && sizes.fast == 0);
+    file[4] = ADAPT_MAX_COMPACT_METADATA_VERSION;
+    CHECK(adapt_header_has_metadata(file));
+    file[4] = ADAPT_MAX_LEAN_METADATA_VERSION;
+    CHECK(adapt_header_has_metadata(file));
+    file[4] = ADAPT_MAX_LEAN_VERSION + 1;
+    CHECK(!adapt_header_has_metadata(file));
+    file[4] = ADAPT_MAX_LEAN_METADATA_VERSION + 1;
+    CHECK(!adapt_header_has_metadata(file));
     file[4] = ADAPT_MAX_VERSION;
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
-    CHECK(sizes.max == 1 && sizes.compact == 0);
+    CHECK(sizes.max == 1 && sizes.compact == 0 && sizes.lean == 0);
     /* 0.8.0's normal profile, version 6, is refused like every version no file was published in */
     file[4] = 6;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
@@ -1268,6 +1283,8 @@ int main(int argc, char **argv) {
     test_vector("text.adpt", "text.bin");
     test_vector("text-fast.adpt", "text.bin");
     test_vector("text-max.adpt", "text.bin");
+    test_vector("text-compact.adpt", "text.bin");
+    test_vector("text-lean.adpt", "text.bin");
     test_vector("records.adpt", "records.bin");
     test_vector("segmented.adpt", "segmented.bin");
     test_vector("cyrillic.adpt", "cyrillic.bin");

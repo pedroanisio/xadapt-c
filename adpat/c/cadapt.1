@@ -204,22 +204,31 @@ Measured on enwik8 (100 MB) with
 l r r r.
 budget	context table	container	vs 674 MiB
 _
-128 MiB	32 MiB	20,091,771	+8.2 %
-192 MiB	64 MiB	19,597,276	+5.6 %
+128 MiB	64 MiB	19,657,760	+5.9 %
+192 MiB	128 MiB	19,284,703	+3.9 %
 256 MiB	128 MiB	19,185,877	+3.3 %
 674 MiB	512 MiB	18,564,510	\(em
 1 GiB	1 GiB	18,563,312	\-0.01 %
 .TE
 .IP
-Speed is the same at every budget: interleaved on the first 8 MiB, the
-128 MiB and 674 MiB runs took the same user cycles.
+At 128 and 192 MiB the table is bought with the compact side tables
+(versions 53 and 56), and at 128 MiB the lean context set as well
+(54 and 57); see
+.BR "\-\-allocation" .
+Speed hardly depends on the budget: interleaved on the first 8 MiB, the
+128 MiB and 674 MiB runs took the same user cycles with the full tables.
 .TP
 .BR \-\-allocation " " window | context
 How a budget is spent once the smallest model fits:
 .B window
 (the default) grows the history window first, then the context table;
 .B context
-grows the table first.
+grows the table first; under
+.B \-\-max
+it also halves the side tables (versions 53/56) when the budget would
+otherwise stop the table at 2^22 blocks or fewer, short of the input's
+target, and spends the difference on a table twice the size, with a lean
+context set (54/57) while the table stays at that size.
 Either can win depending on the input; on enwik8 at 674 MiB
 .B context
 writes 18,564,510 bytes and
@@ -343,7 +352,9 @@ A stream through a pipe:
 Containers carry a format version in their header; a decoder refuses a
 version it does not implement.
 Versions 13 to 18 are refused; 19 to 24 are the three profiles as streams
-and as named files or folders; 25 to 52 are the experimental profiles.
+and as named files or folders; 25 to 52 are the experimental profiles;
+53 and 56 are the max profile with compact side tables, 54 and 57 with
+its lean context set as well.
 .SH SEE ALSO
 .BR xz (1).
 .br

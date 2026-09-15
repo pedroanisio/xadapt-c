@@ -37,7 +37,7 @@ static int header_has_bmp(const uint8_t *header) {
 
 int adapt_header_has_metadata(const uint8_t *header) {
     return header != NULL && ((header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION) ||
-                              header[4] == ADAPT_MAX_COMPACT_METADATA_VERSION ||
+                              header[4] == ADAPT_MAX_COMPACT_METADATA_VERSION || header[4] == ADAPT_MAX_LEAN_METADATA_VERSION ||
                               (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_MAX_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION) ||
@@ -124,6 +124,7 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     }
     s.adaptive = 0;
     s.compact = 0;
+    s.lean = 0;
     if (version == ADAPT_FORMAT_VERSION) {
         s.fast = 0;
     } else if (version == ADAPT_FAST_VERSION) {
@@ -131,10 +132,11 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     } else if (version == ADAPT_MAX_VERSION) {
         s.fast = 0;
         s.max = 1;
-    } else if (version == ADAPT_MAX_COMPACT_VERSION) {
+    } else if (version == ADAPT_MAX_COMPACT_VERSION || version == ADAPT_MAX_LEAN_VERSION) {
         s.fast = 0;
         s.max = 1;
         s.compact = 1;
+        s.lean = (uint8_t)(version == ADAPT_MAX_LEAN_VERSION);
     } else if (version >= ADAPT_ADAPTIVE_VERSION && version <= ADAPT_ADAPTIVE_LAST_VERSION) {
         s.fast = 0;
         s.adaptive = (uint8_t)(version - ADAPT_ADAPTIVE_VERSION + 1);
@@ -210,7 +212,7 @@ uint32_t adapt_class_width(adapt_sizes sizes) {
 }
 
 void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len) {
-    uint32_t mask = sizes.set_code < ADAPT_CONTEXT_SETS ? CONTEXT_SETS[sizes.set_code] : 0;
+    uint32_t mask = (sizes.set_code < ADAPT_CONTEXT_SETS ? CONTEXT_SETS[sizes.set_code] : 0) | (sizes.lean ? LEAN_DROPPED : 0);
     /* the max profile's kinds are not the normal profile's to drop */
     size_t kinds = sizes.max ? HASHED : BASE_HASHED;
     size_t i, at = 0;
