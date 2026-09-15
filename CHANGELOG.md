@@ -52,6 +52,14 @@ The binary reports `0.12.0`; the tag is pending.
   worker as well as when it decodes in parallel.
 
 ### Added
+- `make ltcb-release` (`tools/ltcb_release.sh`) builds the assets of a
+  Large Text Compression Benchmark entry from the committed HEAD into
+  `dist/`: the stripped Linux binary and its zip (the decompressor the
+  ranking counts; the sources are not published), the fixtures' containers
+  written and decoded byte for byte by that binary or taken over from an
+  earlier run, `SHA256SUMS` and a manifest. `docs/ltcb-submission.md` has
+  the rules, the 2026-09-15 release (enwik8 18,207,203 B, enwik9
+  150,063,628 B, zip 209,893 B) and the email to send.
 - The documents are checked against the code by `make check`
   (`tools/test_docs.py`): the README's usage block and the flags of the
   manual against `cadapt --help`, the container versions of `adapt.h`

@@ -22,3 +22,5 @@ docs/doc-hygiene-report-2026-09-15.md
 docs/doc-quarantine/doc-quarantine.sh
 docs/doc-quarantine/quarantine-manifest.json
 docs/doc-quarantine/quarantine-summaries.md
+# release assets built by tools/ltcb_release.sh
+dist/

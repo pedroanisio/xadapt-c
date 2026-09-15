@@ -8,7 +8,7 @@ BUILD ?= build
 CODEC_BUILD = $(if $(filter /%,$(BUILD)),$(BUILD),adpat/c/$(BUILD))
 GATE_ARGS ?=
 FLOOR_ARGS ?=
-.PHONY: all test check check-parts clean bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor ltcb
+.PHONY: all test check check-parts clean bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor ltcb ltcb-release
 
 all test clean:
 	$(MAKE) -C adpat/c $@
@@ -65,6 +65,15 @@ manifest: all
 
 reproduce:
 	$(PYTHON) -B tools/provenance.py reproduce
+
+# The assets of a Large Text Compression Benchmark entry from the committed
+# HEAD (docs/ltcb-submission.md): the decompressor zip (the binary alone —
+# the sources are not published), the verified containers of the fixtures
+# given, hashes and a manifest, under dist/.
+#   make ltcb-release RELEASE_ARGS='--enwik8 static/corpus/enwik8 --enwik9 /path/to/enwik9'
+RELEASE_ARGS ?=
+ltcb-release:
+	tools/ltcb_release.sh $(RELEASE_ARGS)
 
 # The LTCB renderings research/ltcb-tables.md links (ignored by git): the
 # dashboard, the phase chart, the analysis and the interactive page, from
