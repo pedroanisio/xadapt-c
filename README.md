@@ -14,8 +14,10 @@ all six versions. Experimental profiles also use versions 25–52 for
 causal adaptive predictors and a reversible BMP24 transform; the max
 profile with compact side tables uses 53 and 56, with its lean context
 set as well 54 and 57, and sized to its budget — a context table any
-eighth past a power of two, named by a sizing byte — 58 and 61. The CLI
-uses native filesystem APIs to restore metadata.
+eighth past a power of two, named by a sizing byte — 58 and 61; the text
+transform ahead of the normal, fast, max, compact and lean models uses
+62 to 66, 67 to 71 with metadata. The CLI uses native filesystem APIs to
+restore metadata.
 
 The [experimental implementation report](research/causal-byte-implementation.md)
 specifies the new algorithms, format versions, limits and measurement protocol.
@@ -156,6 +158,17 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   tails and boundary pixels. It adds a 12-byte descriptor and a 256 KiB encoder
   workspace reservation. Automatic selection tries this transform on whole
   BMP inputs; embedded images inside folders/PDF/EPUB are not transformed.
+- `--transform text` asks for the text transform and `--transform none`
+  refuses it; a file of 8 MiB or more whose first block looks like text
+  takes it by itself (versions 62–66, 67–71 with metadata). A word both
+  sides have seen written out three times becomes, from then on, a code
+  of one to three bytes the model reads as one symbol; each side builds
+  the same bounded book as the file is coded, nothing is sent ahead and
+  nothing is built in, and every other byte passes as it is. Measured on
+  enwik8 at 128 MiB with `--max --allocation context`: 19,657,760 →
+  18,971,412 bytes in fewer seconds. Below 8 MiB it costs, which is what
+  the length rule is for; a pipe's length is unknown, so a pipe gets it
+  only when asked.
 - `--threads <n>` with `n ≥ 2` cuts the input into segments of
   `--segment-bytes` (default 16 MiB, whole 256 KiB blocks) that each start
   the model afresh, and codes them at once, on as many of the `n` threads

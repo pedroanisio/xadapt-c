@@ -1,5 +1,5 @@
 /*
- * adapt.h — the adapt codec, format versions 19 through 57, in C99 with
+ * adapt.h — the adapt codec, format versions 19 through 71, in C99 with
  * nothing beyond the C standard library (and POSIX threads for the
  * encoder's proof, when built with ADAPT_THREADS).
  *
@@ -174,6 +174,48 @@ extern "C" {
 #define ADAPT_SIZING_LEAN 2u
 #define ADAPT_SIZING_FRAC_SHIFT 2u
 #define ADAPT_SIZING_FRAC_MAX 7u
+/* The text transform (adapt_text.h) ahead of the normal, fast, max,
+ * compact and lean models: versions 62 to 66 in that order, 67 to 71 with
+ * metadata (ADAPT_TEXT_METADATA_OFFSET more; 58 to 61 are left to the
+ * sized max profile, whose sizing byte has room for a text bit). The
+ * payload is the input
+ * with every word both sides have seen three times replaced, from then
+ * on, by a code of one to three bytes at or above 0x80; each side builds
+ * the same book of words as it goes, so nothing is sent ahead and
+ * nothing is agreed in advance (FMT-2, FMT-8: the model still sees only
+ * bytes, and a fixed rule of the format carries no data). The decoder
+ * undoes it as it writes; the trailer's length and checksum are the
+ * original's. The encoder takes it when the first block looks like text
+ * (text_detect) or when told to (adapt_sizes.text); measured on enwik8
+ * with the model unchanged, at 128 MiB (--max --allocation context)
+ * 19,657,760 -> 18,958,016 bytes, the model coding 62 % of the bytes.
+ * Never with the adaptive predictors, the BMP transform or the x86
+ * transform, and never with a table fraction: a text version names a
+ * power-of-two table, and the transform is worth more than the fraction,
+ * which the encoder drops when it takes the transform. Each side's book,
+ * index and buffers are under 3 MiB (TEXT_STATE_BYTES), part of what
+ * HEADROOM allows for. */
+#define ADAPT_TEXT_VERSION 62u
+#define ADAPT_TEXT_FAST_VERSION 63u
+#define ADAPT_TEXT_MAX_VERSION 64u
+#define ADAPT_TEXT_MAX_COMPACT_VERSION 65u
+#define ADAPT_TEXT_MAX_LEAN_VERSION 66u
+#define ADAPT_TEXT_LAST_VERSION 66u
+#define ADAPT_TEXT_METADATA_OFFSET 5u
+#define ADAPT_TEXT_METADATA_VERSION 67u
+#define ADAPT_TEXT_METADATA_LAST_VERSION 71u
+#define ADAPT_TEXT_AUTO 0u
+#define ADAPT_TEXT_ON 1u
+#define ADAPT_TEXT_OFF 2u
+/* The input length from which the sizing policies leave the transform to
+ * the first block's look (ADAPT_TEXT_AUTO); below it, or with the length
+ * unknown, they set ADAPT_TEXT_OFF, because the book's three sightings a
+ * word and the model's learning of the codes are paid before they pay
+ * back — measured on enwik8's first bytes at the default budget, --max:
+ * 64 KiB +3.2 %, 1 MiB +1.3 %, 4 MiB +0.4 %, 8 MiB -0.03 %, 32 MiB
+ * -0.75 %, the whole -2.9 %. A pipe's length is unknown: a caller who
+ * knows it holds text asks with ADAPT_TEXT_ON. */
+#define ADAPT_TEXT_MIN_BYTES ((uint64_t)8 << 20)
 #define ADAPT_BMP_BYTES 12u
 #define ADAPT_METADATA_BYTES 28u
 #define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)
@@ -268,7 +310,11 @@ typedef enum adapt_status {
     ADAPT_ERROR_INVALID_ARGUMENT,
     /* The decoded bytes of a folder are not a well-formed adapt archive:
      * `detail` is the offset of the byte that was refused. */
-    ADAPT_ERROR_BAD_ARCHIVE
+    ADAPT_ERROR_BAD_ARCHIVE,
+    /* The text transform's stream is malformed: a prelude that is no
+     * dictionary, a code past it, a flag or an escape that nothing
+     * follows, or a stream that ends inside one. */
+    ADAPT_ERROR_BAD_TEXT
 } adapt_status;
 
 /* A status with the numbers its message needs: `required` and `limit` for
@@ -364,6 +410,13 @@ typedef struct adapt_sizes {
      * has 0, a power of two. adapt_sizes_prioritize_context sets it from
      * the budget's slack. */
     uint8_t table_frac;
+    /* The text transform (versions 62 to 71): on encode, ADAPT_TEXT_AUTO
+     * (the default, 0) takes it when the first block looks like text,
+     * ADAPT_TEXT_ON always, ADAPT_TEXT_OFF never; the encoder records the
+     * choice it made in the header, and a decoder sets ADAPT_TEXT_ON from
+     * the version and 0 from any other. Never with `adaptive`, `bmp` or
+     * `x86`. */
+    uint8_t text;
 } adapt_sizes;
 
 /* Blocks of the context table `sizes` describes: 2^table_log, or with a
@@ -523,6 +576,11 @@ typedef struct adapt_stats {
      * adapt_encode_stream_threads() or adapt_decode_threads() ran them at
      * once. */
     uint32_t workers;
+    /* Under the text transform, the bytes the model coded (the
+     * transformed input) and the words the book came to hold; both 0
+     * without it. */
+    uint64_t text_bytes;
+    uint32_t text_words;
 } adapt_stats;
 
 /* Read up to `len` bytes into `buf` and store how many in `*got`: 0 only
@@ -618,6 +676,7 @@ adapt_status adapt_encode_stream_threads(adapt_read_fn read, void *read_context,
                                          int verify, adapt_stats *stats, adapt_error *error);
 uint64_t adapt_parallel_encode_memory_bound(adapt_sizes sizes, uint64_t workers, uint64_t segment_bytes);
 uint64_t adapt_encode_workers(adapt_sizes sizes, uint64_t max_memory, uint64_t segment_bytes, uint64_t threads);
+
 /* The most workers either side runs segments on. */
 #define ADAPT_WORKERS_MAX 64u
 

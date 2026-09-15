@@ -520,9 +520,31 @@ static void test_framing(void) {
     file[4] = 4;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
-    file[4] = ADAPT_MAX_SIZED_METADATA_VERSION + 1;
+    /* past the last text version nothing is named */
+    file[4] = ADAPT_TEXT_METADATA_LAST_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_MAX_SIZED_METADATA_VERSION + 1);
+    CHECK(error.detail == ADAPT_TEXT_METADATA_LAST_VERSION + 1);
+    /* the text versions front the five models in order, and their
+     * metadata variants five higher carry a record; nothing else does */
+    {
+        static const uint8_t fronted[] = {ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
+                                          ADAPT_MAX_COMPACT_VERSION, ADAPT_MAX_LEAN_VERSION};
+        unsigned k;
+        for (k = 0; k < 5; k++) {
+            adapt_sizes plain;
+            file[4] = fronted[k];
+            CHECK_STATUS(adapt_read_header(file, sizeof(file), &plain, &error), ADAPT_OK);
+            CHECK(plain.text == 0);
+            file[4] = (uint8_t)(ADAPT_TEXT_VERSION + k);
+            CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+            CHECK(sizes.text == ADAPT_TEXT_ON && sizes.max == plain.max && sizes.fast == plain.fast &&
+                  sizes.compact == plain.compact && sizes.lean == plain.lean && sizes.adaptive == 0 && sizes.bmp == 0);
+            CHECK(!adapt_header_has_metadata(file));
+            file[4] = (uint8_t)(ADAPT_TEXT_METADATA_VERSION + k);
+            CHECK(adapt_header_has_metadata(file));
+        }
+        CHECK(ADAPT_TEXT_METADATA_VERSION == ADAPT_TEXT_VERSION + ADAPT_TEXT_METADATA_OFFSET);
+    }
     /* the numbers between the lean max profile and the compact one's
      * metadata variant, and between the sized profile and its own, name
      * no format and are refused */
@@ -1355,6 +1377,115 @@ static void test_threads(void) {
     free(want);
 }
 
+/* A text container built by hand: the header of version `version`, one
+ * stored block holding `body` as the transform's stream, and a trailer
+ * naming `declared` original bytes with `crc`. */
+static size_t text_file(uint8_t *file, uint8_t version, const uint8_t *body, size_t body_len, uint64_t declared,
+                        uint32_t crc) {
+    size_t at = 0, i;
+    file[at++] = 'A';
+    file[at++] = 'D';
+    file[at++] = 'P';
+    file[at++] = 'T';
+    file[at++] = version;
+    file[at++] = 20;
+    file[at++] = 12;
+    file[at++] = 16;
+    file[at++] = 2; /* stored, skipped: the bytes as they are */
+    for (i = 0; i < 4; i++) file[at++] = (uint8_t)(body_len >> (8 * i));
+    for (i = 0; i < 4; i++) file[at++] = (uint8_t)(body_len >> (8 * i));
+    memcpy(file + at, body, body_len);
+    at += body_len;
+    file[at++] = 3;
+    for (i = 0; i < 8; i++) file[at++] = (uint8_t)(declared >> (8 * i));
+    for (i = 0; i < 4; i++) file[at++] = (uint8_t)(crc >> (8 * i));
+    return at;
+}
+
+/* The text transform's stream, undone by every decoder: a well-formed one
+ * comes back and is held to the trailer's original length and checksum;
+ * a code past the book, a flag before a literal, a code byte below 0x80,
+ * the reserved byte and a stream that ends inside a code are refused as
+ * ADAPT_ERROR_BAD_TEXT; the trailer is checked on the original bytes. */
+static void test_text_stream(void) {
+    /* "the the the the" transformed: three raw, then code 0 */
+    static const uint8_t body[] = {'t', 'h', 'e', ' ', 't', 'h', 'e', ' ', 't', 'h', 'e', ' ', 0x84};
+    static const uint8_t original[] = "the the the the";
+    static const uint8_t past[] = {'t', 'h', 'e', ' ', 0x85};
+    static const uint8_t flag_literal[] = {0x81, 'a'};
+    static const uint8_t low_byte[] = {0xC0, 'a'};
+    static const uint8_t reserved[] = {'a', 0x83};
+    static const uint8_t open_code[] = {'t', 'h', 'e', ' ', 't', 'h', 'e', ' ', 't', 'h', 'e', ' ', 0xF0, 0x80};
+    static const uint8_t escaped[] = {0x80, 0xC3, 0x80, 0xA9, ' ', 0x80, 0x80};
+    static const uint8_t escaped_original[] = {0xC3, 0xA9, ' ', 0x80};
+    uint8_t file[256], *out = NULL;
+    size_t len, out_len = 0;
+    adapt_limits limits = adapt_default_limits();
+    adapt_error error;
+    adapt_stats stats;
+    adapt_sizes sizes;
+    sink s;
+    uint8_t buf[64];
+    s.out = buf;
+    s.cap = sizeof(buf);
+    s.fail = 0;
+    len = text_file(file, ADAPT_TEXT_VERSION, body, sizeof(body), 15, adapt_crc32(original, 15));
+    CHECK_STATUS(adapt_read_header(file, len, &sizes, &error), ADAPT_OK);
+    CHECK(sizes.text == ADAPT_TEXT_ON);
+    CHECK_STATUS(adapt_decode(file, len, limits, &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == 15 && memcmp(out, original, 15) == 0);
+    adapt_free(out);
+    CHECK_STATUS(decode_threads(file, len, limits, 2, &s, &stats, &error), ADAPT_OK);
+    CHECK(s.len == 15 && memcmp(buf, original, 15) == 0 && stats.input_bytes == 15 && stats.text_bytes == sizeof(body) &&
+          stats.text_words == 1);
+    CHECK_STATUS(adapt_declared_len(file, len, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == 15);
+    /* the trailer names the original: a length or checksum of the
+     * transform's bytes is a checksum error */
+    len = text_file(file, ADAPT_TEXT_VERSION, body, sizeof(body), sizeof(body), adapt_crc32(body, sizeof(body)));
+    CHECK_STATUS(decode_bytes(file, len, limits, &error), ADAPT_ERROR_CHECKSUM);
+    len = text_file(file, ADAPT_TEXT_VERSION, body, sizeof(body), 15, adapt_crc32(body, sizeof(body)));
+    CHECK_STATUS(decode_bytes(file, len, limits, &error), ADAPT_ERROR_CHECKSUM);
+    /* the original may be longer than the output limit though the
+     * transform is not */
+    limits.max_output = 14;
+    len = text_file(file, ADAPT_TEXT_VERSION, body, sizeof(body), 15, adapt_crc32(original, 15));
+    CHECK_STATUS(decode_bytes(file, len, limits, &error), ADAPT_ERROR_TOO_LARGE);
+    CHECK(error.limit == 14);
+    limits.max_output = 15;
+    CHECK_STATUS(decode_bytes(file, len, limits, &error), ADAPT_OK);
+    limits = adapt_default_limits();
+    /* escapes come back as the bytes they stand for */
+    len = text_file(file, ADAPT_TEXT_VERSION, escaped, sizeof(escaped), 4, adapt_crc32(escaped_original, 4));
+    CHECK_STATUS(adapt_decode(file, len, limits, &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == 4 && memcmp(out, escaped_original, 4) == 0);
+    adapt_free(out);
+    /* the malformed streams */
+    len = text_file(file, ADAPT_TEXT_VERSION, past, sizeof(past), 7, 0);
+    CHECK_STATUS(decode_bytes(file, len, limits, &error), ADAPT_ERROR_BAD_TEXT);
+    CHECK_STATUS(decode_threads(file, len, limits, 2, &s, &stats, &error), ADAPT_ERROR_BAD_TEXT);
+    len = text_file(file, ADAPT_TEXT_VERSION, flag_literal, sizeof(flag_literal), 1, 0);
+    CHECK_STATUS(decode_bytes(file, len, limits, &error), ADAPT_ERROR_BAD_TEXT);
+    len = text_file(file, ADAPT_TEXT_VERSION, low_byte, sizeof(low_byte), 1, 0);
+    CHECK_STATUS(decode_bytes(file, len, limits, &error), ADAPT_ERROR_BAD_TEXT);
+    len = text_file(file, ADAPT_TEXT_VERSION, reserved, sizeof(reserved), 1, 0);
+    CHECK_STATUS(decode_bytes(file, len, limits, &error), ADAPT_ERROR_BAD_TEXT);
+    len = text_file(file, ADAPT_TEXT_VERSION, open_code, sizeof(open_code), 12, adapt_crc32(original, 12));
+    CHECK_STATUS(decode_bytes(file, len, limits, &error), ADAPT_ERROR_BAD_TEXT);
+    {
+        char msg[128];
+        error.status = ADAPT_ERROR_BAD_TEXT;
+        error.cause = ADAPT_OK;
+        error.detail = error.limit = 0;
+        CHECK(adapt_error_message(&error, msg, sizeof(msg)) > 0 && strstr(msg, "text transform") != NULL);
+    }
+    /* the same stream under the plain version is the bytes themselves */
+    len = text_file(file, ADAPT_FORMAT_VERSION, body, sizeof(body), sizeof(body), adapt_crc32(body, sizeof(body)));
+    CHECK_STATUS(adapt_decode(file, len, limits, &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == sizeof(body) && memcmp(out, body, sizeof(body)) == 0);
+    adapt_free(out);
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: test_adapt_decode <vectors-dir>\n");
@@ -1383,6 +1514,7 @@ int main(int argc, char **argv) {
     test_threads();
     test_limits();
     test_x86_flag();
+    test_text_stream();
     test_arguments_and_messages();
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);

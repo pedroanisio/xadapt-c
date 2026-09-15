@@ -37,17 +37,17 @@ TEST_THREADS = $(if $(findstring -DADAPT_THREADS,$(CFLAGS)),1,0)
 
 LIB   = $(BUILD)/libadapt.a
 BIN   = $(BUILD)/cadapt
-TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode
+TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode $(BUILD)/test_adapt_text
 
 all: $(LIB) $(BIN)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/adapt_decode.o: adapt_decode.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h | $(BUILD)
+$(BUILD)/adapt_decode.o: adapt_decode.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h adapt_text.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ adapt_decode.c
 
-$(BUILD)/adapt_encode.o: adapt_encode.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h | $(BUILD)
+$(BUILD)/adapt_encode.o: adapt_encode.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h adapt_text.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ adapt_encode.c
 
 $(BUILD)/adapt_archive.o: adapt_archive.c adapt.h | $(BUILD)
@@ -88,6 +88,8 @@ $(BUILD)/test_decode_budget: tests/test_decode_budget.c adapt.h $(LIB)
 
 $(BUILD)/test_fuzz_decode: tests/test_fuzz_decode.c fuzz/fuzz_decode.c fuzz/fuzz_decode.h adapt.h $(LIB)
 	$(CC) $(CFLAGS) -o $@ tests/test_fuzz_decode.c fuzz/fuzz_decode.c $(LIB) $(LDFLAGS)
+$(BUILD)/test_adapt_text: tests/test_adapt_text.c adapt.h adapt_text.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/test_adapt_text.c $(LDFLAGS)
 
 test: $(TESTS)
 	$(BUILD)/test_adapt_adaptive
@@ -96,6 +98,7 @@ test: $(TESTS)
 	$(BUILD)/test_adapt_archive
 	$(BUILD)/test_decode_budget tests/vectors
 	$(BUILD)/test_fuzz_decode tests/vectors
+	$(BUILD)/test_adapt_text tests/vectors
 
 check: all test
 	$(PYTHON) -B tests/test_check_gcov.py
@@ -115,13 +118,15 @@ COVUNITS = adapt_decode adapt_encode adapt_archive cadapt
 coverage:
 	rm -rf $(COV)
 	$(MAKE) BUILD=$(COV) CFLAGS="$(COVFLAGS)" LDFLAGS="--coverage" all $(COV)/test_adapt_decode \
-	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive $(COV)/test_adapt_adaptive $(COV)/test_decode_budget $(COV)/test_fuzz_decode
+	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive $(COV)/test_adapt_adaptive $(COV)/test_decode_budget $(COV)/test_fuzz_decode \
+	    $(COV)/test_adapt_text
 	$(COV)/test_adapt_decode tests/vectors
 	$(COV)/test_adapt_encode tests/vectors
 	$(COV)/test_adapt_archive
 	$(COV)/test_adapt_adaptive
 	$(COV)/test_decode_budget tests/vectors
 	$(COV)/test_fuzz_decode tests/vectors
+	$(COV)/test_adapt_text tests/vectors
 	$(PYTHON) -B tests/test_cadapt.py "$(abspath $(COV))/cadapt"
 	ADAPT_TEST_THREADS=$(if $(findstring -DADAPT_THREADS,$(COVFLAGS)),1,0) $(PYTHON) -B tests/test_cadapt_safety.py "$(abspath $(COV))/cadapt"
 	cd $(COV) && for u in $(COVUNITS); do gcov -b -c --json-format -o . $$u.o > /dev/null && gunzip -f $$u.gcov.json.gz; done

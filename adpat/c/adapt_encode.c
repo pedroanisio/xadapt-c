@@ -25,6 +25,7 @@
 #endif
 #include "adapt.h"
 #include "adapt_model.h"
+#include "adapt_text.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -275,6 +276,9 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
     if (check_memory(adapt_encode_memory_bound(s), max_memory, error) != ADAPT_OK) {
         return ADAPT_ERROR_MEMORY_LIMIT;
     }
+    /* the text transform pays from ADAPT_TEXT_MIN_BYTES; a length unknown
+     * cannot be judged, so a pipe gets it only when asked for */
+    s.text = (uint8_t)(length_known && length >= ADAPT_TEXT_MIN_BYTES ? ADAPT_TEXT_AUTO : ADAPT_TEXT_OFF);
     *sizes = s;
     return fail(error, ADAPT_OK, 0, 0);
 }
@@ -438,6 +442,8 @@ static adapt_status sizes_for_threads_profile(uint64_t length, uint64_t max_memo
         return status;
     }
     s.segmented = 1;
+    /* the transform runs over the whole file, so its rule takes the whole length */
+    s.text = (uint8_t)(length >= ADAPT_TEXT_MIN_BYTES ? ADAPT_TEXT_AUTO : ADAPT_TEXT_OFF);
     status = check_memory(adapt_threads_encode_memory_bound(s, threads, segment_bytes), max_memory, error);
     if (status != ADAPT_OK) {
         return status;
@@ -872,6 +878,11 @@ typedef struct verifier {
     uint64_t seen;
     uint32_t crc;
     int ended;
+    /* Under the text transform the recovered blocks are undone here, and
+     * `seen` and `crc` — the trailer's — count the original bytes. */
+    text_inverse inv;
+    uint8_t *undone; /* TEXT_INVERSE_SLACK * VERIFY_UNDO_CHUNK */
+    int has_inv;
 #ifdef ADAPT_THREADS
     /* The proof on its own thread: a ring of VERIFY_QUEUE slots the
      * encoder fills and the thread drains in order; the encoder waits
@@ -947,6 +958,8 @@ static void verifier_join(verifier *v) {
 }
 #endif
 
+#define VERIFY_UNDO_CHUNK ((size_t)4096)
+
 static adapt_status verifier_init(verifier *v, adapt_sizes sizes, adapt_error *error) {
     v->decoder.m = model_new(sizes);
     v->sizes = sizes;
@@ -958,6 +971,13 @@ static adapt_status verifier_init(verifier *v, adapt_sizes sizes, adapt_error *e
     v->ended = 0;
     if (v->decoder.m == NULL || v->scratch == NULL) {
         return fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+    }
+    if (sizes.text == ADAPT_TEXT_ON) {
+        v->undone = malloc(TEXT_INVERSE_SLACK * VERIFY_UNDO_CHUNK);
+        if (v->undone == NULL || !text_inverse_init(&v->inv)) {
+            return fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+        }
+        v->has_inv = 1;
     }
 #ifdef ADAPT_THREADS
     {
@@ -996,6 +1016,8 @@ static adapt_status verifier_init(verifier *v, adapt_sizes sizes, adapt_error *e
 static void verifier_clear(verifier *v) {
     v->decoder.m = NULL;
     v->scratch = NULL;
+    v->undone = NULL;
+    v->has_inv = 0;
     counter_init(&v->segments, 0);
 #ifdef ADAPT_THREADS
     {
@@ -1033,6 +1055,10 @@ static void verifier_free(verifier *v) {
     model_free(v->decoder.m);
     counter_free(&v->segments);
     free(v->scratch);
+    if (v->has_inv) text_inverse_free(&v->inv);
+    free(v->undone);
+    v->undone = NULL;
+    v->has_inv = 0;
     v->decoder.m = NULL;
     v->scratch = NULL;
 }
@@ -1135,6 +1161,10 @@ static adapt_status verifier_block(verifier *v, const uint8_t *source, size_t n,
             return fail_verification(error, &cause);
         }
         read_trailer_payload(payload, &len, &sum);
+        if (v->has_inv && !text_inverse_complete(&v->inv)) {
+            fail(&cause, ADAPT_ERROR_BAD_TEXT, 0, 0);
+            return fail_verification(error, &cause);
+        }
         if (len != v->seen || sum != ~v->crc) {
             fail(&cause, ADAPT_ERROR_CHECKSUM, 0, 0);
             return fail_verification(error, &cause);
@@ -1154,6 +1184,21 @@ static adapt_status verifier_block(verifier *v, const uint8_t *source, size_t n,
     if (v->sizes.bmp) bmp_transform(v->scratch, raw, v->seen, v->sizes, 1);
     if (raw != n || memcmp(v->scratch, source, n) != 0) {
         return fail_verification(error, NULL);
+    }
+    if (v->has_inv) {
+        /* what a decoder would write: the block undone, counted and summed */
+        size_t at;
+        for (at = 0; at < raw; at += VERIFY_UNDO_CHUNK) {
+            size_t take = raw - at < VERIFY_UNDO_CHUNK ? raw - at : VERIFY_UNDO_CHUNK;
+            size_t w = text_inverse_feed(&v->inv, v->scratch + at, take, v->undone);
+            if (w == (size_t)-1) {
+                fail(&cause, ADAPT_ERROR_BAD_TEXT, 0, 0);
+                return fail_verification(error, &cause);
+            }
+            v->seen += w;
+            v->crc = crc32_update(&v->crc_table, v->crc, v->undone, w);
+        }
+        return ADAPT_OK;
     }
     v->seen += raw;
     v->crc = crc32_update(&v->crc_table, v->crc, v->scratch, raw);
@@ -1513,6 +1558,154 @@ static adapt_status segment_table_bytes(const segment_counter *c, uint8_t **out,
     return ADAPT_OK;
 }
 
+/* ------------------------------------------------------------------------
+ * The text transform as a reader: what the coder reads is the transform
+ * of what the caller's reader gives, primed with the first block the
+ * encoder already took to choose its model. The original bytes' count
+ * and checksum, the trailer's, are kept here; with `verify` the inverse
+ * runs over every byte produced and is held against the original.
+ * --------------------------------------------------------------------- */
+
+#define TEXT_CHUNK ((size_t)1 << 16)
+
+typedef struct text_source {
+    adapt_read_fn read;
+    void *read_context;
+    text_forward fwd;
+    uint8_t *in;      /* TEXT_CHUNK original bytes */
+    uint8_t *out;     /* their transform: 2 * TEXT_CHUNK + TEXT_FORWARD_SLACK */
+    size_t out_len, out_pos;
+    int eof;
+    const crc32_table *crc_table;
+    uint32_t crc;
+    uint64_t bytes, produced;
+    /* the proof: the inverse of what is produced, against the original */
+    int verify;
+    text_inverse inv;
+    uint8_t *back;    /* TEXT_INVERSE_SLACK * TEXT_PROOF_CHUNK */
+    uint8_t *ring;    /* original bytes not yet reproduced */
+    size_t ring_len;
+    int mismatch;
+} text_source;
+
+#define TEXT_PROOF_CHUNK ((size_t)4096)
+#define TEXT_RING_BYTES (TEXT_CHUNK + ADAPT_BLOCK_BYTES + TEXT_WORD_MAX + 8)
+
+static void text_source_free(text_source *t) {
+    if (t == NULL) return;
+    text_forward_free(&t->fwd);
+    text_inverse_free(&t->inv);
+    free(t->in);
+    free(t->out);
+    free(t->back);
+    free(t->ring);
+    free(t);
+}
+
+/* The proof over `n` produced bytes: their inverse must be the next `n'`
+ * original bytes waiting in the ring. */
+static void text_source_prove(text_source *t, const uint8_t *p, size_t n) {
+    size_t i;
+    if (!t->verify || t->mismatch) return;
+    for (i = 0; i < n && !t->mismatch; i += TEXT_PROOF_CHUNK) {
+        size_t take = n - i < TEXT_PROOF_CHUNK ? n - i : TEXT_PROOF_CHUNK;
+        size_t w = text_inverse_feed(&t->inv, p + i, take, t->back);
+        if (w == (size_t)-1 || w > t->ring_len || memcmp(t->back, t->ring, w) != 0) {
+            t->mismatch = 1;
+            return;
+        }
+        memmove(t->ring, t->ring + w, t->ring_len - w);
+        t->ring_len -= w;
+    }
+}
+
+/* Original bytes the coder will read transformed: counted, summed, and
+ * with `verify` kept until their inverse has been checked. */
+static int text_source_take(text_source *t, const uint8_t *p, size_t n) {
+    t->crc = crc32_update(t->crc_table, t->crc, p, n);
+    t->bytes += n;
+    if (t->verify) {
+        if (t->ring_len + n > TEXT_RING_BYTES) return 0;
+        memcpy(t->ring + t->ring_len, p, n);
+        t->ring_len += n;
+    }
+    return 1;
+}
+
+static text_source *text_source_new(adapt_read_fn read, void *read_context, const crc32_table *crc_table, int verify,
+                                    const uint8_t *first, size_t first_len) {
+    text_source *t = calloc(1, sizeof(*t));
+    if (t == NULL) return NULL;
+    t->read = read;
+    t->read_context = read_context;
+    t->crc_table = crc_table;
+    t->crc = CRC32_INIT;
+    t->verify = verify;
+    t->in = malloc(TEXT_CHUNK);
+    /* the first block's transform is produced at once, so `out` holds a block's worth */
+    t->out = malloc(2 * (ADAPT_BLOCK_BYTES > TEXT_CHUNK ? ADAPT_BLOCK_BYTES : TEXT_CHUNK) + TEXT_FORWARD_SLACK);
+    if (verify) {
+        t->back = malloc(TEXT_INVERSE_SLACK * TEXT_PROOF_CHUNK);
+        t->ring = malloc(TEXT_RING_BYTES);
+    }
+    if (t->in == NULL || t->out == NULL || (verify && (t->back == NULL || t->ring == NULL)) || !text_forward_init(&t->fwd) ||
+        (verify && !text_inverse_init(&t->inv))) {
+        text_source_free(t);
+        return NULL;
+    }
+    if (!text_source_take(t, first, first_len)) {
+        text_source_free(t);
+        return NULL;
+    }
+    t->out_len = text_forward_feed(&t->fwd, first, first_len, t->out);
+    if (first_len == 0) {
+        t->out_len += text_forward_end(&t->fwd, t->out + t->out_len);
+        t->eof = 1;
+    }
+    text_source_prove(t, t->out, t->out_len);
+    t->produced = t->out_len;
+    return t;
+}
+
+static int text_source_read(void *context, uint8_t *buf, size_t len, size_t *got) {
+    text_source *t = context;
+    size_t w = 0;
+    while (w < len) {
+        size_t take;
+        if (t->out_pos == t->out_len) {
+            size_t n = 0;
+            int rc;
+            if (t->eof) break;
+            rc = t->read(t->read_context, t->in, TEXT_CHUNK, &n);
+            if (rc != 0) return rc;
+            if (n > TEXT_CHUNK) return -1;
+            t->out_pos = 0;
+            if (n == 0) {
+                t->eof = 1;
+                t->out_len = text_forward_end(&t->fwd, t->out);
+            } else {
+                if (!text_source_take(t, t->in, n)) return -1;
+                t->out_len = text_forward_feed(&t->fwd, t->in, n, t->out);
+            }
+            text_source_prove(t, t->out, t->out_len);
+            t->produced += t->out_len;
+            continue;
+        }
+        take = t->out_len - t->out_pos;
+        if (take > len - w) take = len - w;
+        memcpy(buf + w, t->out + t->out_pos, take);
+        t->out_pos += take;
+        w += take;
+    }
+    *got = w;
+    return 0;
+}
+
+/* Whether the proof held to the end: every original byte reproduced. */
+static int text_source_proven(const text_source *t) {
+    return !t->verify || (!t->mismatch && t->ring_len == 0 && text_inverse_complete(&t->inv));
+}
+
 static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
                                   adapt_sizes sizes, uint64_t max_memory, uint64_t segment_bytes, verifier *v,
                                   uint64_t workers, int verify, adapt_stats *stats, adapt_error *error) {
@@ -1524,6 +1717,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     uint8_t *table = NULL;
     /* The block as read, kept for the proof when `block` is transformed. */
     uint8_t *orig = NULL;
+    text_source *text = NULL;
     segment_counter segments;
     crc32_table crc_table;
     uint32_t crc = CRC32_INIT;
@@ -1561,6 +1755,29 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     if (status != ADAPT_OK) {
         goto done;
     }
+    /* The text transform: asked for, or the first block looks like text.
+     * From here on the coder reads the transform, its first block first,
+     * and chooses its model from that. */
+    if (sizes.text == ADAPT_TEXT_ON ||
+        (sizes.text == ADAPT_TEXT_AUTO && !sizes.adaptive && !sizes.bmp && text_detect(block, n))) {
+        sizes.text = ADAPT_TEXT_ON;
+        /* the text versions name a power-of-two table: the transform is
+         * worth more than a table's fraction, so the fraction goes */
+        sizes.table_frac = 0;
+        text = text_source_new(read, read_context, &crc_table, v != NULL || verify, block, n);
+        if (text == NULL) {
+            status = fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+            goto done;
+        }
+        read = text_source_read;
+        read_context = text;
+        status = fill(read, read_context, block, ADAPT_BLOCK_BYTES, &n, error);
+        if (status != ADAPT_OK) {
+            goto done;
+        }
+    } else {
+        sizes.text = 0;
+    }
     if (n == 0 || (entropy_256(block, n) >= SKIP_ENTROPY_256 && !repeats_within(block, n, scan))) {
         sizes.class_code = 0;
         sizes.set_code = 0;
@@ -1577,7 +1794,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         status = fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         goto done;
     }
-    sizes.x86 = !sizes.bmp && x86_detect(block, n);
+    sizes.x86 = !sizes.bmp && !text && x86_detect(block, n);
     if (sizes.x86 || sizes.bmp) {
         if (adapt_encode_memory_bound(sizes) > max_memory) {
             sizes.x86 = 0;
@@ -1608,6 +1825,14 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
                                                              : ADAPT_MAX_VERSION)
                                          : ADAPT_FORMAT_VERSION));
     if (sizes.bmp) header[4] = (uint8_t)((sizes.max ? ADAPT_MAX_BMP_VERSION : ADAPT_BMP_VERSION) + sizes.adaptive);
+    if (text) {
+        /* the text versions, in the order of the models they front */
+        header[4] = (uint8_t)(sizes.fast ? ADAPT_TEXT_FAST_VERSION
+                              : !sizes.max ? ADAPT_TEXT_VERSION
+                              : sizes.lean ? ADAPT_TEXT_MAX_LEAN_VERSION
+                              : sizes.compact ? ADAPT_TEXT_MAX_COMPACT_VERSION
+                                              : ADAPT_TEXT_MAX_VERSION);
+    }
     header[5] = (uint8_t)(sizes.table_log | sizes.class_code << 5 | (sizes.archive ? ADAPT_ARCHIVE_FLAG : 0));
     header[6] = (uint8_t)(sizes.match_log | sizes.set_code << 5);
     header[7] = (uint8_t)(sizes.window_log | (sizes.period != 0 ? ADAPT_PERIOD_FLAG : 0) |
@@ -1734,6 +1959,21 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
             }
         }
     }
+    if (text) {
+        if (!text_source_proven(text)) {
+            status = fail(error, ADAPT_ERROR_VERIFICATION, 0, 0);
+            goto done;
+        }
+        if (stats != NULL) {
+            stats->text_bytes = input_bytes;
+            stats->text_words = text->fwd.book.words;
+        }
+        input_bytes = text->bytes;
+        crc = text->crc;
+    } else if (stats != NULL) {
+        stats->text_bytes = 0;
+        stats->text_words = 0;
+    }
     crc = ~crc;
     trailer[0] = METHOD_END;
     {
@@ -1775,6 +2015,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
 done:
     model_free(m);
     counter_free(&segments);
+    text_source_free(text);
     free(table);
     free(scan);
     free(block);
@@ -1980,7 +2221,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);

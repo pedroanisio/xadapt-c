@@ -2,6 +2,76 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — The text transform builds its book as it codes (versions 62–71)
+
+**Decision.** A word both sides have seen written out three times becomes,
+from then on, a code of one to three bytes at or above 0x80; each side
+keeps the same bounded book (65,536 words, 1 MiB of letters), entering a
+word at its third sighting and never sending the book. Words are maximal
+runs of ASCII letters, 2 to 32 long, lower-case, capitalised or upper-case
+(a flag byte before the code); everything else passes as it is, a byte at
+or above 0x80 behind an escape. The encoder takes it for a file of 8 MiB
+or more whose first block looks like text (two fifths of its bytes in
+letter runs, under one in twenty-five at or above 0x80), or when asked
+(`--transform text`); a pipe's length is unknown, so a pipe gets it only
+when asked; never with the adaptive predictors, the BMP transform or the
+x86 transform. Versions 62–66 front the normal, fast, max, compact and
+lean models in that order, 67–71 with metadata; 58–61 are left to the
+sized max profile of the `sized-table-2` branch, whose sizing byte has
+room for a text bit when the two meet. The trailer's length and
+checksum are the original's; the decoder undoes the transform as it
+writes, and the proof alongside undoes it before checking the trailer and
+holds the inverse of every produced byte against the input.
+
+**Why.** The context table is the ratio at small budgets and text spends
+it letter by letter; a word as one symbol reaches the same contexts with
+a third fewer bytes. Measured on enwik8, the model unchanged:
+
+| Run | Before | After | Change |
+|---|---:|---:|---:|
+| 128 MiB, `--max --allocation context` | 19,657,760 B | 18,971,412 B, 152.8 s, RSS 125.9 MB, decoded byte for byte | −3.49 % |
+| default budget, same command (the locked floor) | 18,564,510 B, 189.4 s | 18,286,763 B, 158.9 s | −1.50 %, faster |
+| 8 MiB proxy (`make gate`) | 1,716,715 B, 18 s | 1,716,213 B, 14 s | −0.03 %, faster |
+
+Rejected, each measured: a dictionary built in a first pass and sent
+ahead of the text (18,980,671 at 128 MiB, and a pass ahead of the model —
+the operator's rule is that a transform is valid only when generated
+during the coding, not prior to it); a book built into the codec
+(FMT-2); implying the space before a word (worse, even with a
+word-aware model: 1,736,886 vs 1,674,769 on the 8 MiB proxy at a 2^19
+table); a case-sensitive book (+1.8 %); alphabetical or suffix-sorted
+code order (+0.4 %, +0.2 %); entering a word at its second sighting
+(18,993,159 vs 18,958,016 in the prototype). Below 8 MiB the transform
+costs (64 KiB +3.2 %, 1 MiB +1.3 %, 4 MiB +0.4 %, 8 MiB −0.03 %, 32 MiB
+−0.75 %), hence the length rule; on a text repeated many times the
+recall model already owns the repetition and the transform costs, which
+the CLI test notes.
+
+**Provenance.** Designed and written in this repository. Word-replacement
+transforms ahead of a compressor are published prior art (WRT and XWRT,
+Skibiński and Grabowski; DRT, Mahoney); no code or data of theirs is
+used, and this transform differs in building its book online on both
+sides with no transmitted or built-in dictionary.
+
+**Consequences.**
+- Both locked floors improve on both axes on enwik8; the enwik9 floor is
+  re-measured with this binary before the merge (see the commit).
+- Each side's book, index and buffers are under 3 MiB (`TEXT_STATE_BYTES`),
+  covered by the memory bounds' 8 MiB HEADROOM: the 128 MiB run above
+  peaked at 125.9 MB against a bound of 127.3 MiB.
+- A file under the transform whose blocks say fewer raw bytes than the
+  trailer declares is a checksum error, as any other length lie.
+- Changing the sighting count, the book's bounds, the byte classes or the
+  length rule is a new entry with the enwik8 runs that justify it.
+
+**Status.** Landed 2026-09-15 with `adapt_text.h`, `adapt_sizes.text`,
+versions 62–71, decoder support on every path (stream, in memory,
+threads), the proof alongside and after the fact, `ADAPT_ERROR_BAD_TEXT`,
+`--transform text|none`, `cadapt info`, the vector
+`tests/vectors/text-words.adpt`, C tests (the transform's own suite of
+6,477 checks, the encoder's and decoder's), CLI tests and the gate runs
+above.
+
 ## 2026-09-15 — A budget between two powers of two is spent on the context table (the sized max profile, versions 58/61)
 
 **Decision.** The context table's block count is no longer bound to a

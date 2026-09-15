@@ -580,6 +580,7 @@ static void test_compact_side_tables(void) {
     s.window_log = 16;
     s.compact = 1;
     s.lean = 1;
+    s.text = ADAPT_TEXT_OFF; /* the versions under test are the models' own */
     reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error), ADAPT_OK);
     CHECK(w.len > ADAPT_HEADER_BYTES && coded[4] == ADAPT_MAX_LEAN_VERSION);
@@ -1390,6 +1391,178 @@ static void test_fast_profile(void) {
 
 /* ---- in memory: arguments, budgets, the proof after the fact ----------- */
 
+/* The text transform: asked for, or taken when the first block looks like
+ * text and the input is long enough for it to pay; its own versions in
+ * the header; undone by every decoder, by the proof alongside, and by the
+ * proof after the fact; never with the adaptive predictors or the BMP
+ * transform. */
+static void test_text_transform(void) {
+    size_t len, i, plain_len, text_len, back_len = 0;
+    uint8_t *data = read_file("text.bin", &len);
+    uint8_t *coded = malloc(len + 4096), *again = malloc(len + 4096), *back = NULL;
+    adapt_sizes s, read;
+    adapt_stats stats;
+    adapt_error error;
+    reader r;
+    writer w;
+    /* the policies: the transform is left to the first block from
+     * ADAPT_TEXT_MIN_BYTES; off below it and with the length unknown */
+    CHECK_STATUS(adapt_sizes_for_input(1, ADAPT_TEXT_MIN_BYTES - 1, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK(s.text == ADAPT_TEXT_OFF);
+    CHECK_STATUS(adapt_sizes_for_input(1, ADAPT_TEXT_MIN_BYTES, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK(s.text == ADAPT_TEXT_AUTO);
+    CHECK_STATUS(adapt_sizes_for_input(0, 0, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK(s.text == ADAPT_TEXT_OFF);
+    CHECK_STATUS(adapt_sizes_for_input_max(1, len, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    CHECK(s.text == ADAPT_TEXT_OFF);
+    CHECK_STATUS(adapt_sizes_for_threads(ADAPT_TEXT_MIN_BYTES, ADAPT_DEFAULT_MAX_MEMORY, 2, ADAPT_SEGMENT_BYTES, &s, &error),
+                 ADAPT_OK);
+    CHECK(s.text == ADAPT_TEXT_AUTO);
+    CHECK_STATUS(adapt_sizes_for_threads(ADAPT_TEXT_MIN_BYTES - 1, ADAPT_DEFAULT_MAX_MEMORY, 2, ADAPT_SEGMENT_BYTES, &s,
+                                         &error),
+                 ADAPT_OK);
+    CHECK(s.text == ADAPT_TEXT_OFF);
+    /* the vector, off by the policy: the committed bytes; then asked for */
+    CHECK_STATUS(adapt_sizes_for_input(1, len, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    reset(&r, data, len, 4096, &w, coded, len + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
+    plain_len = w.len;
+    CHECK(coded[4] == ADAPT_FORMAT_VERSION && stats.text_words == 0 && stats.text_bytes == 0);
+    s.text = ADAPT_TEXT_ON;
+    reset(&r, data, len, 4096, &w, coded, len + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
+    text_len = w.len;
+    CHECK(coded[4] == ADAPT_TEXT_VERSION && text_len != plain_len);
+    CHECK(stats.input_bytes == len && stats.crc32 == adapt_crc32(data, len) && stats.output_bytes == text_len);
+    CHECK(stats.text_words > 0 && stats.text_bytes > 0 && stats.text_bytes < len);
+    CHECK_STATUS(adapt_read_header(coded, text_len, &read, &error), ADAPT_OK);
+    CHECK(read.text == ADAPT_TEXT_ON && read.max == 0 && read.fast == 0);
+    /* every decoder undoes it */
+    CHECK_STATUS(adapt_decode(coded, text_len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == len && memcmp(back, data, len) == 0);
+    adapt_free(back);
+    {
+        reader e;
+        writer o;
+        reset(&e, coded, text_len, 1000, &o, again, len + 4096);
+        CHECK_STATUS(adapt_decode_stream(reader_read, &e, writer_write, &o, adapt_default_limits(), &stats, &error), ADAPT_OK);
+        CHECK(o.len == len && memcmp(again, data, len) == 0);
+        CHECK(stats.input_bytes == len && stats.text_words > 0 && stats.text_bytes < len);
+        /* the proof after the fact, with one model */
+        reset(&r, data, len, 4096, &o, again, len + 4096);
+        reset(&e, coded, text_len, 777, &o, again, len + 4096);
+        CHECK_STATUS(adapt_verify_stream(reader_read, &r, reader_read, &e, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
+        CHECK(stats.input_bytes == len);
+        /* a declared output too small for the original, though not for the transform */
+        {
+            adapt_limits limits = adapt_default_limits();
+            limits.max_output = stats.text_bytes;
+            reset(&e, coded, text_len, 1000, &o, again, len + 4096);
+            CHECK_STATUS(adapt_decode_stream(reader_read, &e, writer_write, &o, limits, NULL, &error), ADAPT_ERROR_TOO_LARGE);
+            CHECK(error.limit == limits.max_output);
+            CHECK_STATUS(adapt_decode(coded, text_len, limits, &back, &back_len, &error), ADAPT_ERROR_TOO_LARGE);
+        }
+    }
+    /* the proof alongside: the transform undone before the trailer is
+     * checked, and the transform's own inverse held against the input */
+    reset(&r, data, len, 4096, &w, again, len + 4096);
+    CHECK_STATUS(adapt_encode_stream_verified(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error),
+                 ADAPT_OK);
+    CHECK(w.len == text_len && memcmp(again, coded, text_len) == 0 && stats.input_bytes == len);
+    /* the same bytes from the in-memory encoder with the transform asked
+     * for through its limits' sizes: the policy's choice, off for a file
+     * this short */
+    CHECK_STATUS(adapt_encode(data, len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == plain_len && back[4] == ADAPT_FORMAT_VERSION);
+    adapt_free(back);
+    /* the fast and max models under it */
+    s = adapt_sizes_fast(s);
+    s.text = ADAPT_TEXT_ON;
+    reset(&r, data, len, 4096, &w, coded, len + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
+    CHECK(coded[4] == ADAPT_TEXT_FAST_VERSION);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == len && memcmp(back, data, len) == 0);
+    adapt_free(back);
+    s = adapt_sizes_max(s);
+    s.text = ADAPT_TEXT_ON;
+    reset(&r, data, len, 4096, &w, coded, len + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
+    CHECK(coded[4] == ADAPT_TEXT_MAX_VERSION);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == len && memcmp(back, data, len) == 0);
+    adapt_free(back);
+    s.compact = 1;
+    s.table_log = 18;
+    reset(&r, data, len, 4096, &w, coded, len + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
+    CHECK(coded[4] == ADAPT_TEXT_MAX_COMPACT_VERSION);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == len && memcmp(back, data, len) == 0);
+    adapt_free(back);
+    s.lean = 1;
+    reset(&r, data, len, 4096, &w, coded, len + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
+    CHECK(coded[4] == ADAPT_TEXT_MAX_LEAN_VERSION);
+    CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
+    CHECK(read.text == ADAPT_TEXT_ON && read.max && read.compact && read.lean);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == len && memcmp(back, data, len) == 0);
+    adapt_free(back);
+    /* not with the adaptive predictors or the BMP transform, nor a value
+     * past the three; asked for, it is never the x86 transform */
+    s.lean = 0;
+    s.compact = 0;
+    s.adaptive = 1;
+    CHECK(!adapt_sizes_valid(s));
+    s.adaptive = 0;
+    s.bmp = 1;
+    CHECK(!adapt_sizes_valid(s));
+    s.bmp = 0;
+    s.text = ADAPT_TEXT_OFF + 1;
+    CHECK(!adapt_sizes_valid(s));
+    s.text = ADAPT_TEXT_ON;
+    s.table_frac = 1;
+    CHECK(!adapt_sizes_valid(s));
+    s.table_frac = 0;
+    s.text = ADAPT_TEXT_OFF;
+    s.adaptive = 1;
+    CHECK(adapt_sizes_valid(s));
+    s.adaptive = 0;
+    /* a segmented file, in order and on threads, with the book carried
+     * across the segments; the workers' bytes are the in-order coder's */
+    {
+        size_t n = 3 * ADAPT_BLOCK_BYTES + 555, seg = 2 * ADAPT_BLOCK_BYTES, k, t;
+        uint8_t *big = malloc(n), *c1 = malloc(n + 4096), *c2 = malloc(n + 4096);
+        for (i = 0; i < n; i++) big[i] = data[(i * 7919) % len];
+        CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+        s.segmented = 1;
+        s.text = ADAPT_TEXT_ON;
+        reset(&r, big, n, 4096, &w, c1, n + 4096);
+        CHECK_STATUS(adapt_encode_stream_segments(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, seg, &stats,
+                                                  &error),
+                     ADAPT_OK);
+        k = w.len;
+        CHECK(c1[4] == ADAPT_TEXT_VERSION && stats.input_bytes == n && stats.segments >= 2);
+        CHECK_STATUS(adapt_decode(c1, k, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+        CHECK(back_len == n && memcmp(back, big, n) == 0);
+        adapt_free(back);
+        for (t = 1; t <= 3; t++) {
+            reset(&r, big, n, 4096, &w, c2, n + 4096);
+            CHECK_STATUS(adapt_encode_stream_threads(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, seg, t, 1,
+                                                     &stats, &error),
+                         ADAPT_OK);
+            CHECK(w.len == k && memcmp(c2, c1, k) == 0 && stats.input_bytes == n);
+        }
+        free(big);
+        free(c1);
+        free(c2);
+    }
+    free(coded);
+    free(again);
+    free(data);
+}
+
 /* The x86 branch transform: chosen by the first block's signature, flagged
  * in the header, undone by every decoder and by the proof alongside; each
  * operand shape the transform decides on is in the input. */
@@ -1676,6 +1849,7 @@ int main(int argc, char **argv) {
     test_edges();
     test_record_period();
     test_x86_transform();
+    test_text_transform();
     test_archive_flag();
     test_in_memory();
     if (failures != 0) {

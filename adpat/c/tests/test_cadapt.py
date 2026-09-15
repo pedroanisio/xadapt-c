@@ -27,11 +27,12 @@ SOURCE = b"optional verification\n" * 128
 
 def payload_stream(container: bytes) -> bytes:
     """Remove only validated filesystem metadata for legacy stream comparisons."""
-    if container[4] not in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52):
+    if container[4] not in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52, 56, 57, 67, 68, 69, 70, 71):
         return container
     base = 8 + (2 if container[7] & 0x80 else 0) + (12 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 0)
     assert zlib.crc32(container[:base + 28]) == int.from_bytes(container[base + 28:base + 32], "little")
-    return container[:4] + bytes([container[4] - (4 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 3)]) + container[5:base] + container[base + 32:]
+    offset = 4 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 5 if 67 <= container[4] <= 71 else 3
+    return container[:4] + bytes([container[4] - offset]) + container[5:base] + container[base + 32:]
 
 
 class CodecTest(unittest.TestCase):
@@ -195,6 +196,62 @@ class AllocationTest(CodecTest):
 
 
 class AdaptiveTest(CodecTest):
+    def test_text_transform_is_taken_for_long_text_asked_for_or_refused(self):
+        # A long text (8 MiB of the vector's prose, repeated) is coded under
+        # the text transform by itself: the fast profile's text version 63
+        # (68 with metadata), decoded to the bytes (what it saves is measured
+        # on enwik8, not on a repetition the recall model already owns);
+        # --transform none keeps the plain version, and so does a pipe, whose
+        # length is unknown, unless asked; --transform text takes it for a
+        # short file too, where the policy would not, and info
+        # names it; it composes with neither --adaptive nor the BMP transform.
+        prose = (VECTORS / "text.bin").read_bytes()
+        long_text = (prose * ((8 << 20) // len(prose) + 1))[: 8 << 20]
+        big = self.root / "long.txt"
+        big.write_bytes(long_text)
+        auto = self.run_codec("encode", big, "-o", "-", "--fast")
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout[4], 68)
+        none = self.run_codec("encode", big, "-o", "-", "--fast", "--transform", "none")
+        self.assertEqual(none.returncode, 0, none.stderr)
+        self.assertEqual(none.stdout[4], 23)
+        back = self.run_codec("decode", "-", data=auto.stdout)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertEqual(back.stdout, long_text)
+        piped = self.run_codec("encode", "-", "--fast", data=long_text)
+        self.assertEqual(piped.returncode, 0, piped.stderr)
+        self.assertEqual(piped.stdout[4], 20) # a pipe's length is unknown: not by itself
+        piped = self.run_codec("encode", "-", "--fast", "--transform", "text", data=long_text)
+        self.assertEqual(piped.returncode, 0, piped.stderr)
+        self.assertEqual(piped.stdout[4], 63)
+        back = self.run_codec("decode", "-", data=piped.stdout)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertEqual(back.stdout, long_text)
+        short = self.run_codec("encode", self.source, "-o", "-")
+        self.assertEqual(short.returncode, 0, short.stderr)
+        self.assertEqual(short.stdout[4], 22)
+        asked = self.run_codec("encode", self.source, "-o", "-", "--transform", "text", "--verify")
+        self.assertEqual(asked.returncode, 0, asked.stderr)
+        self.assertEqual(asked.stdout[4], 67)
+        back = self.run_codec("decode", "-", data=asked.stdout)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertEqual(back.stdout, SOURCE)
+        named = self.root / "asked.adpt"
+        named.write_bytes(asked.stdout)
+        info = self.run_codec("info", named)
+        self.assertEqual(info.returncode, 0, info.stderr)
+        self.assertIn(b"format          adapt container version 67", info.stdout)
+        self.assertIn(b"text transform  yes", info.stdout)
+        self.assert_usage_error(self.run_codec("encode", self.source, "--transform", "text", "--adaptive", "rates"),
+                                b"--transform text")
+        self.assert_usage_error(self.run_codec("encode", self.source, "--transform", "words"), b"--transform")
+        # a damaged text stream is refused as such, not written
+        damaged = bytearray(asked.stdout)
+        damaged[len(damaged) // 2] ^= 0x55
+        run = self.run_codec("decode", "-", data=bytes(damaged))
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(run.stdout, b"")
+
     def test_bmp_transform_preserves_padding_headers_and_partial_pixels(self):
         width, height = 509, 193
         stride = (width * 3 + 3) & ~3
@@ -1174,6 +1231,7 @@ class CommandTest(CodecTest):
             "text-max.adpt": (b"format          adapt container version 21", b"contexts        all but word, field\n", b"profile         max\n"),
             "text-compact.adpt": (b"format          adapt container version 53", b"contexts        all but word, field\n", b"profile         max (compact side tables)\n"),
             "text-lean.adpt": (b"format          adapt container version 54", b"contexts        all but word, field, o8, word3, wordc\n", b"profile         max (compact side tables, lean contexts)\n"),
+            "text-words.adpt": (b"format          adapt container version 62", b"profile         normal\n", b"text transform  yes\n"),
             "records.adpt": (b"record period   192 bytes", b"class history   21 bytes", b"contexts        all"),
             "segmented.adpt": (b"segments        2", b"declared bytes  300000"),
             "empty.adpt": (b"declared bytes  0", b"file bytes      21"),

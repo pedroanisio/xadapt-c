@@ -26,7 +26,7 @@ cadapt \- compress and decompress files and folders with the adapt context-mixin
 .RB [ \-\-adaptive
 .BR rates | sparse | retained | auto ]
 .RB [ \-\-transform
-.BR bmp ]
+.BR bmp | text | none ]
 .br
 .B cadapt decode
 .I input
@@ -153,6 +153,24 @@ Versions 25 to 52.
 .TP
 .BR \-\-transform " " bmp
 Code a BMP24 image through reversible colour and row residuals.
+.TP
+.BR \-\-transform " " text | none
+The text transform: a word both sides have seen written out three times
+becomes, from then on, a code of one to three bytes the model reads as
+one symbol. Each side builds the same bounded book as the file is coded;
+nothing is sent ahead and nothing is built in, and every other byte
+passes as it is. A file of 8 MiB or more whose first block looks like
+text takes it by itself;
+.B text
+asks for it whatever the input (a pipe's length is unknown, so a pipe
+gets it only when asked), and
+.B none
+refuses it. Measured on enwik8 at 128 MiB, 3.5 % fewer bytes in fewer
+seconds; below 8 MiB it costs, which the rule is for. Not with
+.B \-\-adaptive
+or
+.BR "\-\-transform bmp" .
+Versions 62 to 66, 67 to 71 with metadata.
 .SH MEMORY OPTIONS
 .TP
 .BR \-0 " .. " \-9
@@ -367,7 +385,8 @@ and as named files or folders; 25 to 52 are the experimental profiles;
 53 and 56 are the max profile with compact side tables, 54 and 57 with
 its lean context set as well; 58 and 61 the max profile sized to its
 budget, one byte after the header naming the side tables, the context
-set and the table's fraction.
+set and the table's fraction; 62 to 66 are the text transform ahead of
+the normal, fast, max, compact and lean models, 67 to 71 with metadata.
 .SH SEE ALSO
 .BR xz (1).
 .br

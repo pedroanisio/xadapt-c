@@ -2,8 +2,8 @@
 """Enforce branch coverage of the C codec from gcov's JSON.
 
 The library — adapt_decode.c, adapt_encode.c, adapt_archive.c, and
-adapt_model.h, adapt_adaptive.h and adapt_bmp.h as each of the first two
-compiles them — must reach 80 % of its
+adapt_model.h, adapt_adaptive.h, adapt_bmp.h and adapt_text.h as each of
+the first two compiles them — must reach 80 % of its
 branches together, the command line (cadapt.c) 60 %: the crate's floors, applied to its second implementation.
 A source missing from the report fails the gate, so a file that stopped
 being instrumented cannot pass by absence. The header is inlined into both
@@ -18,7 +18,8 @@ import json
 import sys
 from pathlib import Path
 
-LIBRARY = {"adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "adapt_model.h", "adapt_adaptive.h", "adapt_bmp.h"}
+LIBRARY = {"adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "adapt_model.h", "adapt_adaptive.h", "adapt_bmp.h",
+           "adapt_text.h"}
 CLI = {"cadapt.c"}
 FLOORS = {"library": 80.0, "cli": 60.0}
 

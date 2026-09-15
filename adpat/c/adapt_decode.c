@@ -12,6 +12,7 @@
 #endif
 #include "adapt.h"
 #include "adapt_model.h"
+#include "adapt_text.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +31,10 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len) {
 int adapt_bmp_probe(const uint8_t *prefix, size_t length, adapt_sizes *sizes) {
     return bmp_probe(prefix, length, sizes);
 }
+static int header_has_text(const uint8_t *header) {
+    return header[4] >= ADAPT_TEXT_VERSION && header[4] <= ADAPT_TEXT_METADATA_LAST_VERSION;
+}
+
 static int header_has_bmp(const uint8_t *header) {
     return (header[4] >= ADAPT_BMP_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
            (header[4] >= ADAPT_MAX_BMP_VERSION && header[4] <= ADAPT_MAX_BMP_METADATA_LAST_VERSION);
@@ -39,6 +44,7 @@ int adapt_header_has_metadata(const uint8_t *header) {
     return header != NULL && ((header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION) ||
                               header[4] == ADAPT_MAX_COMPACT_METADATA_VERSION || header[4] == ADAPT_MAX_LEAN_METADATA_VERSION ||
                               header[4] == ADAPT_MAX_SIZED_METADATA_VERSION ||
+                              (header[4] >= ADAPT_TEXT_METADATA_VERSION && header[4] <= ADAPT_TEXT_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_MAX_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION) ||
@@ -70,7 +76,7 @@ size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_
         return 0;
     }
     memcpy(out, header, len);
-    out[4] = (uint8_t)(header[4] + (header_has_bmp(header) ? 4 : 3));
+    out[4] = (uint8_t)(header[4] + (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET : 3));
     crc = adapt_crc32(out, total - 4);
     for (i = 0; i < 4; i++) {
         out[total - 4 + i] = (uint8_t)(crc >> (8 * i));
@@ -119,9 +125,17 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         if (!adapt_metadata_read(header + n - ADAPT_METADATA_HEADER_BYTES, &metadata)) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
-        version = (uint8_t)(version - (header_has_bmp(header) ? 4 : 3));
+        version = (uint8_t)(version - (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET : 3));
     }
     s.max = 0;
+    s.text = 0;
+    if (version >= ADAPT_TEXT_VERSION && version <= ADAPT_TEXT_LAST_VERSION) {
+        /* the text versions front the models in the order of their own */
+        static const uint8_t fronted[] = {ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
+                                          ADAPT_MAX_COMPACT_VERSION, ADAPT_MAX_LEAN_VERSION};
+        s.text = ADAPT_TEXT_ON;
+        version = fronted[version - ADAPT_TEXT_VERSION];
+    }
     if (version >= ADAPT_MAX_ADAPTIVE_VERSION && version <= ADAPT_MAX_ADAPTIVE_LAST_VERSION) {
         s.max = 1;
         version = (uint8_t)(version - ADAPT_MAX_ADAPTIVE_VERSION + ADAPT_ADAPTIVE_VERSION);
@@ -305,6 +319,86 @@ adapt_limits adapt_default_limits(void) {
 }
 
 /* ------------------------------------------------------------------------
+ * The text transform as a writer: what the coder recovers is undone on
+ * its way to the caller's writer, and the original bytes' count and
+ * checksum, the ones the trailer holds, are taken here.
+ * --------------------------------------------------------------------- */
+
+#define TEXT_SINK_CHUNK ((size_t)4096)
+
+typedef struct text_sink {
+    adapt_write_fn write;
+    void *write_context;
+    text_inverse inv;
+    uint8_t *out; /* TEXT_INVERSE_SLACK * TEXT_SINK_CHUNK */
+    const crc32_table *crc_table;
+    uint32_t crc;
+    uint64_t written, max_output;
+    adapt_status status; /* ADAPT_OK, or why the stream was refused */
+    uint64_t detail;
+    int rc;              /* the caller's writer's failure, when it failed */
+} text_sink;
+
+static int text_sink_init(text_sink *s, adapt_write_fn write, void *write_context, const crc32_table *t,
+                          uint64_t max_output) {
+    memset(s, 0, sizeof(*s));
+    s->write = write;
+    s->write_context = write_context;
+    s->crc_table = t;
+    s->crc = CRC32_INIT;
+    s->max_output = max_output;
+    s->out = malloc(TEXT_INVERSE_SLACK * TEXT_SINK_CHUNK);
+    if (s->out == NULL || !text_inverse_init(&s->inv)) {
+        free(s->out);
+        s->out = NULL;
+        return 0;
+    }
+    return 1;
+}
+
+static void text_sink_free(text_sink *s) {
+    text_inverse_free(&s->inv);
+    free(s->out);
+    s->out = NULL;
+}
+
+static int text_sink_write(void *context, const uint8_t *buf, size_t len) {
+    text_sink *s = context;
+    size_t i;
+    if (s->status != ADAPT_OK) return 1;
+    for (i = 0; i < len; i += TEXT_SINK_CHUNK) {
+        size_t take = len - i < TEXT_SINK_CHUNK ? len - i : TEXT_SINK_CHUNK;
+        size_t w = text_inverse_feed(&s->inv, buf + i, take, s->out);
+        int rc;
+        if (w == (size_t)-1) {
+            s->status = ADAPT_ERROR_BAD_TEXT;
+            return 1;
+        }
+        if (w > s->max_output - s->written) {
+            s->status = ADAPT_ERROR_TOO_LARGE;
+            s->detail = s->written + w;
+            return 1;
+        }
+        s->crc = crc32_update(s->crc_table, s->crc, s->out, w);
+        s->written += w;
+        rc = s->write(s->write_context, s->out, w);
+        if (rc != 0) {
+            s->status = ADAPT_ERROR_IO;
+            s->rc = rc;
+            return rc;
+        }
+    }
+    return 0;
+}
+
+/* The error a failed sink stands for, in place of the writer's. */
+static adapt_status text_sink_fail(const text_sink *s, uint64_t max_output, adapt_error *error) {
+    if (s->status == ADAPT_ERROR_TOO_LARGE) return fail(error, ADAPT_ERROR_TOO_LARGE, s->detail, max_output);
+    if (s->status == ADAPT_ERROR_IO) return fail(error, ADAPT_ERROR_IO, (uint64_t)(s->rc < 0 ? -(int64_t)s->rc : s->rc), 0);
+    return fail(error, ADAPT_ERROR_BAD_TEXT, 0, 0);
+}
+
+/* ------------------------------------------------------------------------
  * container.rs — the streaming decoder
  * --------------------------------------------------------------------- */
 
@@ -325,6 +419,8 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
     uint32_t crc = CRC32_INIT;
     uint64_t output_bytes = ADAPT_HEADER_BYTES;
     size_t got;
+    text_sink text;
+    int has_text = 0;
     if (read == NULL || write == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
     }
@@ -364,6 +460,16 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
         goto done;
     }
     crc32_table_init(&crc_table);
+    if (sizes.text == ADAPT_TEXT_ON) {
+        /* the recovered bytes are the transform's: undone on their way out */
+        if (!text_sink_init(&text, write, write_context, &crc_table, limits.max_output)) {
+            status = fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+            goto done;
+        }
+        has_text = 1;
+        write = text_sink_write;
+        write_context = &text;
+    }
     for (;;) {
         uint8_t method;
         size_t raw, payload_len;
@@ -433,6 +539,22 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
             }
             output_bytes += ADAPT_TRAILER_BYTES;
             read_trailer_payload(trailer, &len, &sum);
+            if (has_text) {
+                /* the trailer names the original bytes, which the sink wrote */
+                if (!text_inverse_complete(&text.inv)) {
+                    status = fail(error, ADAPT_ERROR_BAD_TEXT, 0, 0);
+                    goto done;
+                }
+                if (stats != NULL) {
+                    stats->text_bytes = written;
+                    stats->text_words = text.inv.book.words;
+                }
+                written = text.written;
+                crc = text.crc;
+            } else if (stats != NULL) {
+                stats->text_bytes = 0;
+                stats->text_words = 0;
+            }
             if (len != written || sum != ~crc) {
                 status = fail(error, ADAPT_ERROR_CHECKSUM, 0, 0);
                 goto done;
@@ -491,7 +613,7 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
             goto done;
         }
         output_bytes += ADAPT_BLOCK_HEADER_BYTES + payload_len;
-        if (written + raw > limits.max_output) {
+        if (!has_text && written + raw > limits.max_output) {
             status = fail(error, ADAPT_ERROR_TOO_LARGE, written + raw, limits.max_output);
             goto done;
         }
@@ -515,12 +637,14 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
         {
             int rc = write(write_context, scratch, raw);
             if (rc != 0) {
-                status = fail(error, ADAPT_ERROR_IO, (uint64_t)(rc < 0 ? -(int64_t)rc : rc), 0);
+                status = has_text ? text_sink_fail(&text, limits.max_output, error)
+                                  : fail(error, ADAPT_ERROR_IO, (uint64_t)(rc < 0 ? -(int64_t)rc : rc), 0);
                 goto done;
             }
         }
     }
 done:
+    if (has_text) text_sink_free(&text);
     model_free(decoder.m);
     counter_free(&segments);
     free(table);
@@ -556,11 +680,13 @@ typedef struct memory_writer {
     uint8_t *out;
     size_t len;
     size_t pos;
+    int overflow; /* more bytes came than the trailer declared */
 } memory_writer;
 
 static int memory_write(void *context, const uint8_t *buf, size_t len) {
     memory_writer *w = context;
     if (len > w->len - w->pos) {
+        w->overflow = 1;
         return 1;
     }
     memcpy(w->out + w->pos, buf, len);
@@ -636,7 +762,7 @@ adapt_status adapt_decode(const uint8_t *file, size_t file_len, adapt_limits lim
     if (pos != file_len) {
         return fail(error, ADAPT_ERROR_TRAILING_BYTES, file_len - pos, 0);
     }
-    if (len != total) {
+    if (len != total && sizes.text != ADAPT_TEXT_ON) {
         return fail(error, ADAPT_ERROR_CHECKSUM, 0, 0);
     }
     if (len > limits.max_output) {
@@ -656,13 +782,16 @@ adapt_status adapt_decode(const uint8_t *file, size_t file_len, adapt_limits lim
     }
     writer.len = (size_t)len;
     writer.pos = 0;
+    writer.overflow = 0;
     reader.src = file;
     reader.len = file_len;
     reader.pos = 0;
     status = adapt_decode_stream(memory_read, &reader, memory_write, &writer, limits, &stats, error);
     if (status != ADAPT_OK) {
         free(writer.out);
-        return status;
+        /* under the text transform the blocks' bytes do not say how many
+         * come out; more than the trailer declared is the trailer's lie */
+        return status == ADAPT_ERROR_IO && writer.overflow ? fail(error, ADAPT_ERROR_CHECKSUM, 0, 0) : status;
     }
     *out = writer.out;
     *out_len = writer.pos;
@@ -713,7 +842,7 @@ uint64_t adapt_decode_workers(adapt_sizes sizes, uint64_t max_memory, uint64_t s
  * entries account for exactly the bytes between the header and the
  * table, and for the length the trailer declares. */
 static adapt_status read_segment_table(const uint8_t *file, size_t file_len, size_t header_len, uint64_t declared,
-                                       const uint8_t **entries, uint32_t *count_out, uint64_t *raw_max,
+                                       int text, const uint8_t **entries, uint32_t *count_out, uint64_t *raw_max,
                                        adapt_error *error) {
     uint32_t count, i;
     size_t table_len, table_at;
@@ -742,7 +871,8 @@ static adapt_status read_segment_table(const uint8_t *file, size_t file_len, siz
             longest = raw;
         }
     }
-    if (coded_total != table_at - header_len || raw_total != declared) {
+    /* the segments' raw bytes are the transform's under it, not the declared original's */
+    if (coded_total != table_at - header_len || (!text && raw_total != declared)) {
         return fail(error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
     }
     *entries = file + table_at + 1;
@@ -943,7 +1073,8 @@ adapt_status adapt_decode_threads(const uint8_t *file, size_t file_len, adapt_li
         if (status != ADAPT_OK) {
             return status;
         }
-        status = read_segment_table(file, file_len, header_len, declared, &entries, &count, &raw_max, error);
+        status = read_segment_table(file, file_len, header_len, declared, sizes.text == ADAPT_TEXT_ON, &entries, &count,
+                                    &raw_max, error);
         if (status != ADAPT_OK) {
             return status;
         }
@@ -958,14 +1089,35 @@ adapt_status adapt_decode_threads(const uint8_t *file, size_t file_len, adapt_li
 #ifdef ADAPT_THREADS
     if (workers >= 2) {
         uint32_t sum;
-        uint64_t written;
+        uint64_t written, text_bytes = 0;
+        uint32_t text_words = 0;
+        crc32_table t;
+        text_sink text;
         status = check_memory(adapt_parallel_decode_memory_bound(sizes, workers, raw_max, file_len), limits.max_memory,
                               error);
         if (status != ADAPT_OK) {
             return status;
         }
+        if (sizes.text == ADAPT_TEXT_ON) {
+            /* the segments come out in order: undone on their way to the writer */
+            crc32_table_init(&t);
+            if (!text_sink_init(&text, write, write_context, &t, limits.max_output)) {
+                return fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+            }
+            write = text_sink_write;
+            write_context = &text;
+        }
         status = decode_segments_parallel(file, header_len, sizes, entries, count, raw_max, workers, write, write_context,
                                           &sum, &written, error);
+        if (sizes.text == ADAPT_TEXT_ON) {
+            if (status == ADAPT_ERROR_IO && text.status != ADAPT_OK) status = text_sink_fail(&text, limits.max_output, error);
+            if (status == ADAPT_OK && !text_inverse_complete(&text.inv)) status = fail(error, ADAPT_ERROR_BAD_TEXT, 0, 0);
+            text_bytes = written;
+            text_words = text.inv.book.words;
+            written = text.written;
+            sum = text.crc;
+            text_sink_free(&text);
+        }
         if (status != ADAPT_OK) {
             return status;
         }
@@ -978,6 +1130,8 @@ adapt_status adapt_decode_threads(const uint8_t *file, size_t file_len, adapt_li
             stats->crc32 = crc;
             stats->segments = count;
             stats->workers = (uint32_t)workers;
+            stats->text_bytes = text_bytes;
+            stats->text_words = text_words;
         }
         return fail(error, ADAPT_OK, 0, 0);
     }
@@ -1072,6 +1226,8 @@ int adapt_error_message(const adapt_error *error, char *buf, size_t len) {
             return snprintf(buf, len, "invalid argument");
         case ADAPT_ERROR_BAD_ARCHIVE:
             return snprintf(buf, len, "invalid archive at byte %llu", (unsigned long long)error->detail);
+        case ADAPT_ERROR_BAD_TEXT:
+            return snprintf(buf, len, "invalid text transform stream");
     }
     return snprintf(buf, len, "unknown error %d", (int)error->status);
 }

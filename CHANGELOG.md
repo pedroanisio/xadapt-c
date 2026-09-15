@@ -35,6 +35,26 @@ The binary reports `0.12.0`; the tag is pending.
   worker as well as when it decodes in parallel.
 
 ### Added
+- The text transform, container versions 62 to 66 (67 to 71 with
+  metadata), ahead of the normal, fast, max, compact and lean models: a
+  word both sides have seen written out three times becomes, from then
+  on, a code of one to three bytes at or above 0x80, so the model meets a
+  word as one symbol and codes fewer bytes. Each side builds the same
+  bounded book as it goes; nothing is sent ahead and no data is built in
+  (FMT-2, FMT-8); other bytes pass unchanged, escaped above 0x7F, and the
+  decoder undoes it as it writes. Taken by itself for a file of 8 MiB or
+  more whose first block looks like text; `--transform text` asks for it
+  (a pipe's length being unknown), `--transform none` refuses it; never
+  with the adaptive predictors or the BMP transform. Measured on enwik8
+  with the model unchanged: at 128 MiB (`--max --allocation context`)
+  19,657,760 → 18,971,412 bytes in fewer seconds, the model coding 62 %
+  of the bytes; the 8 MiB proxy 1,716,715 → 1,716,213 in 14 s instead
+  of 18. Below 8 MiB it costs (64 KiB +3.2 %, 4 MiB +0.4 %), which is
+  what the length rule is for. The proof alongside undoes the transform
+  before checking the trailer and holds the inverse of every byte
+  produced against the input; `cadapt info` names it; `adapt_sizes`
+  gains `text`, `adapt_stats` `text_bytes` and `text_words`, and
+  `ADAPT_ERROR_BAD_TEXT` names a malformed stream.
 - Container versions 53 and 56 (with metadata): the max profile with
   compact side tables — the third and fourth first-layer arbiters keep
   2^15 weight sets instead of 2^16 and the second estimation stage 2^17

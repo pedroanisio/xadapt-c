@@ -447,7 +447,7 @@ static void print_usage(FILE *stream) {
             "usage:\n"
             "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -9]\n"
             "                [--max-memory <bytes>] [--threads <n>] [--segment-bytes <bytes>]\n"
-            "                [--adaptive rates|sparse|retained|auto] [--transform bmp] [--allocation window|context]\n"
+            "                [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation window|context]\n"
             "  cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]\n"
             "  cadapt info   <file>\n"
             "  cadapt --version\n"
@@ -470,7 +470,16 @@ static void print_usage(FILE *stream) {
             "with the lean context set they take at a table of 2^22 blocks or fewer, 54/57.\n"
             "--transform bmp explicitly selects that reversible transform. Search\n"
             "uses up to eight encodes, temporary disk of input plus two containers, and\n"
-            "verifies only with --verify (one model, also for pipes).\n"
+            "verifies only with --verify (one model, also for pipes).\n",
+            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
+            ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_METADATA_MAX_VERSION);
+    fprintf(stream,
+            "The text transform (versions 62--66, 67--71 with metadata) replaces a word both\n"
+            "sides have seen three times by a code the model reads as one symbol; the book\n"
+            "is built as the file is coded, nothing is sent ahead. It is taken by itself for\n"
+            "a file of 8 MiB or more whose first block looks like text (measured on\n"
+            "enwik8 at 128 MiB: 3.5 %% fewer bytes in fewer seconds); --transform text asks\n"
+            "for it whatever the input, --transform none refuses it.\n"
             "--allocation context grows the context table before the recall window;\n"
             "window is the default. Either policy can win depending on the input.\n"
             "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
@@ -498,8 +507,6 @@ static void print_usage(FILE *stream) {
             "as many of the n threads as the budget holds a model, a segment and a block's\n"
             "workspace for; decode --threads <n> decodes a file's segments the same way.\n"
             "The report says how many threads ran.\n",
-            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
-            ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_METADATA_MAX_VERSION,
             (unsigned long long)ADAPT_DEFAULT_MAX_MEMORY,
             (unsigned long long)minimum_error.detail, (unsigned long long)minimum_max_error.detail,
             (unsigned long long)ADAPT_SEGMENT_BYTES, (unsigned long long)ADAPT_BLOCK_BYTES);
@@ -2751,6 +2758,7 @@ static int encode_command(int argc, char **argv) {
     int force, verify, alongside, rc, known_length;
     unsigned adaptive = 0;
     int bmp_transform_requested = 0, context_first = 0;
+    int text_transform = ADAPT_TEXT_AUTO;
     uint64_t profile_memory;
     uint64_t max_memory = ADAPT_DEFAULT_MAX_MEMORY, length = 0, hundredths, threads, segment_bytes = ADAPT_SEGMENT_BYTES;
     uint64_t workers = 1;
@@ -2819,10 +2827,18 @@ static int encode_command(int argc, char **argv) {
     }
     text = value_of(&a, "--transform");
     if (text != NULL) {
-        if (strcmp(text, "bmp") != 0) return usage_error("--transform: expected bmp: %s", text);
-        if (has_flag(&a, "--fast") || adaptive == 4 || is_folder)
-            return usage_error("--transform bmp requires a file/pipe and normal, max or an explicit adaptive profile%s", "");
-        bmp_transform_requested = 1;
+        if (strcmp(text, "bmp") == 0) {
+            if (has_flag(&a, "--fast") || adaptive == 4 || is_folder)
+                return usage_error("--transform bmp requires a file/pipe and normal, max or an explicit adaptive profile%s", "");
+            bmp_transform_requested = 1;
+        } else if (strcmp(text, "text") == 0) {
+            if (adaptive != 0) return usage_error("--transform text cannot be combined with --adaptive%s", "");
+            text_transform = ADAPT_TEXT_ON;
+        } else if (strcmp(text, "none") == 0) {
+            text_transform = ADAPT_TEXT_OFF;
+        } else {
+            return usage_error("--transform: expected bmp, text or none: %s", text);
+        }
     }
     if (has_flag(&a, "--fast") && has_flag(&a, "--max")) {
         return usage_error("--fast and --max are two profiles; pass one%s", "");
@@ -2963,6 +2979,10 @@ static int encode_command(int argc, char **argv) {
     }
     sizes.archive = (uint8_t)is_folder;
     sizes.bmp = (uint8_t)bmp_transform_requested;
+    /* the text transform: the policy's choice by the length, unless asked
+     * for or refused; never over the adaptive predictors or the BMP transform */
+    if (text_transform != ADAPT_TEXT_AUTO) sizes.text = (uint8_t)text_transform;
+    if (adaptive != 0 || bmp_transform_requested) sizes.text = ADAPT_TEXT_OFF;
     if (threads >= 2) {
         /* The crate cuts a file's segments on threads and a pipe's in
          * order; this port cuts both on threads when the budget allows, to
@@ -3314,6 +3334,7 @@ static int info_command(int argc, char **argv) {
     printf("profile         %s%s%s\n", sizes.max && sizes.adaptive ? "max-" : "", sizes.adaptive ? adaptive_name(sizes.adaptive) : (sizes.fast ? "fast" : (sizes.max ? "max" : "normal")),
            sizes.lean ? " (compact side tables, lean contexts)" : sizes.compact ? " (compact side tables)" : "");
     printf("x86 transform   %s\n", sizes.x86 ? "yes" : "no");
+    printf("text transform  %s\n", sizes.text == ADAPT_TEXT_ON ? "yes" : "no");
     if (sizes.bmp) printf("bmp transform   %lu x %lu, pixel offset %lu\n", (unsigned long)sizes.bmp_width,
                           (unsigned long)sizes.bmp_rows, (unsigned long)sizes.bmp_offset);
     printf("holds           %s\n", sizes.archive ? "a folder (an adapt archive)" : "a file");
