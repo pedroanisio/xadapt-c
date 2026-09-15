@@ -181,9 +181,12 @@ extern "C" {
  * names (o5 the 21-byte class history, o8 the order-1 indirect context,
  * word3 recall's expected byte, sparse2 its next two), recall buckets of
  * four positions, and a fifth arbiter keyed by the bytes since a space
- * and the previous byte's class; the encoder sets it for every max
- * encode, so the max profile is always this version now, and a decoder
- * sets it from the sizing byte. Measured on the first 8 MiB of enwik8
+ * and the previous byte's class — the last three (o8's and word3's
+ * slots, the fifth arbiter) only from a table of 2^21 blocks, the size
+ * the header names, since they pay under table pressure and cost small
+ * inputs without it (MODEL2_PRESSURE_LOG in adapt_model.h); the encoder
+ * sets it for every max encode, so the max profile is always this
+ * version now, and a decoder sets it from the sizing byte. Measured on the first 8 MiB of enwik8
  * under the text transform, 1,700,354 -> 1,686,110 bytes with 4.9 %
  * fewer instructions and a decode 5 % faster; on the first 32 MiB,
  * 6,351,878 -> 6,297,375. The int16 tables halve the side tables' 36.5

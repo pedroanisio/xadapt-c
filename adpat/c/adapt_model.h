@@ -253,6 +253,7 @@ static const uint32_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
  * max model (adapt_sizes.model2) adds a fifth verdict, see MODEL2 below. */
 #define FINAL_INPUTS 6
 #define FINAL_INPUTS_OF(m2) ((m2) ? 6 : 5)
+#define FINAL_INPUTS_ON(m, m2) (((m2) && (m)->extra_on) ? 6 : 5)
 /* ---- the second max model (ADAPT_SIZING_MODEL2) ----
  * Measured on the first 8 MiB of enwik8 under the text transform at the
  * default tier (--max --allocation context), 1,700,354 -> 1,686,110 bytes
@@ -274,6 +275,18 @@ static const uint32_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
  *    the longest verified candidate wins, in the same table (0.10 %);
  *  - a fifth first-layer arbiter keyed by the bytes since the last space
  *    and the previous byte's class, with the partial byte (0.13 %). */
+/* The parts of model2 that pay under table pressure and cost without it
+ * — the o8 and word3 slots re-purposed, and the fifth arbiter — run from
+ * a table of 2^MODEL2_PRESSURE_LOG blocks, the size the header names,
+ * which follows the input's length for a named file (150 KB is 2^20,
+ * 8 MiB 2^22, enwik8 2^25). Measured on the mixed corpus at -6: with
+ * them always on, five Canterbury rows broke their floors (kennedy.xls
+ * +3.7 %, the order-1 indirect context in o8's slot; fields.c, grammar.lsp,
+ * xargs.1 +1.5 to +3 %, the untrained fifth arbiter; alice29.txt +0.17 %,
+ * recall in word3's slot); gated at 2^21 every row is under its floor,
+ * kennedy.xls by 5.8 %, xml (2^21) keeps its 4.4 %, and nothing at 2^22
+ * or above changes a byte. */
+#define MODEL2_PRESSURE_LOG 21
 #define RECALL_WAYS(m2) ((m2) ? 4 : 1)
 #define EXTRA_SETS (128 * 256)
 #define EXTRA_SETS_OF(m2) ((m2) ? EXTRA_SETS : 0)
@@ -1187,6 +1200,9 @@ typedef struct model {
      * buckets and a fifth arbiter. Read once per block; the per-bit path
      * has it constant. */
     int model2;
+    /* model2's pressure-gated parts (MODEL2_PRESSURE_LOG): the o8 and
+     * word3 slots re-purposed, and the fifth arbiter */
+    int slots_on, extra_on;
     size_t mix34_row_mask;
     size_t apm2_mask;
     /* The record period in bytes, or 0: when set, the record and field
@@ -1747,14 +1763,14 @@ static inline void hash_kinds(const model *m, const byte_view *v, int fast, uint
          * above) carry these instead; the set's mask still decides
          * whether the slot runs */
         uint64_t len = v->mlen < 15 ? v->mlen : 15;
-        if (m->on[H_WORD3]) {
+        if (m->on[H_WORD3] && m->slots_on) {
             hk[H_WORD3] = v->mlen > 0 ? mix64((uint64_t)v->mbyte | len << 8 | (c & 0xFF) << 12 | ((uint64_t)25 << 56))
                                       : mix64((c & 0xFF) | ((uint64_t)26 << 56));
         }
         if (m->on[H_O5]) {
             hk[H_O5] = mix64((v->classes & (((uint64_t)1 << 63) - 1)) | ((uint64_t)27 << 56));
         }
-        if (m->on[H_O8]) {
+        if (m->on[H_O8] && m->slots_on) {
             hk[H_O8] = mix64((c & 0xFF) | (uint64_t)v->followed1 << 8 | ((uint64_t)28 << 56));
         }
         if (m->on[H_SPARSE2]) {
@@ -2286,7 +2302,9 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
             m->pmix2 = m->squashed[d[1] + 2047];
             m->pmix3 = m->squashed[d[2] + 2047];
             m->pmix4 = m->squashed[d[3] + 2047];
-            m->pmixx = m->squashed[dot1_16_v3(m->w16_x + m->wsetx * stride, m->st, m->st16, LANES(0, max)) + 2047];
+            if (m->extra_on) {
+                m->pmixx = m->squashed[dot1_16_v3(m->w16_x + m->wsetx * stride, m->st, m->st16, LANES(0, max)) + 2047];
+            }
         } else
 #endif
         {
@@ -2294,7 +2312,9 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
             m->pmix2 = m->squashed[dot16_scalar(m->w16_2 + m->wset2 * stride, m->st, LANES(0, max)) + 2047];
             m->pmix3 = m->squashed[dot16_scalar(m->w16_3 + m->wset3 * stride, m->st, LANES(0, max)) + 2047];
             m->pmix4 = m->squashed[dot16_scalar(m->w16_4 + m->wset4 * stride, m->st, LANES(0, max)) + 2047];
-            m->pmixx = m->squashed[dot16_scalar(m->w16_x + m->wsetx * stride, m->st, LANES(0, max)) + 2047];
+            if (m->extra_on) {
+                m->pmixx = m->squashed[dot16_scalar(m->w16_x + m->wsetx * stride, m->st, LANES(0, max)) + 2047];
+            }
         }
     } else {
 #if ADAPT_X86_V3
@@ -2321,12 +2341,12 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     m->stf[1] = st[m->pmix2];
     m->stf[2] = st[m->pmix3];
     m->stf[3] = st[m->pmix4];
-    if (m2) {
+    if (m2 && m->extra_on) {
         m->stf[4] = st[m->pmixx];
     }
-    m->stf[FINAL_INPUTS_OF(m2) - 1] = 256;
+    m->stf[FINAL_INPUTS_ON(m, m2) - 1] = 256;
     m->wsetf = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (m->c0 & 255);
-    m->pfinal = m->squashed[dot(m->wfinal[m->wsetf].w, m->stf, FINAL_INPUTS_OF(m2), 0) + 2047];
+    m->pfinal = m->squashed[dot(m->wfinal[m->wsetf].w, m->stf, FINAL_INPUTS_ON(m, m2), 0) + 2047];
     /* secondary estimation keyed by the previous byte and the partial
      * byte, and a second stage keyed by an order-2 hash with the partial
      * byte, averaged; three parts of it to one of the arbiters' verdict */
@@ -2460,7 +2480,9 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
             train16_v3(w2, w2 + lanes, m->st16s, m->st, lanes, target - m->pmix2, m->mixer_rate);
             train16_v3(w3, w3 + lanes, m->st16s, m->st, lanes, target - m->pmix3, m->mixer_rate);
             train16_v3(w4, w4 + lanes, m->st16s, m->st, lanes, target - m->pmix4, m->mixer_rate);
-            train16_v3(wx, wx + lanes, m->st16s, m->st, lanes, target - m->pmixx, m->mixer_rate);
+            if (m->extra_on) {
+                train16_v3(wx, wx + lanes, m->st16s, m->st, lanes, target - m->pmixx, m->mixer_rate);
+            }
         } else
 #endif
         {
@@ -2468,7 +2490,9 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
             train16(w2, w2 + lanes, m->st, lanes, target - m->pmix2, m->mixer_rate);
             train16(w3, w3 + lanes, m->st, lanes, target - m->pmix3, m->mixer_rate);
             train16(w4, w4 + lanes, m->st, lanes, target - m->pmix4, m->mixer_rate);
-            train16(wx, wx + lanes, m->st, lanes, target - m->pmixx, m->mixer_rate);
+            if (m->extra_on) {
+                train16(wx, wx + lanes, m->st, lanes, target - m->pmixx, m->mixer_rate);
+            }
         }
     } else {
         int32_t *w = m->weights + m->wset * ARBITER_STRIDE(fast, max);
@@ -2483,7 +2507,7 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
         }
     }
     if (!fast) {
-        train(m->wfinal[m->wsetf].w, &m->wfinal[m->wsetf].n, m->stf, FINAL_INPUTS_OF(m2), target - m->pfinal, m->mixer_rate);
+        train(m->wfinal[m->wsetf].w, &m->wfinal[m->wsetf].n, m->stf, FINAL_INPUTS_ON(m, m2), target - m->pfinal, m->mixer_rate);
         /* secondary estimation: move both neighbours toward the outcome,
          * in both stages */
         g = (int32_t)(bit << 16) + (int32_t)(bit << APM_RATE) - (int32_t)bit * 2;
@@ -2717,6 +2741,8 @@ static inline model *model_new(adapt_sizes sizes) {
     m->compact = sizes.compact != 0;
     m->low_start = sizes.low_start != 0;
     m->model2 = sizes.model2 != 0;
+    m->slots_on = m->model2 && sizes.table_log >= MODEL2_PRESSURE_LOG;
+    m->extra_on = m->slots_on;
     m->mix34_row_mask = MIX34_ROW_MASK(m->compact);
     m->apm2_mask = APM2_CONTEXTS(m->max, m->compact) - 1;
     m->period = sizes.period;
@@ -2784,7 +2810,7 @@ static inline model *model_new(adapt_sizes sizes) {
     }
     /* the final arbiter starts as the mean of its verdicts, four or five */
     for (i = 0; i < FINAL_SETS; i++) {
-        size_t nf = (size_t)FINAL_INPUTS_OF(m->model2);
+        size_t nf = (size_t)FINAL_INPUTS_ON(m, m->model2);
         for (j = 0; j < nf - 1; j++) {
             m->wfinal[i].w[j] = (1 << 16) / (int32_t)(nf - 1);
         }

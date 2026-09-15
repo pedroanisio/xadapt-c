@@ -104,6 +104,38 @@ profile (−20 B), and the final blend at 1:1 or 1:7 (+1,072 B, +62 B).
 - The encoder's max vectors are `text-max2.adpt` and `abc-max2.adpt`;
   `text-max.adpt` and `abc-max.adpt` stay as decode fixtures of 21.
 
+**Amended the same day — the `DLV-3` gate.** `make corpus-floor` on the
+landed binary: under the default command all 24 rows byte-identical;
+under `--max --allocation context -6` nineteen rows smaller (every
+Silesia row: nci −8.4 %, xml −4.4 %, reymont −3.8 %, webster −2.0 %,
+samba −1.9 %, mozilla −1.5 %) and five Canterbury rows over their floors:
+kennedy.xls +3.7 %, grammar.lsp +3.0 %, xargs.1 +1.9 %, fields.c +1.5 %,
+alice29.txt +0.17 %. Ablated one change at a time on those rows (all at
+`-6`, bytes): the fifth arbiter is the small files' loss (fields.c 2,531
+→ 2,479 without it, grammar.lsp 1,162 → 1,125, xargs.1 1,625 → 1,589 —
+starting its final weight at zero does not help: 2,536), the order-1
+indirect context in o8's slot is kennedy.xls's (14,837 → 13,649 with o8
+kept), recall in word3's slot is alice29.txt's (36,746 → 36,614 with
+word3 kept); the class history in o5's slot and recall's next two bytes
+in sparse2's are worth keeping on every row (without them nci +1.1 %,
+xml +1.3 %). The mechanism was always table pressure — those three
+parts pay when the table is oversubscribed and a 150 KB or 1 MB input
+never oversubscribes it — and the header names a measure of it: the
+table's size, which for a named file follows its length (150 KB → 2^20,
+1 MB → 2^20, 5 MB → 2^21, 8 MiB → 2^22, enwik8 → 2^25). So the three run
+from 2^21 blocks (`MODEL2_PRESSURE_LOG`), the other two slots, the
+int16 arbiters and the four-way recall always. Thresholds 2^21 and 2^22
+measured on the ten rows: at 2^22 xml (a 2^21 table at `-6`) gives back
+0.2–0.5 %; at 2^21 every row is under its floor — kennedy.xls 13,481 B
+(−5.8 %), fields.c 2,466, grammar.lsp 1,119, xargs.1 1,584, alice29.txt
+36,631, sum 9,464, cp.html 6,296 — and no row at 2^22 or above changes
+a byte (the proxy stays 1,686,110 B; the enwik8 and enwik9 floors, at
+2^25 and 2^26, stand). The corpus floors under `-6` are lowered to the
+gated binary's bytes. No container of the ungated bit-7 model was
+published or pushed: the model was amended within the day it landed,
+before any release, and the vectors `text-max2.adpt`/`abc-max2.adpt`
+(49 KB and 40 B inputs, below the line) were regenerated.
+
 **Status.** Landed 2026-09-15 on branch `ratio-speed` with the model,
 the sizing bit, decoder, encoder, C and CLI tests, the man page, README
 and CHANGELOG; the SBOM regenerated.

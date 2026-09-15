@@ -30,8 +30,13 @@ The binary reports `0.12.0`; the tag is pending.
   Versions 21, 24, 53, 54, 56 and 57 are read and no longer written; every
   file decodes as written. The cast intrinsic that leaves a vector's upper
   half undefined is not used: gcc and clang builds write the same bytes.
-  The floors re-locked on this binary on a quiet host, size and CPU
-  seconds both tighter on every row: enwik8-8MiB 1,686,110 B in 12.2 s,
+  The three parts that pay under table pressure — o8's and word3's
+  slots, the fifth arbiter — run from a table of 2^21 blocks, the size
+  the header names, after the mixed-corpus gate found them costing five
+  small Canterbury rows at `-6` (kennedy.xls +3.7 %); gated, every row is
+  under its floor (kennedy.xls −5.8 %) and nothing at 2^22 or above
+  changes a byte. The floors re-locked on this binary on a quiet host,
+  size and CPU seconds both tighter on every row: enwik8-8MiB 1,686,110 B in 12.2 s,
   enwik8-16MiB 3,266,940 B in 22.2 s, enwik8 17,978,253 B in 118.2 s,
   enwik9 147,896,517 B in 1,159.2 s, every round trip verified.
 
