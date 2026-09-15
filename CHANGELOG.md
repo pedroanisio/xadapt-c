@@ -67,6 +67,13 @@ The binary reports `0.12.0`; the tag is pending.
   `ADAPT_ISA=baseline` in the environment selects the portable pair, which
   the CLI tests use to hold the two to the same bytes.
 
+### Changed
+- The recall index grows to 2^22 entries from whatever budget the table and
+  the window leave once both have all they can use (its cap was 2^20):
+  enwik8 under `--max --allocation context` at the default budget,
+  18,564,510 to 18,529,513 bytes; at 128 MiB nothing is left and the
+  container is unchanged. The size floors are re-locked in `LOCKS.md`.
+
 ### Added
 - Segments on threads: `encode --threads <n>` codes a segmented file's
   segments at once, on as many of the `n` threads as the memory budget
