@@ -121,7 +121,9 @@ class AllocationTest(CodecTest):
         explicit = self.run_codec("encode", self.source, "-o", "-", "--allocation", "window")
         self.assertEqual(default.returncode, 0, default.stderr)
         self.assertEqual(explicit.returncode, 0, explicit.stderr)
-        self.assertEqual(default.stdout, explicit.stdout)
+        # the named input's metadata carries its access time, which the
+        # first run's read may move; the streams are what the policy decides
+        self.assertEqual(payload_stream(default.stdout), payload_stream(explicit.stdout))
 
 
 class AdaptiveTest(CodecTest):
@@ -824,7 +826,7 @@ class PresetTest(unittest.TestCase):
         for out, flags in ((plain, ()), (nine, ("-9",)), (small, ("-9", "--max-memory", LOW_MEMORY))):
             r = self.run_codec("encode", self.source, "-o", out, "--no-verify", *flags)
             self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(plain.read_bytes(), nine.read_bytes())
+        self.assertEqual(payload_stream(plain.read_bytes()), payload_stream(nine.read_bytes()))
         self.assertLess(self.table_log(small), self.table_log(nine))
         self.assertGreater(small.stat().st_size, nine.stat().st_size)
 
