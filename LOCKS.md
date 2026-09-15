@@ -64,8 +64,8 @@ other agents' jobs, every file decoded byte for byte):
 
 | Command | Corpus | Bytes |
 |---|---|---:|
-| `encode` (default) | Silesia + Canterbury, 214,749,364 B | 40,478,327 B (18.85 %) |
-| `encode --max --allocation context -6` | the same | 40,330,336 B (18.78 %); 40,311,762 B once the text bit below landed (dickens −0.17 %, webster −0.26 %, the rest identical) |
+| `encode` (default) | Silesia + Canterbury, 214,749,364 B | 40,478,327 B (18.85 %) at 15d0cbe; 40,426,753 B once PR #2 (the recall index grown) merged |
+| `encode --max --allocation context -6` | the same | 40,330,336 B (18.78 %); 40,311,762 B once the text bit below landed (dickens −0.17 %, webster −0.26 %, the rest identical); 40,309,136 B on the merged binary at 87d50ec, which the floor files lock |
 
 **Consequences.**
 - `make corpus-floor` joins `make gate` and `make ratio-floor` as the
