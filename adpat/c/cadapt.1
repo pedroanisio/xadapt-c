@@ -17,6 +17,8 @@ cadapt \- compress and decompress files and folders with the adapt context-mixin
 .RB [ \-0 " .. " \-11 ]
 .RB [ \-\-allocation
 .BR window | context ]
+.RB [ \-\-contexts
+.BR auto | lean ]
 .RB [ \-\-threads
 .IR n ]
 .RB [ \-\-segment\-bytes
@@ -306,6 +308,19 @@ Either can win depending on the input; on enwik8 at
 writes 18,207,203 bytes and
 .B window
 18,393,652.
+.TP
+.BR \-\-contexts " " auto | lean
+Which context set the model runs:
+.B auto
+(the default) chooses it by coding the first block under each candidate;
+.B lean
+takes the lean set outright — word and field left out and, under
+.BR \-\-max ,
+o8, word3 and wordc too (the sizing byte's lean bit, written with the
+full side tables as well since this option; a reader older than it
+refuses such a file). Time for bytes on text: the measurements are in
+LOCKS.md. Not with
+.BR \-\-fast .
 .TP
 Decoding memory
 .B decode

@@ -44,6 +44,18 @@ The binary reports `0.12.0`; the tag is pending.
   verified bytes reach the output callback. Immutable historical fixtures
   cover memory, streaming and threaded APIs, text, metadata and segments.
 
+### Added
+
+- `--contexts auto|lean` on encode (`adapt_sizes.contexts`,
+  `ADAPT_CONTEXTS_LEAN`): `lean` takes the lean context set outright —
+  word and field left out and, under `--max`, o8, word3 and wordc (the
+  sizing byte's lean bit, which the format now allows with the full side
+  tables; a reader older than this release refuses such a file) —
+  instead of choosing the set from the first block, trading bytes for
+  time on text; `auto`, the default, writes the same bytes as before.
+  `cadapt info` prints "lean contexts" for it. Not with `--fast`. The
+  measurements on enwik8 and enwik9 are in LOCKS.md.
+
 ### Performance
 
 - The class-history width is proved on the whole first block when the

@@ -100,6 +100,7 @@ strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
 cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -11]
               [--threads <n>] [--segment-bytes <bytes>]
               [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation window|context]
+              [--contexts auto|lean]
 cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
 cadapt info   <file>
 cadapt --version
@@ -161,6 +162,13 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   measurements behind each rule are in the LOCKS.md entries that made it.
   Either allocation can produce a larger file; choose from measured complete
   containers. More of the allowed memory can be used by the context policy.
+- `--contexts lean` takes the lean context set outright instead of choosing
+  the set from the first block: word and field are left out and, under
+  `--max`, o8, word3 and wordc too (the lean bit, now written with the full
+  side tables as well — a reader older than this option refuses such a
+  file). It buys time for bytes on text: the measurements are in the
+  LOCKS.md entry that made it. `--contexts auto`, the default, chooses the
+  set as before and writes the same bytes. Not with `--fast`.
 - `--adaptive rates|sparse|retained` selects experimental causal predictors:
   fast/slow calibration, then sparse byte contexts, then retained calibration
   states. These compose with `--max`. Each adds 2,837,272 bytes of model state on the tested platform,

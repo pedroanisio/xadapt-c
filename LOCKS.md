@@ -2,6 +2,57 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-16 — `--contexts lean`: the lean context set outright, time for bytes on text
+
+**Decision.** A new encode option, `--contexts auto|lean`
+(`adapt_sizes.contexts`, `ADAPT_CONTEXTS_LEAN`). `auto`, the default,
+chooses the context set from the first block as before and writes the
+same bytes. `lean` takes the lean set outright: set 3 (word and field
+left out) and, under `--max`, the lean bit (o8, word3 and wordc — under
+the second max model the order-1 indirect and recall-byte slots) — five
+of the twenty kinds. For that the format now allows the sizing byte's
+lean bit with the full side tables, a combination no file ever carried;
+a reader older than this release refuses such a file, every file
+written before decodes as before. `cadapt info` prints "lean contexts".
+Not with `--fast`, whose sets are its own menu.
+
+**Measured** with `--max --allocation context` at the default tier on
+the reference host, quiet, each round trip verified byte for byte
+(encode alone with `--no-verify`, CPU seconds; enwik8 twice each,
+enwik9 once; instructions by `perf stat`):
+
+| | auto | lean | Δ |
+|---|---|---|---|
+| enwik8 bytes | 17,883,525 | 17,902,645 | +0.107 % |
+| enwik8 encode | 119.5 / 120.7 s | 116.2 / 116.6 s | −3.1 % (instructions −7.6 %) |
+| enwik8 decode | 133.8 / 133.0 s | 126.0 / 127.2 s | −5.1 % |
+| enwik9 bytes | 146,899,997 | **146,797,785** | **−0.070 %** |
+| enwik9 encode | 1,181.2 s | 1,147.1 s | −2.9 % (instructions −7.0 %) |
+| enwik9 decode | 1,340.9 s | 1,258.8 s | −6.1 % |
+
+The five kinds cost more time than they earn at every size and earn
+bytes only below about 30 bytes per block: on enwik9 at `-9` (30 bytes
+per block) the lean set is smaller as well as faster, on enwik8 (3 per
+block) 0.1 % larger. The time saved is less than the instructions saved
+because the per-bit path is bound by the table's cache misses and the
+arbiters' lanes, which are fixed at 72 whatever the set: dropping kinds
+removes their claims and state reads, not the dots. On the 8 MiB proxy,
+1,680,015 → 1,681,725 B (+0.10 %) at −12.5 % instructions on encode and
+−7.8 % on decode; the other sets the format can name were worse trades
+(set 4 with the lean bit +0.20 %, the eight-kind set of the previous
+entry +0.69 % at −17 %).
+
+**Consequences.**
+- No floor moves: the default command's bytes are unchanged, and the
+  option is the caller's choice. The corpus gate holds under both
+  commands on this binary.
+- Observation for the default: at 30 bytes per block and beyond the
+  lean set is the better set on text; a pressure rule in `choose_model`
+  (bytes per block from the header's length and table) would take it by
+  itself on inputs the size of enwik9 — measured here, not landed.
+
+**Status.** Landed 2026-09-16 on branch `ratio-speed`.
+
 ## 2026-09-15 — The class-history width proved on the first block, the recall index's cap under --max, and the -7 objective measured
 
 **Decision.** Two encoder policies, no format change (every sizing bit
