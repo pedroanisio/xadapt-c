@@ -108,7 +108,8 @@ static void test_context_allocation(void) {
     CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 24 && s.window_log == 27);
     CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
-    CHECK(s.table_log == 25 && s.window_log == 26 && s.match_log == 22 && s.max);
+    /* the recall index takes a doubling from the slack the tier leaves (its cap is the format's 2^24) */
+    CHECK(s.table_log == 25 && s.window_log == 26 && s.match_log == 23 && s.max);
     CHECK(adapt_encode_memory_bound(s) <= ADAPT_DEFAULT_MAX_MEMORY);
     saved = s;
     CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, 1, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_ERROR_MEMORY_LIMIT);
@@ -255,7 +256,8 @@ static void test_sizes(void) {
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 25 && s.match_log == 20 && s.window_log == 27);
     /* the recall index takes what the table and the window leave once the
-     * window has all it can use: nothing at 64 MiB, its spare cap at 256 */
+     * window has all it can use: nothing at 64 MiB, its spare cap at 256
+     * (the normal profile's cap stays 2^22; the max profile's is the format's) */
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, (uint64_t)64 << 20, &s, &error), ADAPT_OK);
     CHECK(s.table_log == 20 && s.match_log == 20 && s.window_log == 24);
     CHECK_STATUS(adapt_sizes_for_input(1, 100000000, (uint64_t)256 << 20, &s, &error), ADAPT_OK);
@@ -419,6 +421,68 @@ static void test_roundtrips(void) {
         CHECK(file != NULL && (file[5] >> 5) == 0);
         adapt_free(file);
     }
+    free(buf);
+}
+
+/* The class-history width's proof on the first block: an input long
+ * enough for the proof (a table of 2^21 blocks, 4 MiB and up) whose first
+ * 32 KiB cannot rank the widths — random letters, one class — and whose
+ * rest a class history of eight bytes predicts (five letters, two digits,
+ * a space, in an order the letters alone do not give) takes the eight-byte
+ * width from the block; the same head with letters and digits in random
+ * order after it takes none, and a short input keeps the sample's
+ * verdict. */
+static void test_class_width_proof(void) {
+    size_t n = ((size_t)4 << 20) + 4096, head = (size_t)1 << 15, i, k;
+    uint8_t *buf = malloc(n);
+    uint8_t *file = NULL;
+    size_t file_len = 0;
+    adapt_error error;
+    uint64_t x = 0x9E3779B97F4A7C15ull;
+    for (i = 0; i < head; i++) {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        buf[i] = (uint8_t)('a' + (x >> 24) % 26);
+    }
+    for (k = head; k + 8 <= n; k += 8) {
+        for (i = 0; i < 5; i++) {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            buf[k + i] = (uint8_t)('a' + (x >> 24) % 26);
+        }
+        for (i = 5; i < 7; i++) {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            buf[k + i] = (uint8_t)('0' + (x >> 24) % 10);
+        }
+        buf[k + 7] = ' ';
+    }
+    for (; k < n; k++) {
+        buf[k] = 'a';
+    }
+    CHECK_STATUS(adapt_encode(buf, n, adapt_default_limits(), &file, &file_len, &error), ADAPT_OK);
+    CHECK(file != NULL && (file[5] >> 5) == 1 && (file[5] & 31) >= 21);
+    adapt_free(file);
+    file = NULL;
+    /* the head alone: shorter than the proof's threshold, the sample decides */
+    CHECK_STATUS(adapt_encode(buf, 3 * head, adapt_default_limits(), &file, &file_len, &error), ADAPT_OK);
+    CHECK(file != NULL && (file[5] >> 5) == 0);
+    adapt_free(file);
+    file = NULL;
+    /* letters and digits in random order after the head: a class history
+     * of that is noise, and the block prefers none as the sample did */
+    for (i = head; i < n; i++) {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        buf[i] = (uint8_t)((x >> 20) & 1 ? 'a' + (x >> 24) % 26 : '0' + (x >> 24) % 10);
+    }
+    CHECK_STATUS(adapt_encode(buf, n, adapt_default_limits(), &file, &file_len, &error), ADAPT_OK);
+    CHECK(file != NULL && (file[5] >> 5) == 0);
+    adapt_free(file);
     free(buf);
 }
 
@@ -1953,6 +2017,7 @@ int main(int argc, char **argv) {
     SHARD(test_sizes());
     SHARD(test_context_allocation());
     SHARD(test_compact_side_tables());
+    SHARD(test_class_width_proof());
     SHARD(test_fast_fits_where_normal_fits());
     SHARD(test_roundtrips());
     SHARD(test_streams());

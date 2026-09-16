@@ -2751,6 +2751,16 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
         /* the max profile's kinds run only under it */
         uint32_t dropped = set | (sizes.class_code == 0 ? (1u << H_CLASS) : 0) | (m->max ? 0 : MAX_KINDS) |
                            (sizes.lean ? LEAN_DROPPED : 0);
+#ifdef ADAPT_SIZES_OVERRIDE
+        {
+            /* development builds only (see cadapt.c): ADAPT_DROP_MASK leaves
+             * kinds out, a bit per kind in H_* order, for ablation under a
+             * named pressure; the header still names the set, so such a
+             * file decodes only under the same mask */
+            const char *o = getenv("ADAPT_DROP_MASK");
+            if (o != NULL) dropped |= (uint32_t)strtoul(o, NULL, 0);
+        }
+#endif
         m->hashed = 0;
         for (i = 0; i < HASHED; i++) {
             m->on[i] = (dropped >> i & 1) == 0;

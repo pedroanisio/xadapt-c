@@ -3731,6 +3731,28 @@ static int encode_command(int argc, char **argv) {
     if (has_flag(&a, "--max") && adaptive == 0) {
         sizes = adapt_sizes_max(sizes);
     }
+#ifdef ADAPT_SIZES_OVERRIDE
+    /* A development build only: ADAPT_SIZES=table:window:recall:compact:lean
+     * names the model outright, past the tier — a small input coded under
+     * the pressure a large one meets at a small tier. */
+    {
+        const char *o = getenv("ADAPT_SIZES");
+        unsigned t, w, r, c, l;
+        if (o != NULL && sscanf(o, "%u:%u:%u:%u:%u", &t, &w, &r, &c, &l) == 5) {
+            sizes.table_log = (uint8_t)t;
+            sizes.table_frac = 0;
+            sizes.window_log = (uint8_t)w;
+            sizes.match_log = (uint8_t)r;
+            sizes.compact = (uint8_t)c;
+            sizes.lean = (uint8_t)l;
+            if (!adapt_sizes_valid(sizes)) {
+                fprintf(stderr, "error: ADAPT_SIZES names invalid sizes\n");
+                return EXIT_OTHER;
+            }
+            max_memory = adapt_encode_memory_bound(sizes) + ((uint64_t)64 << 20);
+        }
+    }
+#endif
     sizes.archive = (uint8_t)is_folder;
     sizes.bmp = (uint8_t)bmp_transform_requested;
     /* the text transform: the policy's choice by the length, unless asked

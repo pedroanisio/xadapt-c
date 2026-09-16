@@ -44,6 +44,13 @@
 /* Coded bytes a sample must produce before its ranking of the widths
  * counts. */
 #define CLASS_EVIDENCE 2048
+/* A class-history width the sample puts within this fraction of none,
+ * either way, is proved on the whole first block instead — on an input
+ * the sizer gave a table of CLASS_PROOF_TABLE_LOG blocks or more (4 MiB
+ * and up at the tiers that hold it), where the proof's two block codings
+ * are a small part of the encode and the width has the length to pay. */
+#define CLASS_BAND 256
+#define CLASS_PROOF_TABLE_LOG 21
 /* Order-0 entropy, in 1/256 bits per byte, above which a block may be
  * stored without modeling if it has no repeated sequences: 7.94 bits. */
 #define SKIP_ENTROPY_256 2033
@@ -57,7 +64,13 @@
 #define SCAN 8
 /* The recall index's cap when the budget has room left after the table
  * and the window: 2^22 entries, 16 MiB; its usual cap is 2^20. */
-#define RECALL_LOG_SPARE 22
+/* The recall index grows past its usual cap to the format's limit when the
+ * budget has room: measured on the first 32 MiB of enwik8 at the default
+ * tier, 2^22 -> 2^24 entries 6,297,375 -> 6,287,528 bytes (-0.16 %) for
+ * 48 MiB; the sizer takes only what the tier holds (enwik8 at -9: 2^23). */
+#define RECALL_LOG_SPARE 24
+/* the normal and fast profiles keep their cap: their containers are the locked floors */
+#define RECALL_LOG_SPARE_NORMAL 22
 /* The most bytes a block's coded form can take: at most four settled bytes
  * per bit, eight bits for the byte that crosses the line, four final. */
 #define CODED_SLACK 36
@@ -278,7 +291,7 @@ static adapt_status sizes_for_input_profile(int length_known, uint64_t length, u
      * without gives the index nothing the table or the window wanted. */
     if (length_known) {
         uint8_t target = adapt_table_log_for(length);
-        uint8_t recall = clamp_u8(bits(length > 0 ? length - 1 : 0), MATCH_LOG_MIN, RECALL_LOG_SPARE);
+        uint8_t recall = clamp_u8(bits(length > 0 ? length - 1 : 0), MATCH_LOG_MIN, max ? RECALL_LOG_SPARE : RECALL_LOG_SPARE_NORMAL);
         while (s.window_log == cap && s.table_log < target) {
             adapt_sizes larger = s;
             larger.table_log = s.table_log + 1;
@@ -436,7 +449,7 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
     }
     /* the recall index last, from what the table and the window left */
     if (length_known) {
-        uint8_t recall = clamp_u8(bits(length > 0 ? length - 1 : 0), MATCH_LOG_MIN, RECALL_LOG_SPARE);
+        uint8_t recall = clamp_u8(bits(length > 0 ? length - 1 : 0), MATCH_LOG_MIN, s.max ? RECALL_LOG_SPARE : RECALL_LOG_SPARE_NORMAL);
         while (s.match_log < recall) {
             next = s;
             next.match_log++;
@@ -750,18 +763,27 @@ static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_cod
  * codes, from the first block: the crate's `choose_model`. The width first,
  * from the block's first CLASS_SAMPLE bytes, each width on the full set, a
  * tie to the narrower; a first sample too compressible to rank anything
- * declines the class context and keeps every other. Then the context sets
- * on the same sample, family by family — the text family (sets 1, 2, 6)
- * drops record and field first, the binary family (3, 4, 5, 7) word and
- * field first, and a family whose head cannot beat the full set by
- * SET_MARGIN of the sample is not pursued; a block no longer than two
- * samples tries the two heads only. The set that codes the sample smallest
- * wins, ties to fewer contexts then the lower code; a lean choice on a
- * long block is proved on the whole block against the full set and
- * reverts unless it wins there by PROOF_MARGIN. The margins are what a
- * sample can be trusted for: measured on 16 MiB of enwik8, a lean set that
- * won its 32 KiB sample by a hair and its 256 KiB block by less than a
- * thousandth lost the whole file by seven. */
+ * declines the class context and keeps every other. A class history earns
+ * its keep slowly — its eight-byte key spans 2^24 histories, so the sample
+ * ranks it within a thousandth of none whichever way the file goes: on
+ * the first 8 MiB of enwik8 the sample put eight bytes 14 in 12,037 ahead
+ * of none, the first block 282 in 82,357, the file 0.34 % — so on a long
+ * input (CLASS_PROOF_TABLE_LOG) whose sample puts a width within
+ * CLASS_BAND of none, that width — the sample's favorite, or the narrower
+ * of the two when it favored none — is proved against none on the whole
+ * block and taken only where it codes the block smaller; a sample that
+ * separates them by more decides, as before. Then the context sets on the sample,
+ * family by family — the text family (sets 1, 2, 6) drops record and
+ * field first, the binary family (3, 4, 5, 7) word and field first, and a
+ * family whose head cannot beat the full set by SET_MARGIN of the sample
+ * is not pursued; a block no longer than two samples tries the two heads
+ * only. The set that codes the sample smallest wins, ties to fewer
+ * contexts then the lower code; a lean choice on a long block is proved
+ * on the whole block against the full set (the width's proof already
+ * coded it) and reverts unless it wins there by PROOF_MARGIN. The margins
+ * are what a sample can be trusted for: measured on 16 MiB of enwik8, a
+ * lean set that won its 32 KiB sample by a hair and its 256 KiB block by
+ * less than a thousandth lost the whole file by seven. */
 static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
                                  uint8_t *class_out, uint8_t *set_out, uint16_t *period_out, adapt_error *error) {
     size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
@@ -770,6 +792,9 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     *period_out = sizes.period;
     size_t coded_len[3];
     size_t none, best_size, full;
+    /* the whole block under the chosen width and the full set, once proved */
+    size_t whole = 0;
+    int have_whole = 0;
     uint8_t code, class_code, set_code;
     int deep = n > 2 * head;
     /* choice: smallest sample, then fewest contexts, then lower code */
@@ -797,6 +822,34 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
             class_code = code;
         }
     }
+    /* the width's proof: the whole block without a class history and with
+     * the sample's favorite, the winner's coding kept for the set proof */
+    if (deep && sizes.table_log >= CLASS_PROOF_TABLE_LOG) {
+        uint8_t candidate = class_code != 0 ? class_code : (coded_len[1] <= coded_len[2] ? 1 : 2);
+        size_t favorite = coded_len[candidate], band = none / CLASS_BAND;
+        if (favorite <= none + band && favorite + band >= none) {
+            size_t without, with;
+            status = trial(sizes, 0, 0, block, n, coded, coded_cap, &without, error);
+            if (status != ADAPT_OK) {
+                return status;
+            }
+            status = trial(sizes, candidate, 0, block, n, coded, coded_cap, &with, error);
+            if (status != ADAPT_OK) {
+                return status;
+            }
+            class_code = with < without ? candidate : 0;
+            whole = with < without ? with : without;
+            have_whole = 1;
+        }
+    }
+#ifdef ADAPT_SIZES_OVERRIDE
+    {
+        /* development builds: ADAPT_CLASS_CODE pins the width, so a model
+         * experiment is not confounded by the sample's verdict moving */
+        const char *o = getenv("ADAPT_CLASS_CODE");
+        if (o != NULL && o[0] >= '0' && o[0] <= '2') class_code = (uint8_t)(o[0] - '0');
+    }
+#endif
     full = coded_len[class_code];
     /* The fast profile's sets all cost the decoder the same, so every one
      * is tried and the smallest taken, on the terms below: it must beat
@@ -818,14 +871,16 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         }
         set_code = choice_code;
         if (set_code != 0 && deep) {
-            size_t lean, whole;
+            size_t lean;
             status = trial(sizes, class_code, set_code, block, n, coded, coded_cap, &lean, error);
             if (status != ADAPT_OK) {
                 return status;
             }
-            status = trial(sizes, class_code, 0, block, n, coded, coded_cap, &whole, error);
-            if (status != ADAPT_OK) {
-                return status;
+            if (!have_whole) {
+                status = trial(sizes, class_code, 0, block, n, coded, coded_cap, &whole, error);
+                if (status != ADAPT_OK) {
+                    return status;
+                }
             }
             if (lean > PROOF_MARGIN(whole)) {
                 set_code = 0;
@@ -876,14 +931,16 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     }
     set_code = choice_code;
     if (set_code != 0 && deep) {
-        size_t lean, whole;
+        size_t lean;
         status = trial(sizes, class_code, set_code, block, n, coded, coded_cap, &lean, error);
         if (status != ADAPT_OK) {
             return status;
         }
-        status = trial(sizes, class_code, 0, block, n, coded, coded_cap, &whole, error);
-        if (status != ADAPT_OK) {
-            return status;
+        if (!have_whole) {
+            status = trial(sizes, class_code, 0, block, n, coded, coded_cap, &whole, error);
+            if (status != ADAPT_OK) {
+                return status;
+            }
         }
         if (lean > PROOF_MARGIN(whole)) {
             set_code = 0;
