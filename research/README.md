@@ -17,7 +17,7 @@ numbers that stand are in [tools/ratio_floor.json](../tools/ratio_floor.json).
 | [scripts-measurement.md](scripts-measurement.md) | 2026-09-14 | The six per-script corpus rows (Cyrillic, CJK, diacritics) at that day's binary |
 | [baseline-2026-09-14.md](baseline-2026-09-14.md) | 2026-09-14 | The measurements of 2026-09-14 afternoon: 18,564,510 bytes on enwik8 with `--allocation context`, since improved |
 | [ltcb-tables.md](ltcb-tables.md) | 2026-09-14, snapshot of 2026-09-15 | The Large Text Compression Benchmark tables as CSV — the main table of the day cadapt 0.12.0 was listed (rank 30 of 226), transcribed by `tools/ltcb/transcribe_ltcb_table.py`; `make ltcb` builds the charts |
-| [speed-3x-experiments-2026-09-16.md](speed-3x-experiments-2026-09-16.md) | 2026-09-16 | What `kanzi`, `mcm` and `zmix` are worth for a threefold speedup at the locked ratio: the two front-end bypasses priced out on text by [bench/redundancy_probe.c](../bench/redundancy_probe.c), the model restart priced at about 105 KB, and eighteen independent experiments |
+| [speed-3x-experiments-2026-09-16.md](speed-3x-experiments-2026-09-16.md) | 2026-09-16 | What `kanzi`, `mcm` and `zmix` are worth for a threefold speedup at the locked ratio: five experiments run — four refuted, one paying — and thirteen more ranked; the context-slot price tables in [slot-price.json](slot-price.json) from [bench/slot_price.py](../bench/slot_price.py), and the front-end bypasses priced out on text by [bench/redundancy_probe.c](../bench/redundancy_probe.c) |
 
 The CSV and JSON files beside the notes are their data. The renderings
 `make ltcb` writes here are not tracked.
