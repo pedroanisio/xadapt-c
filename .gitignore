@@ -24,3 +24,5 @@ docs/doc-quarantine/quarantine-manifest.json
 docs/doc-quarantine/quarantine-summaries.md
 # release assets built by tools/ltcb_release.sh
 dist/
+_study/
+of.txt

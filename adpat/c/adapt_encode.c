@@ -1936,23 +1936,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     header[1] = 'D';
     header[2] = 'P';
     header[3] = 'T';
-    header[4] = sizes.adaptive ? (uint8_t)((sizes.max ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + sizes.adaptive - 1) :
-                (sizes.fast ? ADAPT_FAST_VERSION
-                            : (sizes.max ? (sizes.model2 ? ADAPT_MAX_PRESSURE_VERSION : sizes.table_frac || sizes.low_start ? ADAPT_MAX_SIZED_VERSION
-                                            : sizes.lean     ? ADAPT_MAX_LEAN_VERSION
-                                            : sizes.compact  ? ADAPT_MAX_COMPACT_VERSION
-                                                             : ADAPT_MAX_VERSION)
-                                         : ADAPT_FORMAT_VERSION));
-    if (sizes.bmp) header[4] = (uint8_t)((sizes.max ? ADAPT_MAX_BMP_VERSION : ADAPT_BMP_VERSION) + sizes.adaptive);
-    if (text && header[4] != ADAPT_MAX_SIZED_VERSION && header[4] != ADAPT_MAX_PRESSURE_VERSION) {
-        /* the text versions, in the order of the models they front; a
-         * sized model carries the transform in its sizing byte instead */
-        header[4] = (uint8_t)(sizes.fast ? ADAPT_TEXT_FAST_VERSION
-                              : !sizes.max ? ADAPT_TEXT_VERSION
-                              : sizes.lean ? ADAPT_TEXT_MAX_LEAN_VERSION
-                              : sizes.compact ? ADAPT_TEXT_MAX_COMPACT_VERSION
-                                              : ADAPT_TEXT_MAX_VERSION);
-    }
+    header[4] = encode_header_version(sizes);
     header[5] = (uint8_t)(sizes.table_log | sizes.class_code << 5 | (sizes.archive ? ADAPT_ARCHIVE_FLAG : 0));
     header[6] = (uint8_t)(sizes.match_log | sizes.set_code << 5);
     header[7] = (uint8_t)(sizes.window_log | (sizes.period != 0 ? ADAPT_PERIOD_FLAG : 0) |

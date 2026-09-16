@@ -665,13 +665,11 @@ static int other_error(const char *path, const char *message) {
  * --------------------------------------------------------------------- */
 
 typedef struct args {
-    const char *positional[4];
+    const char *positional;
     int positionals;
-    const char *flags[8];
-    int nflags;
-    const char *names[8];
-    const char *values[8];
-    int nvalues;
+    int argc;
+    char **argv;
+    const char *const *with_value;
 } args;
 
 static int takes_value(const char *arg, const char *const *with_value) {
@@ -687,37 +685,44 @@ static int takes_value(const char *arg, const char *const *with_value) {
 static int parse_args(args *a, int argc, char **argv, const char *const *with_value) {
     int i;
     memset(a, 0, sizeof(*a));
+    a->argc = argc;
+    a->argv = argv;
+    a->with_value = with_value;
     for (i = 0; i < argc; i++) {
         const char *arg = argv[i];
         if (strcmp(arg, "-") == 0 || arg[0] != '-') {
-            if (a->positionals < 4) {
-                a->positional[a->positionals] = arg;
-            }
+            a->positional = arg;
             a->positionals++;
         } else if (takes_value(arg, with_value)) {
             if (i + 1 >= argc) {
                 return usage_error("%s needs a value", arg);
             }
-            if (a->nvalues < 8) {
-                a->names[a->nvalues] = arg;
-                a->values[a->nvalues] = argv[i + 1];
-                a->nvalues++;
-            }
             i++;
-        } else {
-            if (a->nflags < 8) {
-                a->flags[a->nflags] = arg;
-            }
-            a->nflags++;
         }
     }
     return 0;
 }
 
+/* Iterate the borrowed argument list after parse_args succeeds. Option
+ * values are consumed with their names, even when they look like flags;
+ * no fixed-size option array can silently discard a caller's limits. */
+static const char *next_option(const args *a, int *at, const char **value) {
+    while (*at < a->argc) {
+        const char *name = a->argv[(*at)++];
+        if (name[0] != '-' || strcmp(name, "-") == 0) {
+            continue;
+        }
+        *value = takes_value(name, a->with_value) ? a->argv[(*at)++] : NULL;
+        return name;
+    }
+    return NULL;
+}
+
 static int has_flag(const args *a, const char *name) {
-    int i;
-    for (i = 0; i < a->nflags && i < 8; i++) {
-        if (strcmp(a->flags[i], name) == 0) {
+    int at = 0;
+    const char *option, *value;
+    while ((option = next_option(a, &at, &value)) != NULL) {
+        if (value == NULL && strcmp(option, name) == 0) {
             return 1;
         }
     }
@@ -726,13 +731,14 @@ static int has_flag(const args *a, const char *name) {
 
 /* The last value given for `name`, or NULL. */
 static const char *value_of(const args *a, const char *name) {
-    int i;
-    for (i = a->nvalues; i-- > 0;) {
-        if (strcmp(a->names[i], name) == 0) {
-            return a->values[i];
+    int at = 0;
+    const char *option, *value, *last = NULL;
+    while ((option = next_option(a, &at, &value)) != NULL) {
+        if (value != NULL && strcmp(option, name) == 0) {
+            last = value;
         }
     }
-    return NULL;
+    return last;
 }
 
 /* The encode presets -0 to -9: xz's compression-side memory, in MiB, at the
@@ -749,10 +755,14 @@ static const char *const PRESET_FLAGS[PRESETS] = {"-0", "-1", "-2", "-3", "-4", 
  * preset flag is present. */
 static uint64_t preset_budget(const args *a) {
     uint64_t budget = 0;
-    int i, p;
-    for (i = 0; i < a->nflags && i < 8; i++) {
+    int at = 0, p;
+    const char *option, *value;
+    while ((option = next_option(a, &at, &value)) != NULL) {
+        if (value != NULL) {
+            continue;
+        }
         for (p = 0; p < PRESETS; p++) {
-            if (strcmp(a->flags[i], PRESET_FLAGS[p]) == 0) {
+            if (strcmp(option, PRESET_FLAGS[p]) == 0) {
                 budget = PRESET_MIB[p] << 20;
             }
         }
@@ -773,10 +783,11 @@ static uint64_t preset_budget(const args *a) {
 }
 
 static int reject_unknown(const args *a, const char *const *known) {
-    int i;
-    for (i = 0; i < a->nflags && i < 8; i++) {
-        if (!takes_value(a->flags[i], known)) {
-            return usage_error("unknown option %s", a->flags[i]);
+    int at = 0;
+    const char *option, *value;
+    while ((option = next_option(a, &at, &value)) != NULL) {
+        if (value == NULL && !takes_value(option, known)) {
+            return usage_error("unknown option %s", option);
         }
     }
     return 0;
@@ -3068,296 +3079,293 @@ static int peek_header(const char *input, stream *in, replay *r, adapt_sizes *si
     return 0;
 }
 
-static int decode_command(int argc, char **argv) {
-    static const char *const with_value[] = {"-o", "--max-output", "--max-memory", "--threads", NULL};
-    static const char *const known[] = {"--force", NULL};
-    args a;
-    const char *input, *o, *text;
-    char *output = NULL;
-    int force, rc;
-    adapt_limits limits = adapt_default_limits();
-    stream in = {NULL, 0, 0}, out = {NULL, 0, 0};
-    staged stage = {0};
-    adapt_stats stats;
-    /* FMT-6: the container alone decodes. Its header names the model, and
-     * the model is allocated as named; --max-memory and --max-output below
-     * are the only caps that can refuse a valid container, and neither
-     * applies unless given: the library's default limits are an API's
-     * conservative ones, not the command line's. The format bounds what a
-     * header can name (the largest tables and window, about 1.2 GiB). */
-    limits.max_memory = UINT64_MAX;
-    limits.max_output = UINT64_MAX;
-    adapt_error error;
-    adapt_status status;
+/* Command-owned resources. The output stream borrows the staged file;
+ * only the stage closes it. Standard input/output remain caller-owned. */
+typedef struct command_io {
+    const char *input;
+    char *output;
+    stream in, out;
+    staged stage;
+    int directory_output;
+} command_io;
+
+static void command_close_input(command_io *io) {
+    if (io->in.file != NULL && io->in.file != stdin) {
+        fclose(io->in.file);
+    }
+    io->in.file = NULL;
+}
+
+static void command_io_close(command_io *io) {
+    command_close_input(io);
+    if (io->directory_output) {
+        if (io->stage.path != NULL) staged_dir_discard(&io->stage);
+    } else {
+        staged_discard(&io->stage);
+    }
+    free(io->output);
+    io->output = NULL;
+}
+
+static int command_output_name(command_io *io, const char *explicit_name, const char *base, int decode) {
+    const char *suffix = "";
+    size_t n;
+    if (explicit_name != NULL) {
+        base = explicit_name;
+    } else if (strcmp(base, "-") != 0) {
+        suffix = decode ? ".out" : ".adpt";
+    }
+    n = strlen(base);
+    if (decode && explicit_name == NULL && n > 5 && strcmp(base + n - 5, ".adpt") == 0) {
+        n -= 5;
+        suffix = "";
+    }
+    io->output = malloc(n + strlen(suffix) + 1);
+    if (io->output == NULL) return other_error(io->input, "memory allocation failed");
+    memcpy(io->output, base, n);
+    strcpy(io->output + n, suffix);
+    return 0;
+}
+
+static int command_open_input(command_io *io) {
+    io->in.file = strcmp(io->input, "-") == 0 ? stdin : fopen(io->input, "rb");
+    return io->in.file == NULL ? other_error(io->input, strerror(errno)) : 0;
+}
+
+static int command_open_output(command_io *io, int force) {
+    int rc;
+    if (strcmp(io->output, "-") == 0) {
+        io->out.file = stdout;
+        return 0;
+    }
+    rc = staged_open(&io->stage, io->output, force);
+    if (rc == 0) io->out.file = io->stage.file;
+    return rc;
+}
+
+static adapt_status command_flush_output(command_io *io, adapt_status status, adapt_error *error) {
+    if (status == ADAPT_OK && io->out.file == stdout && fflush(stdout) != 0) {
+        io->out.error = errno;
+        error->status = ADAPT_ERROR_IO;
+        return ADAPT_ERROR_IO;
+    }
+    return status;
+}
+
+typedef struct decode_options {
+    adapt_limits limits;
     uint64_t threads;
+    int force;
+} decode_options;
+
+typedef struct decode_job {
+    decode_options options;
+    command_io io;
     adapt_sizes sizes;
     replay ahead;
-    restorer restore = {0};
     adapt_metadata metadata;
     int has_metadata;
-    adapt_archive_unpacker *unpacker = NULL;
-    rc = parse_args(&a, argc, argv, with_value);
-    if (rc != 0) {
-        return rc;
-    }
+    adapt_stats stats;
+} decode_job;
+
+static int decode_parse_options(decode_job *job, int argc, char **argv) {
+    static const char *const with_value[] = {"-o", "--max-output", "--max-memory", "--threads", NULL};
+    static const char *const known[] = {"--force", NULL};
+    decode_options *options = &job->options;
+    args a;
+    const char *text;
+    int rc = parse_args(&a, argc, argv, with_value);
+    if (rc != 0) return rc;
     rc = reject_unknown(&a, known);
-    if (rc != 0) {
-        return rc;
-    }
-    if (a.positionals != 1) {
-        return usage_error("decode takes exactly one input%s", "");
-    }
-    input = a.positional[0];
-    threads = thread_count(&a);
-    if (threads == 0) {
+    if (rc != 0) return rc;
+    if (a.positionals != 1) return usage_error("decode takes exactly one input%s", "");
+    job->io.input = a.positional;
+    options->threads = thread_count(&a);
+    if (options->threads == 0) {
         return usage_error("--threads: not a count of one or more: %s", value_of(&a, "--threads"));
     }
-    if (threads >= 2) {
-        threads = running_threads(threads);
-    }
-    o = value_of(&a, "-o");
-    if (o != NULL) {
-        output = malloc(strlen(o) + 1);
-        if (output == NULL) {
-            return other_error(input, "memory allocation failed");
-        }
-        strcpy(output, o);
-    } else if (strcmp(input, "-") == 0) {
-        output = malloc(2);
-        if (output == NULL) {
-            return other_error(input, "memory allocation failed");
-        }
-        strcpy(output, "-");
-    } else {
-        size_t n = strlen(input);
-        int strip = n > 5 && strcmp(input + n - 5, ".adpt") == 0;
-        output = malloc(n + 5);
-        if (output == NULL) {
-            return other_error(input, "memory allocation failed");
-        }
-        if (strip) {
-            memcpy(output, input, n - 5);
-            output[n - 5] = '\0';
-        } else {
-            memcpy(output, input, n);
-            memcpy(output + n, ".out", 5);
-        }
-    }
+    if (options->threads >= 2) options->threads = running_threads(options->threads);
+    /* FMT-6: a container names its model. Only explicit CLI caps may
+     * refuse it; the library's conservative defaults do not apply here. */
+    options->limits = adapt_default_limits();
+    options->limits.max_memory = UINT64_MAX;
+    options->limits.max_output = UINT64_MAX;
     text = value_of(&a, "--max-output");
-    if (text != NULL && !parse_bytes(text, &limits.max_output)) {
-        free(output);
+    if (text != NULL && !parse_bytes(text, &options->limits.max_output)) {
         return usage_error("--max-output: not a byte count: %s", text);
     }
     text = value_of(&a, "--max-memory");
-    if (text != NULL && !parse_bytes(text, &limits.max_memory)) {
-        free(output);
+    if (text != NULL && !parse_bytes(text, &options->limits.max_memory)) {
         return usage_error("--max-memory: not a byte count: %s", text);
     }
-    force = has_flag(&a, "--force");
-    binary_stdio();
-    if (strcmp(input, "-") == 0) {
-        in.file = stdin;
-    } else {
-        in.file = fopen(input, "rb");
-        if (in.file == NULL) {
-            rc = other_error(input, strerror(errno));
-            free(output);
-            return rc;
-        }
+    options->force = has_flag(&a, "--force");
+    return command_output_name(&job->io, value_of(&a, "-o"), job->io.input, 1);
+}
+
+static adapt_status decode_finish_archive(decode_job *job, restorer *restore, adapt_status status) {
+    int rc;
+    if (restore->file != NULL) {
+        fclose(restore->file);
+        restore->file = NULL;
     }
-    rc = peek_header(input, &in, &ahead, &sizes);
-    if (rc != 0) {
-        if (in.file != stdin) {
-            fclose(in.file);
-        }
-        free(output);
-        return rc;
-    }
-    has_metadata = adapt_header_has_metadata(ahead.held);
-    if (has_metadata) {
-        (void)adapt_read_metadata(ahead.held, ahead.held_len, &metadata, NULL);
-    }
-    if (sizes.archive) {
-        /* a folder: restored under a staging directory beside the target */
-        adapt_archive_sink sink;
-        if (strcmp(output, "-") == 0) {
-            rc = other_error(input, "holds a folder, which cannot be written to standard output; give -o <directory>");
-            if (in.file != stdin) {
-                fclose(in.file);
-            }
-            free(output);
-            return rc;
-        }
-        rc = staged_dir_open(&stage, output, force);
-        if (rc != 0) {
-            if (in.file != stdin) {
-                fclose(in.file);
-            }
-            free(output);
-            return rc;
-        }
-        restore.root = stage.path;
 #ifndef _WIN32
-        restore.root_fd = stage.root_fd;
-        restore.entry_fd = -1;
-        {
-            mode_t mask = umask(0);
-            umask(mask);
-            restore.file_mode = (unsigned)(0666 & ~mask);
-            restore.directory_mode = (unsigned)(0777 & ~mask);
-        }
-#endif
-        restore.max_output = limits.max_output;
-        sink.context = &restore;
-        sink.directory = restore_directory;
-        sink.file_open = restore_file_open;
-        sink.file_data = restore_file_data;
-        sink.file_close = restore_file_close;
-        sink.symlink = restore_symlink;
-        sink.hardlink = restore_hardlink;
-        sink.sparse_open = restore_sparse_open;
-        sink.extent = restore_extent;
-        sink.attribute = restore_attribute;
-        unpacker = adapt_archive_unpacker_new(sink);
-        if (unpacker == NULL) {
-            rc = other_error(input, "memory allocation failed");
-            if (in.file != stdin) {
-                fclose(in.file);
-            }
-            staged_dir_discard(&stage);
-            free(output);
-            return rc;
-        }
-        adapt_archive_set_metadata_callback(unpacker, restore_metadata);
-        adapt_archive_set_root_attribute_callback(unpacker, restore_root_attribute);
-        status = decode_input(&ahead, threads, sizes, limits, adapt_archive_unpack, unpacker, &stats, &error);
-        if (status == ADAPT_OK) {
-            status = adapt_archive_finish(unpacker, &error);
-        }
-        if (in.file != stdin) {
-            fclose(in.file);
-        }
-        if (restore.file != NULL) {
-            fclose(restore.file);
-        }
-#ifndef _WIN32
-        rc = finish_legacy_file(&restore, status == ADAPT_OK);
-        if (status == ADAPT_OK && rc != 0) {
-            (void)restore_fail(&restore, "file", rc, "cannot restore legacy file mode");
-            status = ADAPT_ERROR_IO;
-        }
-#endif
-        rc = finish_directory_metadata(&restore, status == ADAPT_OK);
-        if (status == ADAPT_OK && rc != 0) {
-            status = ADAPT_ERROR_IO;
-        }
-        if (status == ADAPT_OK && has_metadata) {
-#ifdef _WIN32
-            rc = metadata_apply(stage.path, 0, &metadata);
-#else
-            rc = metadata_apply_fd(stage.root_fd, &metadata);
-#endif
-            if (rc != 0) {
-                (void)restore_fail(&restore, "root", rc, "cannot restore directory metadata");
-                status = ADAPT_ERROR_IO;
-            }
-        }
-#ifndef _WIN32
-        if (status == ADAPT_OK && !has_metadata) {
-            /* Old archives have no root metadata. Publish their usual
-             * umask-derived mode only after the private staging work. */
-            if (fchmod(stage.root_fd, (mode_t)restore.directory_mode) != 0) {
-                (void)restore_fail(&restore, "root", errno, "cannot restore directory mode");
-                status = ADAPT_ERROR_IO;
-            }
-        }
-#endif
-        if (status != ADAPT_OK) {
-            char message[400];
-            uint64_t at = 0;
-            const char *problem = adapt_archive_problem(unpacker, &at);
-            if (status == ADAPT_ERROR_IO && restore.failed != NULL) {
-                snprintf(message, sizeof(message), "%s: %s", restore.failed,
-                         restore.why != NULL ? restore.why : strerror(restore.error != 0 ? restore.error : EIO));
-            } else if (status == ADAPT_ERROR_IO && restore.error != 0) {
-                snprintf(message, sizeof(message), "%s", strerror(restore.error));
-            } else if (status == ADAPT_ERROR_IO && problem != NULL) {
-                snprintf(message, sizeof(message), "invalid archive at byte %llu: %s", (unsigned long long)at, problem);
-            } else if (status == ADAPT_ERROR_BAD_ARCHIVE) {
-                snprintf(message, sizeof(message), "invalid archive at byte %llu: %s", (unsigned long long)at,
-                         problem != NULL ? problem : "cut short");
-            } else if (status == ADAPT_ERROR_IO) {
-                snprintf(message, sizeof(message), "i/o error: %s", in.error != 0 ? strerror(in.error) : "callback failed");
-            } else {
-                adapt_error_message(&error, message, sizeof(message));
-            }
-            rc = other_error(input, message);
-            adapt_archive_unpacker_free(unpacker);
-            free(restore.failed);
-            staged_dir_discard(&stage);
-            free(output);
-            return rc;
-        }
-        free(restore.failed);
-        rc = staged_dir_publish(&stage, output, force);
-        if (rc != 0) {
-            adapt_archive_unpacker_free(unpacker);
-            free(output);
-            return rc;
-        }
-        fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified, %llu entries restored to %s\n",
-                (unsigned long long)stats.output_bytes, (unsigned long long)stats.input_bytes,
-                (unsigned long long)adapt_archive_entries(unpacker), output);
-        adapt_archive_unpacker_free(unpacker);
-        free(output);
-        return 0;
-    }
-    if (strcmp(output, "-") == 0) {
-        out.file = stdout;
-    } else {
-        rc = staged_open(&stage, output, force);
-        if (rc != 0) {
-            if (in.file != stdin) {
-                fclose(in.file);
-            }
-            free(output);
-            return rc;
-        }
-        out.file = stage.file;
-    }
-    status = decode_input(&ahead, threads, sizes, limits, write_stream, &out, &stats, &error);
-    if (status == ADAPT_OK && out.file == stdout && fflush(stdout) != 0) {
-        out.error = errno;
-        error.status = ADAPT_ERROR_IO;
+    rc = finish_legacy_file(restore, status == ADAPT_OK);
+    if (status == ADAPT_OK && rc != 0) {
+        (void)restore_fail(restore, "file", rc, "cannot restore legacy file mode");
         status = ADAPT_ERROR_IO;
     }
-    if (in.file != stdin) {
-        fclose(in.file);
-    }
-    if (status != ADAPT_OK) {
-        rc = codec_failure(input, &error, &in, &out);
-        staged_discard(&stage);
-        free(output);
-        return rc;
-    }
-    if (stage.file != NULL) {
-        rc = staged_publish(&stage, output, force, has_metadata ? &metadata : NULL);
+#endif
+    rc = finish_directory_metadata(restore, status == ADAPT_OK);
+    if (status == ADAPT_OK && rc != 0) status = ADAPT_ERROR_IO;
+    if (status == ADAPT_OK && job->has_metadata) {
+#ifdef _WIN32
+        rc = metadata_apply(job->io.stage.path, 0, &job->metadata);
+#else
+        rc = metadata_apply_fd(job->io.stage.root_fd, &job->metadata);
+#endif
         if (rc != 0) {
-            free(output);
-            return rc;
+            (void)restore_fail(restore, "root", rc, "cannot restore directory metadata");
+            status = ADAPT_ERROR_IO;
         }
     }
-    free(output);
-    /* The crate's line, with the workers that ran. */
-    if (threads >= 2) {
-        fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified, %lu segments on %u thread%s\n",
-                (unsigned long long)stats.output_bytes, (unsigned long long)stats.input_bytes,
-                (unsigned long)stats.segments, stats.workers, stats.workers == 1 ? "" : "s");
+#ifndef _WIN32
+    /* Legacy roots take their umask-derived mode only after staging. */
+    if (status == ADAPT_OK && !job->has_metadata &&
+        fchmod(job->io.stage.root_fd, (mode_t)restore->directory_mode) != 0) {
+        (void)restore_fail(restore, "root", errno, "cannot restore directory mode");
+        status = ADAPT_ERROR_IO;
+    }
+#endif
+    return status;
+}
+
+static int decode_archive_failure(const decode_job *job, const restorer *restore,
+                                  const adapt_archive_unpacker *unpacker, adapt_status status,
+                                  const adapt_error *error) {
+    char message[400];
+    uint64_t at = 0;
+    const char *problem = adapt_archive_problem(unpacker, &at);
+    if (status == ADAPT_ERROR_IO && restore->failed != NULL) {
+        snprintf(message, sizeof(message), "%s: %s", restore->failed,
+                 restore->why != NULL ? restore->why : strerror(restore->error != 0 ? restore->error : EIO));
+    } else if (status == ADAPT_ERROR_IO && restore->error != 0) {
+        snprintf(message, sizeof(message), "%s", strerror(restore->error));
+    } else if (status == ADAPT_ERROR_IO && problem != NULL) {
+        snprintf(message, sizeof(message), "invalid archive at byte %llu: %s", (unsigned long long)at, problem);
+    } else if (status == ADAPT_ERROR_BAD_ARCHIVE) {
+        snprintf(message, sizeof(message), "invalid archive at byte %llu: %s", (unsigned long long)at,
+                 problem != NULL ? problem : "cut short");
+    } else if (status == ADAPT_ERROR_IO) {
+        snprintf(message, sizeof(message), "i/o error: %s", job->io.in.error != 0 ? strerror(job->io.in.error) : "callback failed");
     } else {
-        fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified\n", (unsigned long long)stats.output_bytes,
-                (unsigned long long)stats.input_bytes);
+        adapt_error_message(error, message, sizeof(message));
+    }
+    return other_error(job->io.input, message);
+}
+
+static int decode_archive(decode_job *job) {
+    command_io *io = &job->io;
+    restorer restore = {0};
+    adapt_archive_sink sink;
+    adapt_archive_unpacker *unpacker;
+    adapt_status status;
+    adapt_error error;
+    int rc;
+    if (strcmp(io->output, "-") == 0) {
+        return other_error(io->input, "holds a folder, which cannot be written to standard output; give -o <directory>");
+    }
+    io->directory_output = 1;
+    rc = staged_dir_open(&io->stage, io->output, job->options.force);
+    if (rc != 0) return rc;
+    restore.root = io->stage.path;
+#ifndef _WIN32
+    restore.root_fd = io->stage.root_fd;
+    restore.entry_fd = -1;
+    {
+        mode_t mask = umask(0);
+        umask(mask);
+        restore.file_mode = (unsigned)(0666 & ~mask);
+        restore.directory_mode = (unsigned)(0777 & ~mask);
+    }
+#endif
+    restore.max_output = job->options.limits.max_output;
+    sink.context = &restore;
+    sink.directory = restore_directory;
+    sink.file_open = restore_file_open;
+    sink.file_data = restore_file_data;
+    sink.file_close = restore_file_close;
+    sink.symlink = restore_symlink;
+    sink.hardlink = restore_hardlink;
+    sink.sparse_open = restore_sparse_open;
+    sink.extent = restore_extent;
+    sink.attribute = restore_attribute;
+    unpacker = adapt_archive_unpacker_new(sink);
+    if (unpacker == NULL) return other_error(io->input, "memory allocation failed");
+    adapt_archive_set_metadata_callback(unpacker, restore_metadata);
+    adapt_archive_set_root_attribute_callback(unpacker, restore_root_attribute);
+    status = decode_input(&job->ahead, job->options.threads, job->sizes, job->options.limits,
+                          adapt_archive_unpack, unpacker, &job->stats, &error);
+    if (status == ADAPT_OK) status = adapt_archive_finish(unpacker, &error);
+    command_close_input(io);
+    status = decode_finish_archive(job, &restore, status);
+    if (status != ADAPT_OK) {
+        rc = decode_archive_failure(job, &restore, unpacker, status, &error);
+    } else {
+        rc = staged_dir_publish(&io->stage, io->output, job->options.force);
+        if (rc == 0) {
+            fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified, %llu entries restored to %s\n",
+                    (unsigned long long)job->stats.output_bytes, (unsigned long long)job->stats.input_bytes,
+                    (unsigned long long)adapt_archive_entries(unpacker), io->output);
+        }
+    }
+    adapt_archive_unpacker_free(unpacker);
+    free(restore.failed);
+    return rc;
+}
+
+static int decode_file(decode_job *job) {
+    command_io *io = &job->io;
+    adapt_error error;
+    adapt_status status;
+    int rc = command_open_output(io, job->options.force);
+    if (rc != 0) return rc;
+    status = decode_input(&job->ahead, job->options.threads, job->sizes, job->options.limits,
+                          write_stream, &io->out, &job->stats, &error);
+    status = command_flush_output(io, status, &error);
+    command_close_input(io);
+    if (status != ADAPT_OK) return codec_failure(io->input, &error, &io->in, &io->out);
+    if (io->stage.file != NULL) {
+        rc = staged_publish(&io->stage, io->output, job->options.force, job->has_metadata ? &job->metadata : NULL);
+        if (rc != 0) return rc;
+    }
+    if (job->options.threads >= 2) {
+        fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified, %lu segments on %u thread%s\n",
+                (unsigned long long)job->stats.output_bytes, (unsigned long long)job->stats.input_bytes,
+                (unsigned long)job->stats.segments, job->stats.workers, job->stats.workers == 1 ? "" : "s");
+    } else {
+        fprintf(stderr, "%llu bytes -> %llu bytes, checksum verified\n", (unsigned long long)job->stats.output_bytes,
+                (unsigned long long)job->stats.input_bytes);
     }
     return 0;
+}
+
+static int decode_command(int argc, char **argv) {
+    decode_job job = {0};
+    int rc = decode_parse_options(&job, argc, argv);
+    if (rc != 0) goto done;
+    binary_stdio();
+    rc = command_open_input(&job.io);
+    if (rc != 0) goto done;
+    rc = peek_header(job.io.input, &job.io.in, &job.ahead, &job.sizes);
+    if (rc != 0) goto done;
+    job.has_metadata = adapt_header_has_metadata(job.ahead.held);
+    if (job.has_metadata) {
+        (void)adapt_read_metadata(job.ahead.held, job.ahead.held_len, &job.metadata, NULL);
+    }
+    rc = job.sizes.archive ? decode_archive(&job) : decode_file(&job);
+done:
+    command_io_close(&job.io);
+    return rc;
 }
 
 /* ------------------------------------------------------------------------
@@ -3506,52 +3514,112 @@ done:
     return status;
 }
 
-static int encode_command(int argc, char **argv) {
-    static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", "--allocation", "--contexts", NULL};
-    static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", "-0", "-1", "-2", "-3",
-                                        "-4",      "-5",       "-6",          "-7",     "-8",    "-9", "-10", "-11", NULL};
-    args a;
-    const char *input, *o, *text, *how;
-    char *output = NULL;
-    int force, verify, alongside, rc, known_length;
-    unsigned adaptive = 0;
-    int bmp_transform_requested = 0, context_first = 0, lean_contexts = 0;
-    int text_transform = ADAPT_TEXT_AUTO;
-    uint64_t profile_memory;
-    uint64_t max_memory = ADAPT_DEFAULT_MAX_MEMORY, length = 0, hundredths, threads, segment_bytes = ADAPT_SEGMENT_BYTES;
-    uint64_t workers = 1, running = 1;
-    char segments[96];
-    adapt_sizes sizes;
-    stream in = {NULL, 0, 0}, out = {NULL, 0, 0};
-    staged stage = {0};
-    adapt_stats stats;
-    adapt_error error;
-    adapt_status status;
-    char message[160];
-    /* a folder input: its entries, and the reader that streams them */
+typedef struct encode_options {
+    int force, verify, no_verify, fast, max;
+    unsigned adaptive;
+    int bmp, context_first, lean_contexts, text_transform;
+    uint64_t max_memory, threads, segment_bytes;
+    int is_folder;
+    char folder_name[4096];
+} encode_options;
+
+typedef struct encode_job {
+    encode_options options;
+    command_io io;
     folder dir;
     packer pack;
-    int is_folder = 0;
-    adapt_metadata source_metadata;
-    int has_metadata = 0;
-    metadata_writer metadata_output;
-    char folder_name[4096];
-    rc = parse_args(&a, argc, argv, with_value);
-    if (rc != 0) {
-        return rc;
+    adapt_metadata metadata;
+    int has_metadata, known_length, alongside;
+    uint64_t length, workers, running;
+    adapt_sizes sizes;
+    adapt_stats stats;
+    const char *verification;
+} encode_job;
+
+static int encode_parse_profile(encode_options *options, const args *a) {
+    const char *text = value_of(a, "--allocation");
+    if (text != NULL) {
+        if (strcmp(text, "context") == 0) options->context_first = 1;
+        else if (strcmp(text, "window") != 0)
+            return usage_error("--allocation: expected window or context: %s", text);
     }
+    text = value_of(a, "--contexts");
+    if (text != NULL) {
+        if (strcmp(text, "lean") == 0) options->lean_contexts = 1;
+        else if (strcmp(text, "auto") != 0)
+            return usage_error("--contexts: expected auto or lean: %s", text);
+        if (options->lean_contexts && options->fast)
+            return usage_error("--contexts lean applies to the normal and max profiles, not --fast%s", "");
+    }
+    text = value_of(a, "--adaptive");
+    if (text != NULL) {
+        if (strcmp(text, "rates") == 0) options->adaptive = 1;
+        else if (strcmp(text, "sparse") == 0) options->adaptive = 2;
+        else if (strcmp(text, "retained") == 0) options->adaptive = 3;
+        else if (strcmp(text, "auto") == 0) options->adaptive = 4;
+        else return usage_error("--adaptive: expected rates, sparse, retained or auto: %s", text);
+        if (options->fast) return usage_error("--adaptive cannot be combined with --fast%s", "");
+    }
+    text = value_of(a, "--transform");
+    if (text != NULL) {
+        if (strcmp(text, "bmp") == 0) {
+            if (options->fast || options->adaptive == 4 || options->is_folder)
+                return usage_error("--transform bmp requires a file/pipe and normal, max or an explicit adaptive profile%s", "");
+            options->bmp = 1;
+        } else if (strcmp(text, "text") == 0) {
+            if (options->adaptive != 0) return usage_error("--transform text cannot be combined with --adaptive%s", "");
+            options->text_transform = ADAPT_TEXT_ON;
+        } else if (strcmp(text, "none") == 0) {
+            options->text_transform = ADAPT_TEXT_OFF;
+        } else {
+            return usage_error("--transform: expected bmp, text or none: %s", text);
+        }
+    }
+    if (options->fast && options->max) return usage_error("--fast and --max are two profiles; pass one%s", "");
+    if (options->verify && options->no_verify) {
+        return usage_error("--verify and --no-verify cannot be used together%s", "");
+    }
+    return 0;
+}
+
+static int encode_parse_budget(encode_options *options, const args *a) {
+    const char *text;
+    /* Only presets set encode's budget; byte caps belong to decode. */
+    if (value_of(a, "--max-memory") != NULL) {
+        return usage_error("%s is a decode option; encode sets its budget with a preset, -0 .. -11", "--max-memory");
+    }
+    options->max_memory = preset_budget(a);
+    if (options->max_memory == 0) options->max_memory = ADAPT_DEFAULT_MAX_MEMORY;
+    options->threads = thread_count(a);
+    if (options->threads == 0) {
+        return usage_error("--threads: not a count of one or more: %s", value_of(a, "--threads"));
+    }
+    options->segment_bytes = ADAPT_SEGMENT_BYTES;
+    text = value_of(a, "--segment-bytes");
+    if (text != NULL) {
+        if (!parse_bytes(text, &options->segment_bytes) || !adapt_segment_bytes_valid(options->segment_bytes)) {
+            return usage_error("--segment-bytes: not a whole number of 262144-byte blocks: %s", text);
+        }
+        if (options->threads < 2) return usage_error("--segment-bytes needs --threads of two or more%s", "");
+    }
+    return 0;
+}
+
+static int encode_parse_options(encode_job *job, int argc, char **argv) {
+    static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", "--allocation", "--contexts", NULL};
+    static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", "-0", "-1", "-2", "-3",
+                                        "-4", "-5", "-6", "-7", "-8", "-9", "-10", "-11", NULL};
+    encode_options *options = &job->options;
+    const char *input;
+    args a;
+    int rc = parse_args(&a, argc, argv, with_value);
+    if (rc != 0) return rc;
     rc = reject_unknown(&a, known);
-    if (rc != 0) {
-        return rc;
-    }
-    if (a.positionals != 1) {
-        return usage_error("encode takes exactly one input%s", "");
-    }
-    input = a.positional[0];
-    memset(&dir, 0, sizeof(dir));
-    memset(&pack, 0, sizeof(pack));
+    if (rc != 0) return rc;
+    if (a.positionals != 1) return usage_error("encode takes exactly one input%s", "");
+    input = job->io.input = a.positional;
     if (strcmp(input, "-") != 0 && is_directory(input)) {
-        /* the folder's name without a trailing separator names the output */
+        /* A folder's name without a trailing separator names its output. */
         size_t n = strlen(input);
         while (n > 1 && (input[n - 1] == '/'
 #ifdef _WIN32
@@ -3560,411 +3628,294 @@ static int encode_command(int argc, char **argv) {
                          )) {
             n--;
         }
-        if (n >= sizeof(folder_name)) {
-            return other_error(input, "path is too long");
-        }
-        memcpy(folder_name, input, n);
-        folder_name[n] = '\0';
-        is_folder = 1;
+        if (n >= sizeof(options->folder_name)) return other_error(input, "path is too long");
+        memcpy(options->folder_name, input, n);
+        options->folder_name[n] = '\0';
+        options->is_folder = 1;
     }
-    text = value_of(&a, "--allocation");
-    if (text != NULL) {
-        if (strcmp(text, "context") == 0) context_first = 1;
-        else if (strcmp(text, "window") != 0)
-            return usage_error("--allocation: expected window or context: %s", text);
-    }
-    text = value_of(&a, "--contexts");
-    if (text != NULL) {
-        if (strcmp(text, "lean") == 0) lean_contexts = 1;
-        else if (strcmp(text, "auto") != 0)
-            return usage_error("--contexts: expected auto or lean: %s", text);
-        if (lean_contexts && has_flag(&a, "--fast"))
-            return usage_error("--contexts lean applies to the normal and max profiles, not --fast%s", "");
-    }
-    text = value_of(&a, "--adaptive");
-    if (text != NULL) {
-        if (strcmp(text, "rates") == 0) adaptive = 1;
-        else if (strcmp(text, "sparse") == 0) adaptive = 2;
-        else if (strcmp(text, "retained") == 0) adaptive = 3;
-        else if (strcmp(text, "auto") == 0) adaptive = 4;
-        else return usage_error("--adaptive: expected rates, sparse, retained or auto: %s", text);
-        if (has_flag(&a, "--fast"))
-            return usage_error("--adaptive cannot be combined with --fast%s", "");
-    }
-    text = value_of(&a, "--transform");
-    if (text != NULL) {
-        if (strcmp(text, "bmp") == 0) {
-            if (has_flag(&a, "--fast") || adaptive == 4 || is_folder)
-                return usage_error("--transform bmp requires a file/pipe and normal, max or an explicit adaptive profile%s", "");
-            bmp_transform_requested = 1;
-        } else if (strcmp(text, "text") == 0) {
-            if (adaptive != 0) return usage_error("--transform text cannot be combined with --adaptive%s", "");
-            text_transform = ADAPT_TEXT_ON;
-        } else if (strcmp(text, "none") == 0) {
-            text_transform = ADAPT_TEXT_OFF;
-        } else {
-            return usage_error("--transform: expected bmp, text or none: %s", text);
-        }
-    }
-    if (has_flag(&a, "--fast") && has_flag(&a, "--max")) {
-        return usage_error("--fast and --max are two profiles; pass one%s", "");
-    }
-    if (has_flag(&a, "--verify") && has_flag(&a, "--no-verify")) {
-        return usage_error("--verify and --no-verify cannot be used together%s", "");
-    }
-    o = value_of(&a, "-o");
-    if (o != NULL) {
-        output = malloc(strlen(o) + 1);
-        if (output != NULL) {
-            strcpy(output, o);
-        }
-    } else if (strcmp(input, "-") == 0) {
-        output = malloc(2);
-        if (output != NULL) {
-            strcpy(output, "-");
-        }
-    } else {
-        const char *base = is_folder ? folder_name : input;
-        size_t n = strlen(base);
-        output = malloc(n + 6);
-        if (output != NULL) {
-            memcpy(output, base, n);
-            memcpy(output + n, ".adpt", 6);
-        }
-    }
-    if (output == NULL) {
-        return other_error(input, "memory allocation failed");
-    }
-    /* the preset names the budget, and is encode's only memory setting:
-     * --max-memory is decode's cap, and a byte count here would name a
-     * model no tier describes */
-    if (value_of(&a, "--max-memory") != NULL) {
-        free(output);
-        return usage_error("%s is a decode option; encode sets its budget with a preset, -0 .. -11", "--max-memory");
-    }
-    if (preset_budget(&a) != 0) {
-        max_memory = preset_budget(&a);
-    }
-    threads = thread_count(&a);
-    if (threads == 0) {
-        free(output);
-        return usage_error("--threads: not a count of one or more: %s", value_of(&a, "--threads"));
-    }
-    text = value_of(&a, "--segment-bytes");
-    if (text != NULL) {
-        if (!parse_bytes(text, &segment_bytes) || !adapt_segment_bytes_valid(segment_bytes)) {
-            free(output);
-            return usage_error("--segment-bytes: not a whole number of 262144-byte blocks: %s", text);
-        }
-        if (threads < 2) {
-            free(output);
-            return usage_error("--segment-bytes needs --threads of two or more%s", "");
-        }
-    }
-    force = has_flag(&a, "--force");
-    verify = has_flag(&a, "--verify");
-    binary_stdio();
-    if (is_folder) {
-        /* every entry listed and sized before a byte is coded, so the
-         * stream's length is known and the sizes fit it */
+    options->force = has_flag(&a, "--force");
+    options->verify = has_flag(&a, "--verify");
+    options->no_verify = has_flag(&a, "--no-verify");
+    options->fast = has_flag(&a, "--fast");
+    options->max = has_flag(&a, "--max");
+    options->text_transform = ADAPT_TEXT_AUTO;
+    rc = encode_parse_profile(options, &a);
+    if (rc != 0) return rc;
+    rc = encode_parse_budget(options, &a);
+    if (rc != 0) return rc;
+    return command_output_name(&job->io, value_of(&a, "-o"), options->is_folder ? options->folder_name : input, 0);
+}
+
+static int encode_prepare_input(encode_job *job) {
+    const encode_options *options = &job->options;
+    int rc;
+    if (options->is_folder) {
         char *culprit = NULL;
-        rc = metadata_read_path(folder_name, 0, &source_metadata);
-        if (rc != 0) {
-            free(output);
-            return other_error(input, strerror(rc));
-        }
-        has_metadata = 1;
-        rc = folder_collect(&dir, folder_name, &culprit);
+        char message[160];
+        rc = metadata_read_path(options->folder_name, 0, &job->metadata);
+        if (rc != 0) return other_error(job->io.input, strerror(rc));
+        job->has_metadata = 1;
+        /* Inventory and size every entry before coding the folder stream. */
+        rc = folder_collect(&job->dir, options->folder_name, &culprit);
         if (rc != 0) {
             snprintf(message, sizeof(message), "%s%s%s", culprit != NULL ? culprit : "",
                      culprit != NULL ? ": " : "",
                      rc == ENOTSUP ? "not a directory, a regular file or a symbolic link" : strerror(rc));
             free(culprit);
-            folder_free(&dir);
-            free(output);
-            return other_error(input, message);
+            return other_error(job->io.input, message);
         }
-        packer_reset(&pack, &dir);
-        length = dir.stream_bytes;
-        known_length = 1;
-    } else if (strcmp(input, "-") == 0) {
-        in.file = stdin;
+        packer_reset(&job->pack, &job->dir);
+        job->length = job->dir.stream_bytes;
+        job->known_length = 1;
     } else {
-        in.file = fopen(input, "rb");
-        if (in.file == NULL) {
-            rc = other_error(input, strerror(errno));
-            free(output);
-            return rc;
+        rc = command_open_input(&job->io);
+        if (rc != 0) return rc;
+        job->known_length = input_length(job->io.in.file, &job->length);
+        if (job->known_length) {
+            rc = metadata_read_path(job->io.input, 0, &job->metadata);
+            if (rc != 0) return other_error(job->io.input, strerror(rc));
+            job->has_metadata = 1;
         }
     }
-    if (!is_folder) {
-        known_length = input_length(in.file, &length);
-        if (known_length) {
-            rc = metadata_read_path(input, 0, &source_metadata);
-            if (rc != 0) {
-                fclose(in.file);
-                free(output);
-                return other_error(input, strerror(rc));
-            }
-            has_metadata = 1;
-        }
-    }
-    profile_memory = bmp_transform_requested ? (max_memory > ADAPT_BLOCK_BYTES ? max_memory - ADAPT_BLOCK_BYTES : 0) : max_memory;
-    if (adaptive > 0 && adaptive < 4) {
-        status = threads >= 2 && known_length ?
-            (has_flag(&a, "--max") ? adapt_sizes_for_threads_max_adaptive : adapt_sizes_for_threads_adaptive)(length, profile_memory, threads, segment_bytes, adaptive, &sizes, &error) :
-            (has_flag(&a, "--max") ? adapt_sizes_for_input_max_adaptive : adapt_sizes_for_input_adaptive)(known_length, length, profile_memory, adaptive, &sizes, &error);
-    } else if (threads >= 2 && known_length) {
-        /* A file's sizes are the crate's for its threads: each model fitted
-         * to a segment and to one thread's share of the budget. */
-        status = has_flag(&a, "--max") ? adapt_sizes_for_threads_max(length, profile_memory, threads, segment_bytes, &sizes, &error)
-                                       : adapt_sizes_for_threads(length, profile_memory, threads, segment_bytes, &sizes, &error);
+    return 0;
+}
+
+static int encode_choose_sizes(encode_job *job) {
+    encode_options *options = &job->options;
+    adapt_sizes *sizes = &job->sizes;
+    adapt_error error;
+    adapt_status status;
+    uint64_t profile_memory = options->bmp ?
+        (options->max_memory > ADAPT_BLOCK_BYTES ? options->max_memory - ADAPT_BLOCK_BYTES : 0) : options->max_memory;
+    if (options->adaptive > 0 && options->adaptive < 4) {
+        status = options->threads >= 2 && job->known_length ?
+            (options->max ? adapt_sizes_for_threads_max_adaptive : adapt_sizes_for_threads_adaptive)
+                (job->length, profile_memory, options->threads, options->segment_bytes, options->adaptive, sizes, &error) :
+            (options->max ? adapt_sizes_for_input_max_adaptive : adapt_sizes_for_input_adaptive)
+                (job->known_length, job->length, profile_memory, options->adaptive, sizes, &error);
+    } else if (options->threads >= 2 && job->known_length) {
+        /* Fit each model to a segment and one thread's share of the budget. */
+        status = (options->max ? adapt_sizes_for_threads_max : adapt_sizes_for_threads)
+            (job->length, profile_memory, options->threads, options->segment_bytes, sizes, &error);
     } else {
-        status = has_flag(&a, "--max") ? adapt_sizes_for_input_max(known_length, length, profile_memory, &sizes, &error)
-                                       : adapt_sizes_for_input(known_length, length, profile_memory, &sizes, &error);
+        status = (options->max ? adapt_sizes_for_input_max : adapt_sizes_for_input)
+            (job->known_length, job->length, profile_memory, sizes, &error);
     }
-    if (status == ADAPT_OK && context_first) {
-        if (has_flag(&a, "--fast")) sizes = adapt_sizes_fast(sizes);
-        status = adapt_sizes_prioritize_context(known_length, length, profile_memory, threads, segment_bytes, &sizes, &error);
+    if (status == ADAPT_OK && options->context_first) {
+        if (options->fast) *sizes = adapt_sizes_fast(*sizes);
+        status = adapt_sizes_prioritize_context(job->known_length, job->length, profile_memory,
+                                                options->threads, options->segment_bytes, sizes, &error);
     }
     if (status != ADAPT_OK) {
-        /* the crate's command line names this one without the input */
+        char message[160];
+        /* The crate's command line names sizing failures without the input. */
         adapt_error_message(&error, message, sizeof(message));
         fprintf(stderr, "error: %s\n", message);
-        if (in.file != NULL && in.file != stdin) {
-            fclose(in.file);
-        }
-        folder_free(&dir);
-        free(output);
         return EXIT_OTHER;
     }
-    if (has_flag(&a, "--fast")) {
-        sizes = adapt_sizes_fast(sizes);
-    }
-    if (has_flag(&a, "--max") && adaptive == 0) {
-        sizes = adapt_sizes_max(sizes);
-    }
+    if (options->fast) *sizes = adapt_sizes_fast(*sizes);
+    if (options->max && options->adaptive == 0) *sizes = adapt_sizes_max(*sizes);
 #ifdef ADAPT_SIZES_OVERRIDE
-    /* A development build only: ADAPT_SIZES=table:window:recall:compact:lean
-     * names the model outright, past the tier — a small input coded under
-     * the pressure a large one meets at a small tier. */
+    /* Development-only sizes, past the tier, for pressure experiments. */
     {
-        const char *o = getenv("ADAPT_SIZES");
+        const char *override = getenv("ADAPT_SIZES");
         unsigned t, w, r, c, l;
-        if (o != NULL && sscanf(o, "%u:%u:%u:%u:%u", &t, &w, &r, &c, &l) == 5) {
-            sizes.table_log = (uint8_t)t;
-            sizes.table_frac = 0;
-            sizes.window_log = (uint8_t)w;
-            sizes.match_log = (uint8_t)r;
-            sizes.compact = (uint8_t)c;
-            sizes.lean = (uint8_t)l;
-            if (!adapt_sizes_valid(sizes)) {
+        if (override != NULL && sscanf(override, "%u:%u:%u:%u:%u", &t, &w, &r, &c, &l) == 5) {
+            sizes->table_log = (uint8_t)t;
+            sizes->table_frac = 0;
+            sizes->window_log = (uint8_t)w;
+            sizes->match_log = (uint8_t)r;
+            sizes->compact = (uint8_t)c;
+            sizes->lean = (uint8_t)l;
+            if (!adapt_sizes_valid(*sizes)) {
                 fprintf(stderr, "error: ADAPT_SIZES names invalid sizes\n");
                 return EXIT_OTHER;
             }
-            max_memory = adapt_encode_memory_bound(sizes) + ((uint64_t)64 << 20);
+            options->max_memory = adapt_encode_memory_bound(*sizes) + ((uint64_t)64 << 20);
         }
     }
 #endif
-    sizes.archive = (uint8_t)is_folder;
-    sizes.bmp = (uint8_t)bmp_transform_requested;
-    sizes.contexts = (uint8_t)(lean_contexts ? ADAPT_CONTEXTS_LEAN : ADAPT_CONTEXTS_AUTO);
-    /* the text transform: the policy's choice by the length, unless asked
-     * for or refused; never over the adaptive predictors or the BMP transform */
-    if (text_transform != ADAPT_TEXT_AUTO) sizes.text = (uint8_t)text_transform;
-    if (adaptive != 0 || bmp_transform_requested) sizes.text = ADAPT_TEXT_OFF;
-    if (threads >= 2) {
-        /* The crate cuts a file's segments on threads and a pipe's in
-         * order; this port cuts both on threads when the budget allows, to
-         * the same bytes: every segment starts a fresh model, so the order
-         * the segments are coded in changes nothing. */
-        sizes.segmented = 1;
-    }
-    /* Segments go on threads when the budget holds a model, a segment
-     * and a block's workspace for two or more of them; the workers then
-     * prove their own segments, so the proof needs no second budget. */
-    running = threads >= 2 && adaptive != 4 ? running_threads(threads) : threads;
-    workers = threads >= 2 && adaptive != 4 ? adapt_encode_workers(sizes, max_memory, segment_bytes, running) : 1;
-    alongside = verify && adaptive != 4 && (workers >= 2 || adapt_verified_memory_bound(sizes) <= max_memory);
-    if (verify && adaptive != 4 && !alongside && (in.file == stdin || !known_length || strcmp(output, "-") == 0)) {
+    sizes->archive = (uint8_t)options->is_folder;
+    sizes->bmp = (uint8_t)options->bmp;
+    sizes->contexts = (uint8_t)(options->lean_contexts ? ADAPT_CONTEXTS_LEAN : ADAPT_CONTEXTS_AUTO);
+    if (options->text_transform != ADAPT_TEXT_AUTO) sizes->text = (uint8_t)options->text_transform;
+    if (options->adaptive != 0 || options->bmp) sizes->text = ADAPT_TEXT_OFF;
+    /* Both files and pipes segment on threads when the budget permits. */
+    if (options->threads >= 2) sizes->segmented = 1;
+    return 0;
+}
+
+static int encode_plan_verification(encode_job *job) {
+    const encode_options *options = &job->options;
+    int parallel = options->threads >= 2 && options->adaptive != 4;
+    job->running = parallel ? running_threads(options->threads) : options->threads;
+    job->workers = parallel ? adapt_encode_workers(job->sizes, options->max_memory, options->segment_bytes, job->running) : 1;
+    /* Workers prove their own segments without a second model budget. */
+    job->alongside = options->verify && options->adaptive != 4 &&
+        (job->workers >= 2 || adapt_verified_memory_bound(job->sizes) <= options->max_memory);
+    if (options->verify && options->adaptive != 4 && !job->alongside &&
+        (job->io.in.file == stdin || !job->known_length || strcmp(job->io.output, "-") == 0)) {
+        char message[160];
         snprintf(message, sizeof(message),
                  "proving the output here needs a memory budget of %llu bytes for two models, "
                  "or a file input written to a file; choose a higher preset or omit --verify",
-                 (unsigned long long)adapt_verified_memory_bound(sizes));
-        rc = other_error(input, message);
-        if (in.file != NULL && in.file != stdin) {
-            fclose(in.file);
-        }
-        folder_free(&dir);
-        free(output);
-        return rc;
+                 (unsigned long long)adapt_verified_memory_bound(job->sizes));
+        return other_error(job->io.input, message);
     }
-    if (strcmp(output, "-") == 0) {
-        out.file = stdout;
+    return 0;
+}
+
+static int encode_run(encode_job *job) {
+    const encode_options *options = &job->options;
+    command_io *io = &job->io;
+    adapt_read_fn source = options->is_folder ? read_packer : read_stream;
+    void *source_context = options->is_folder ? (void *)&job->pack : (void *)&io->in;
+    metadata_writer output;
+    adapt_status status;
+    adapt_error error;
+    output.out = &io->out;
+    output.metadata = job->has_metadata ? &job->metadata : NULL;
+    output.header_written = 0;
+    if (options->adaptive == 4) {
+        status = encode_search(source, source_context, &io->out, output.metadata, &job->sizes,
+                               job->known_length, job->length, options->max_memory, options->threads,
+                               options->segment_bytes, options->verify, options->context_first, &job->stats, &error);
+    } else if (job->workers >= 2) {
+        status = adapt_encode_stream_threads(source, source_context, write_metadata_stream, &output, job->sizes,
+                                             options->max_memory, options->segment_bytes, job->running, options->verify,
+                                             &job->stats, &error);
+    } else if (job->alongside) {
+        status = adapt_encode_stream_verified_segments(source, source_context, write_metadata_stream, &output, job->sizes,
+                                                       options->max_memory, options->segment_bytes, &job->stats, &error);
     } else {
-        rc = staged_open(&stage, output, force);
-        if (rc != 0) {
-            if (in.file != NULL && in.file != stdin) {
-                fclose(in.file);
-            }
-            folder_free(&dir);
-            free(output);
-            return rc;
-        }
-        out.file = stage.file;
+        status = adapt_encode_stream_segments(source, source_context, write_metadata_stream, &output, job->sizes,
+                                              options->max_memory, options->segment_bytes, &job->stats, &error);
     }
-    {
-        adapt_read_fn source = is_folder ? read_packer : read_stream;
-        void *source_context = is_folder ? (void *)&pack : (void *)&in;
-        metadata_output.out = &out;
-        metadata_output.metadata = has_metadata ? &source_metadata : NULL;
-        metadata_output.header_written = 0;
-        if (adaptive == 4) {
-            status = encode_search(source, source_context, &out, metadata_output.metadata, &sizes,
-                                   known_length, length, max_memory, threads, segment_bytes, verify, context_first, &stats, &error);
-        } else if (workers >= 2) {
-            status = adapt_encode_stream_threads(source, source_context, write_metadata_stream, &metadata_output, sizes,
-                                                 max_memory, segment_bytes, running, verify, &stats, &error);
-        } else if (alongside) {
-            status = adapt_encode_stream_verified_segments(source, source_context, write_metadata_stream, &metadata_output, sizes, max_memory,
-                                                           segment_bytes, &stats, &error);
-        } else {
-            status = adapt_encode_stream_segments(source, source_context, write_metadata_stream, &metadata_output, sizes, max_memory,
-                                                  segment_bytes, &stats, &error);
-        }
+    if (status == ADAPT_OK && job->has_metadata && options->adaptive != 4) {
+        job->stats.output_bytes += ADAPT_METADATA_HEADER_BYTES;
     }
-    if (status == ADAPT_OK && has_metadata && adaptive != 4) {
-        stats.output_bytes += ADAPT_METADATA_HEADER_BYTES;
-    }
-    packer_close(&pack);
-    if (status == ADAPT_OK && out.file == stdout && fflush(stdout) != 0) {
-        out.error = errno;
-        error.status = ADAPT_ERROR_IO;
-        status = ADAPT_ERROR_IO;
-    }
+    packer_close(&job->pack);
+    status = command_flush_output(io, status, &error);
     if (status != ADAPT_OK) {
-        if (is_folder && status == ADAPT_ERROR_IO && out.error == 0) {
-            rc = packer_failure(input, &pack);
-        } else {
-            rc = codec_failure(input, &error, &in, &out);
+        if (options->is_folder && status == ADAPT_ERROR_IO && io->out.error == 0) {
+            return packer_failure(io->input, &job->pack);
         }
-        if (in.file != NULL && in.file != stdin) {
-            fclose(in.file);
-        }
-        folder_free(&dir);
-        staged_discard(&stage);
-        free(output);
-        return rc;
+        return codec_failure(io->input, &error, &io->in, &io->out);
     }
-    if (alongside || (adaptive == 4 && verify)) {
-        how = "verified";
-    } else if (verify) {
-        /* One model at a time: prove the staged file against the input
-         * again, which needs both to be files that can be read back — a
-         * folder is walked again, and must hold the same bytes. */
-        if ((is_folder || in.file != stdin) && known_length && stage.file != NULL) {
-            stream again = {NULL, 0, 0}, coded = {NULL, 0, 0};
-            if (in.file != NULL) {
-                fclose(in.file);
-                in.file = NULL;
-            }
-            if (fclose(stage.file) != 0) {
-                rc = other_error(output, strerror(errno));
-                stage.file = NULL;
-                staged_discard(&stage);
-                folder_free(&dir);
-                free(output);
-                return rc;
-            }
-            stage.file = NULL;
-            again.file = is_folder ? NULL : fopen(input, "rb");
+    return 0;
+}
+
+static int encode_verify_after(encode_job *job) {
+    command_io *io = &job->io;
+    stream again = {NULL, 0, 0}, coded = {NULL, 0, 0};
+    adapt_error error;
+    adapt_status status;
+    int rc;
+    if (!(job->options.is_folder || io->in.file != stdin) || !job->known_length || io->stage.file == NULL) {
+        return other_error(io->input, "could not reopen the input and staged output for verification");
+    }
+    /* One model at a time: close the writer and compare its staged bytes
+     * with a fresh input read. A folder is walked through the same inventory. */
+    command_close_input(io);
+    rc = fclose(io->stage.file);
+    io->stage.file = NULL;
+    io->out.file = NULL;
+    if (rc != 0) return other_error(io->output, strerror(errno));
+    again.file = job->options.is_folder ? NULL : fopen(io->input, "rb");
 #ifdef _WIN32
-            coded.file = fopen(stage.path, "rb");
+    coded.file = fopen(io->stage.path, "rb");
 #else
-            {
-                int fd = openat(stage.guard_fd, "contents", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-                coded.file = fd < 0 ? NULL : fdopen(fd, "rb");
-                if (fd >= 0 && coded.file == NULL) close(fd);
-            }
+    {
+        int fd = openat(io->stage.guard_fd, "contents", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+        coded.file = fd < 0 ? NULL : fdopen(fd, "rb");
+        if (fd >= 0 && coded.file == NULL) close(fd);
+    }
 #endif
-            if ((!is_folder && again.file == NULL) || coded.file == NULL) {
-                rc = other_error(input, strerror(errno));
-                if (again.file != NULL) {
-                    fclose(again.file);
-                }
-                if (coded.file != NULL) {
-                    fclose(coded.file);
-                }
-                staged_discard(&stage);
-                folder_free(&dir);
-                free(output);
-                return rc;
-            }
-            if (is_folder) {
-                packer_reset(&pack, &dir);
-                status = adapt_verify_stream(read_packer, &pack, read_stream, &coded, max_memory, NULL, &error);
-                packer_close(&pack);
-            } else {
-                status = adapt_verify_stream(read_stream, &again, read_stream, &coded, max_memory, NULL, &error);
-                fclose(again.file);
-            }
-            fclose(coded.file);
-            if (status != ADAPT_OK) {
-                if (is_folder && status == ADAPT_ERROR_IO && pack.failed != NULL) {
-                    rc = packer_failure(input, &pack);
-                } else {
-                    rc = codec_failure(input, &error, &again, &coded);
-                }
-                staged_discard(&stage);
-                folder_free(&dir);
-                free(output);
-                return rc;
-            }
-            how = "verified after encoding";
-        } else {
-            rc = other_error(input, "could not reopen the input and staged output for verification");
-            if (in.file != NULL && in.file != stdin) {
-                fclose(in.file);
-            }
-            staged_discard(&stage);
-            folder_free(&dir);
-            free(output);
-            return rc;
-        }
+    if ((!job->options.is_folder && again.file == NULL) || coded.file == NULL) {
+        rc = other_error(io->input, strerror(errno));
+        goto done;
+    }
+    if (job->options.is_folder) {
+        packer_reset(&job->pack, &job->dir);
+        status = adapt_verify_stream(read_packer, &job->pack, read_stream, &coded, job->options.max_memory, NULL, &error);
+        packer_close(&job->pack);
     } else {
-        how = has_flag(&a, "--no-verify") ? "not verified (--no-verify)" : "not verified (pass --verify to enable)";
+        status = adapt_verify_stream(read_stream, &again, read_stream, &coded, job->options.max_memory, NULL, &error);
     }
-    if (in.file != NULL && in.file != stdin) {
-        fclose(in.file);
+    rc = 0;
+    if (status != ADAPT_OK) {
+        rc = job->options.is_folder && status == ADAPT_ERROR_IO && job->pack.failed != NULL ?
+            packer_failure(io->input, &job->pack) : codec_failure(io->input, &error, &again, &coded);
     }
-    if (stage.path != NULL) {
-        rc = staged_publish(&stage, output, force, NULL);
-        if (rc != 0) {
-            folder_free(&dir);
-            free(output);
-            return rc;
-        }
+done:
+    if (again.file != NULL) fclose(again.file);
+    if (coded.file != NULL) fclose(coded.file);
+    return rc;
+}
+
+static int encode_verify_output(encode_job *job) {
+    if (job->alongside || (job->options.adaptive == 4 && job->options.verify)) {
+        job->verification = "verified";
+    } else if (job->options.verify) {
+        int rc = encode_verify_after(job);
+        if (rc != 0) return rc;
+        job->verification = "verified after encoding";
+    } else {
+        job->verification = job->options.no_verify ? "not verified (--no-verify)" : "not verified (pass --verify to enable)";
     }
-    free(output);
+    return 0;
+}
+
+static void encode_report(const encode_job *job) {
+    const adapt_stats *stats = &job->stats;
+    char segments[96] = "";
     /* Hundredths of a percent in integers, as the crate prints them. */
-    hundredths = stats.input_bytes == 0 ? 0 : (stats.output_bytes * 10000 + stats.input_bytes / 2) / stats.input_bytes;
-    segments[0] = '\0';
-    if (threads >= 2) {
-        unsigned on = adaptive == 4 ? 1u : stats.workers;
-        snprintf(segments, sizeof(segments), ", %lu segments on %u thread%s", (unsigned long)stats.segments, on,
+    uint64_t hundredths = stats->input_bytes == 0 ? 0 :
+        (stats->output_bytes * 10000 + stats->input_bytes / 2) / stats->input_bytes;
+    if (job->options.threads >= 2) {
+        unsigned on = job->options.adaptive == 4 ? 1u : stats->workers;
+        snprintf(segments, sizeof(segments), ", %lu segments on %u thread%s", (unsigned long)stats->segments, on,
                  on == 1 ? "" : "s");
     }
-    if (is_folder) {
-        fprintf(stderr, "%llu entries, %llu bytes -> %llu bytes (%llu.%02llu%%), %s%s\n", (unsigned long long)dir.count,
-                (unsigned long long)stats.input_bytes, (unsigned long long)stats.output_bytes,
-                (unsigned long long)(hundredths / 100), (unsigned long long)(hundredths % 100), how, segments);
+    if (job->options.is_folder) {
+        fprintf(stderr, "%llu entries, %llu bytes -> %llu bytes (%llu.%02llu%%), %s%s\n", (unsigned long long)job->dir.count,
+                (unsigned long long)stats->input_bytes, (unsigned long long)stats->output_bytes,
+                (unsigned long long)(hundredths / 100), (unsigned long long)(hundredths % 100), job->verification, segments);
     } else {
-        fprintf(stderr, "%llu bytes -> %llu bytes (%llu.%02llu%%), %s%s\n", (unsigned long long)stats.input_bytes,
-                (unsigned long long)stats.output_bytes, (unsigned long long)(hundredths / 100),
-                (unsigned long long)(hundredths % 100), how, segments);
+        fprintf(stderr, "%llu bytes -> %llu bytes (%llu.%02llu%%), %s%s\n", (unsigned long long)stats->input_bytes,
+                (unsigned long long)stats->output_bytes, (unsigned long long)(hundredths / 100),
+                (unsigned long long)(hundredths % 100), job->verification, segments);
     }
-    folder_free(&dir);
-    return 0;
+}
+
+static int encode_command(int argc, char **argv) {
+    encode_job job = {0};
+    int rc = encode_parse_options(&job, argc, argv);
+    if (rc != 0) goto done;
+    binary_stdio();
+    rc = encode_prepare_input(&job);
+    if (rc != 0) goto done;
+    rc = encode_choose_sizes(&job);
+    if (rc != 0) goto done;
+    rc = encode_plan_verification(&job);
+    if (rc != 0) goto done;
+    rc = command_open_output(&job.io, job.options.force);
+    if (rc != 0) goto done;
+    rc = encode_run(&job);
+    if (rc != 0) goto done;
+    rc = encode_verify_output(&job);
+    if (rc != 0) goto done;
+    command_close_input(&job.io);
+    if (job.io.stage.path != NULL) {
+        rc = staged_publish(&job.io.stage, job.io.output, job.options.force, NULL);
+        if (rc != 0) goto done;
+    }
+    encode_report(&job);
+done:
+    packer_close(&job.pack);
+    folder_free(&job.dir);
+    command_io_close(&job.io);
+    return rc;
 }
 
 /* ------------------------------------------------------------------------
@@ -3998,7 +3949,7 @@ static int info_command(int argc, char **argv) {
     if (a.positionals != 1) {
         return usage_error("info takes exactly one file%s", "");
     }
-    input = a.positional[0];
+    input = a.positional;
     binary_stdio();
     if (strcmp(input, "-") == 0) {
         file = stdin;

@@ -49,6 +49,7 @@ int main(void) {
         assert(coded[4] == (max_profile ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + mode - 1);
         assert(adapt_read_header(coded, coded_len, &parsed, &error) == ADAPT_OK);
         assert(parsed.adaptive == mode && parsed.max == max_profile);
+        assert(adapt_sizes_header_bytes(parsed) == adapt_header_len(coded));
         assert(adapt_decode(coded, coded_len, limits, &decoded, &decoded_len, &error) == ADAPT_OK);
         assert(decoded_len == sizeof(input) && memcmp(decoded, input, sizeof(input)) == 0);
         free(decoded); free(coded);

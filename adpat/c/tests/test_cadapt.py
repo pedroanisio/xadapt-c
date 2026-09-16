@@ -1251,12 +1251,22 @@ class SurfaceTest(unittest.TestCase):
         checks — and gets the same bytes. Chunking a file at 4 KiB was four
         system calls per chunk, a seventh of the wall time of a
         stored-block decode."""
-        data = bytes(random.Random(7).getrandbits(8) for _ in range(1 << 20))  # incompressible: stored blocks
+        rng = random.Random(7)
+        data = bytes(rng.getrandbits(8) for _ in range(1 << 20))  # incompressible: stored blocks
         source = self.root / "noise.bin"
         source.write_bytes(data)
         container = self.root / "noise.adpt"
         r = self.run_codec("encode", "--fast", source, "-o", container, "--no-verify")
         self.assertEqual(r.returncode, 0, r.stderr)
+        # Keep this a stored-block I/O test even if the fixture changes.
+        encoded = payload_stream(container.read_bytes())
+        at = 8 + (2 if encoded[7] & 0x80 else 0)
+        for block in range(4):
+            method, raw, stored = struct.unpack_from("<BII", encoded, at)
+            self.assertIn(method, (0, 2), f"block {block} must be stored, not modeled")
+            self.assertEqual((raw, stored), (1 << 18, 1 << 18))
+            at += 9 + stored
+        self.assertEqual(encoded[at], 3)  # end marker after four full blocks
         # a pipe sink: standard output captured is a pipe
         r = self.run_codec("decode", container, "-o", "-")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -1413,6 +1423,75 @@ class CommandTest(CodecTest):
     """The exact texts behind SurfaceTest's sweep: each usage error's
     message, what a damaged file is called, what `info` says of every kind
     of committed vector, and the reports and bytes `encode` gives."""
+
+    def test_late_decode_limits_refuse_without_publishing(self) -> None:
+        for count in (6, 7, 32):
+            for limit, message in (("--max-output", b"declared size 900 exceeds the limit 0"),
+                                   ("--max-memory", b"memory budget exceeded")):
+                with self.subTest(count=count, limit=limit):
+                    out = self.root / f"limited-{count}-{limit}.out"
+                    run = self.run_codec("decode", VECTORS / "abc.adpt", "-o", out,
+                                         *(["--threads", "1"] * count), limit, "0")
+                    self.assert_failure(run, message, b"limit 0")
+                    self.assertEqual(run.stdout, b"")
+                    self.assertFalse(out.exists())
+
+    def test_repeated_value_options_use_the_last_value(self) -> None:
+        want = (VECTORS / "abc.bin").read_bytes()
+        run = self.run_codec("decode", VECTORS / "abc.adpt",
+                             *(["--max-output", "0"] * 32), "--max-output", len(want), "-o", "-")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, want)
+
+    def test_late_verify_flag_proves_the_output(self) -> None:
+        run = self.run_codec("encode", self.source, "-o", "-", "--fast", "-5",
+                             *(["--force"] * 32), "--verify")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b", verified", run.stderr)
+        self.assertNotIn(b"not verified", run.stderr)
+        decoded = self.run_codec("decode", "-", data=run.stdout)
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        self.assertEqual(decoded.stdout, SOURCE)
+
+    def test_late_invalid_options_are_rejected_before_output(self) -> None:
+        cases = (
+            ("encode", self.source, (*(["--no-verify"] * 32), "--bogus"),
+             b"unknown option --bogus"),
+            ("decode", VECTORS / "abc.adpt", (*(["--force"] * 32), "--bogus"),
+             b"unknown option --bogus"),
+            ("encode", self.source, (*(["--fast"] * 32), "--max"),
+             b"--fast and --max are two profiles"),
+            ("encode", self.source, (*(["--no-verify"] * 32), "--verify"),
+             b"--verify and --no-verify cannot be used together"),
+            ("decode", VECTORS / "abc.adpt", (*(["--threads", "1"] * 32), "--max-output"),
+             b"--max-output needs a value"),
+            ("encode", self.source, (*(["--threads", "1"] * 32), "--threads", "--verify"),
+             b"--threads: not a count of one or more: --verify"),
+        )
+        for index, (command, source, options, message) in enumerate(cases):
+            with self.subTest(command=command, message=message):
+                out = self.root / f"invalid-{index}.adpt"
+                self.assert_usage_error(self.run_codec(command, source, "-o", out, *options), message)
+                self.assertFalse(out.exists())
+
+    def test_late_preset_overrides_earlier_presets(self) -> None:
+        expected = self.run_codec("encode", "-", "-3", data=SOURCE)
+        self.assertEqual(expected.returncode, 0, expected.stderr)
+        run = self.run_codec("encode", "-", *(["-0"] * 32), "-3", data=SOURCE)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, expected.stdout)
+
+    def test_option_values_that_look_like_flags_remain_values(self) -> None:
+        run = subprocess.run([str(CADAPT), "encode", self.source.name, "-3", "--no-verify",
+                              "-o", "--max", "-o", "--verify"], cwd=self.root,
+                             capture_output=True, timeout=TIMEOUT)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(b"not verified (--no-verify)", run.stderr)
+        self.assertEqual(run.stdout, b"")
+        self.assertFalse((self.root / "--max").exists())
+        decoded = self.run_codec("decode", self.root / "--verify", "-o", "-")
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        self.assertEqual(decoded.stdout, SOURCE)
 
     def test_argument_errors_are_usage_errors(self) -> None:
         cases = (

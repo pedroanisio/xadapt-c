@@ -131,6 +131,7 @@ $(BUILD)/runs/profile: ; @$(BUILD)/test_profile_conversion > $@.log 2>&1 && touc
 check: all
 	$(MAKE) -j check-parts
 check-parts: test coverage $(BUILD)/runs/gcov-tests $(BUILD)/runs/safety $(BUILD)/runs/probe
+# This explicit rule is phony: an old success marker must never skip the gate's tests.
 $(BUILD)/runs/gcov-tests: | $(BUILD)/runs ; @$(PYTHON) -B tests/test_check_gcov.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/safety: all | $(BUILD)/runs ; @ADAPT_TEST_THREADS=$(TEST_THREADS) $(PYTHON) -B tests/test_cadapt_safety.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/probe: all | $(BUILD)/runs ; @$(PYTHON) -B tests/test_allocation_probe.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
@@ -226,3 +227,4 @@ clean:
 	rm -rf $(BUILD) $(COV) $(SANITIZE_BUILD)
 
 .PHONY: all test coverage sanitize fuzz fuzz-smoke check check-parts check-long clean
+.PHONY: $(BUILD)/runs/gcov-tests

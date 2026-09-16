@@ -7,6 +7,7 @@ Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -71,6 +72,19 @@ def units(
 
 
 class GateTest(unittest.TestCase):
+    def test_make_reruns_gate_tests_after_a_success_marker(self) -> None:
+        build = Path(self.dir.name) / "build"
+        marker = build / "runs" / "gcov-tests"
+        marker.parent.mkdir(parents=True)
+        marker.touch()
+        for changed in (None, "check-gcov.py", "tests/test_check_gcov.py"):
+            with self.subTest(changed=changed):
+                command = ["make", "-n", f"BUILD={build}", str(marker)]
+                if changed is not None:
+                    command += ["-W", changed]
+                run = subprocess.run(command, cwd=HERE.parent, capture_output=True, text=True, check=True)
+                self.assertIn("tests/test_check_gcov.py", run.stdout)
+
     def test_new_algorithm_headers_are_required_and_counted(self) -> None:
         for header in ("adapt_adaptive.h", "adapt_bmp.h", "adapt_text.h"):
             evidence = units((50, 50), (50, 50), (90, 100))

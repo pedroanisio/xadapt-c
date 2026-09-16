@@ -505,10 +505,12 @@ adapt_status adapt_sizes_for_threads_max_adaptive(uint64_t length, uint64_t max_
 #define ADAPT_CONTEXT_SETS 8u
 
 /* The bytes the header of a file whose fixed header is `fixed` occupies:
- * fixed part, optional period, BMP descriptor and filesystem metadata.
+ * fixed part, optional period, sizing byte, BMP descriptor and filesystem metadata.
  * `fixed` must contain at least ADAPT_HEADER_BYTES bytes. */
 size_t adapt_header_len(const uint8_t *fixed);
-/* Base byte-stream encoder header size, excluding filesystem metadata. */
+/* Header size written by the current encoder for resolved sizes (including
+ * its chosen period), excluding filesystem metadata. For an existing file,
+ * including older versions, use adapt_header_len() on its fixed header. */
 size_t adapt_sizes_header_bytes(adapt_sizes sizes);
 /* Validate the header at the start of `header`, `len` bytes of it available:
  * fixed part, optional period, and metadata including its checksum.

@@ -87,7 +87,10 @@ size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_
 }
 
 size_t adapt_sizes_header_bytes(adapt_sizes sizes) {
-    return ADAPT_HEADER_BYTES + (sizes.period != 0 ? ADAPT_PERIOD_BYTES : 0) + (sizes.bmp ? ADAPT_BMP_BYTES : 0);
+    uint8_t fixed[ADAPT_HEADER_BYTES] = {0};
+    fixed[4] = encode_header_version(sizes);
+    fixed[7] = sizes.period != 0 ? ADAPT_PERIOD_FLAG : 0;
+    return adapt_header_len(fixed);
 }
 
 size_t adapt_segment_table_len(uint64_t count) {

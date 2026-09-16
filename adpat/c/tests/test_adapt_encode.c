@@ -808,7 +808,7 @@ static void test_vector_profile(const char *name, const char *source, int profil
     uint8_t *coded = malloc(src_len + 4096);
     reader r;
     writer w;
-    adapt_sizes sizes;
+    adapt_sizes sizes, parsed;
     adapt_error error;
     adapt_stats stats;
     CHECK_STATUS(profile == 2 ? adapt_sizes_for_input_max(1, src_len, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error)
@@ -824,6 +824,8 @@ static void test_vector_profile(const char *name, const char *source, int profil
                  ADAPT_OK);
     CHECK(w.len == want_len);
     CHECK(w.len == want_len && memcmp(coded, want, want_len) == 0);
+    CHECK_STATUS(adapt_read_header(coded, w.len, &parsed, &error), ADAPT_OK);
+    CHECK(adapt_sizes_header_bytes(parsed) == adapt_header_len(coded));
     CHECK(stats.input_bytes == src_len && stats.output_bytes == want_len && stats.crc32 == adapt_crc32(src, src_len));
     reset(&r, src, src_len, 4096, &w, coded, src_len + 4096);
     CHECK_STATUS(adapt_encode_stream_verified(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL,
@@ -833,6 +835,43 @@ static void test_vector_profile(const char *name, const char *source, int profil
     free(coded);
     free(want);
     free(src);
+}
+
+static void test_header_sizes(void) {
+    adapt_sizes sizes;
+    adapt_error error;
+    unsigned mode;
+    CHECK_STATUS(adapt_sizes_for_input(1, 0, ADAPT_DEFAULT_MAX_MEMORY, &sizes, &error), ADAPT_OK);
+    CHECK(adapt_sizes_header_bytes(sizes) == 8);
+    sizes.fast = 1;
+    CHECK(adapt_sizes_header_bytes(sizes) == 8);
+    sizes.text = ADAPT_TEXT_ON;
+    CHECK(adapt_sizes_header_bytes(sizes) == 8);
+    sizes.fast = 0;
+    CHECK(adapt_sizes_header_bytes(sizes) == 8);
+    sizes.max = 1;
+    CHECK(adapt_sizes_header_bytes(sizes) == 9);
+    sizes.period = 80;
+    CHECK(adapt_sizes_header_bytes(sizes) == 11);
+    sizes.compact = sizes.lean = sizes.low_start = sizes.model2 = 1;
+    sizes.table_frac = 2;
+    CHECK(adapt_sizes_header_bytes(sizes) == 11);
+    sizes.text = ADAPT_TEXT_OFF;
+    sizes.compact = sizes.lean = sizes.low_start = sizes.model2 = sizes.table_frac = 0;
+    for (mode = 1; mode <= 3; mode++) {
+        sizes.adaptive = (uint8_t)mode;
+        CHECK(adapt_sizes_header_bytes(sizes) == 10);
+    }
+    for (sizes.max = 0; sizes.max <= 1; sizes.max++) {
+        for (mode = 0; mode <= 3; mode++) {
+            sizes.adaptive = (uint8_t)mode;
+            sizes.bmp = 1;
+            CHECK(adapt_sizes_header_bytes(sizes) == 22);
+            sizes.period = 0;
+            CHECK(adapt_sizes_header_bytes(sizes) == 20);
+            sizes.period = 80;
+        }
+    }
 }
 
 /* A committed segmented file, as `cadapt encode --threads <threads>
@@ -2084,6 +2123,7 @@ int main(int argc, char **argv) {
     SHARD(test_text_transform());
     SHARD(test_archive_flag());
     SHARD(test_in_memory());
+    SHARD(test_header_sizes());
     if (failures != 0) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);
         return 1;

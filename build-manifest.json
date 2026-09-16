@@ -1,20 +1,20 @@
 {
   "schema": "cadapt.build-manifest.v1",
   "version": "0.12.0",
-  "commit": "4728fdf6b34c65ecba8ed1c6acb92e45e41774d9",
-  "generated_at": "2026-09-15T13:58:19+00:00",
+  "commit": "150a4c6a414dbf868f42f483366109f7419b6ff9",
+  "generated_at": "2026-09-16T16:48:36+00:00",
   "sources": {
-    "adpat/c/adapt.h": "77bfa1ac123ccaa07b4965ed61e5e861482d004b025995233441e9d2e9562b3f",
+    "adpat/c/adapt.h": "5fb179a6f830ce2508dd00b0e77d7163186619a32c2ef344b746e33b7176bf07",
     "adpat/c/adapt_adaptive.h": "d21a75f99b8d19400819a538becd7b459673de4fef8e2b889e5423fdb17fb5c7",
     "adpat/c/adapt_archive.c": "7d0dea00c782894793cf72be213254ed8f820c1dd253038808ac0e79d635aee8",
     "adpat/c/adapt_bmp.h": "1c2517ba6a05ee609afde4292c1afabb94452f23d97aac90531d31dcca083d96",
-    "adpat/c/adapt_decode.c": "23be27ded875dd19ef2e849ab051c0e4fff8754bab427b161ce782fa702e43cc",
-    "adpat/c/adapt_encode.c": "8617e1afb9c28dc6ae9cf605b51542efca3df1ab4aa3dc8061a3f5b4a9b89e20",
-    "adpat/c/adapt_model.h": "3612314832d88f5cba3a79565f6e02fb56ef9f44d763567a4d7cb99ab99df64b",
+    "adpat/c/adapt_decode.c": "df4290b812836f57bd749ff8ace3cad84bb833af741e7beadda5ca00012701b5",
+    "adpat/c/adapt_encode.c": "e823ff06a8891bf5d1aa5e14467faba42afc8f2dbf23827ae898169d7f8568a8",
+    "adpat/c/adapt_model.h": "ce4dab626d9af48181332272c279bb0dfd3dbb598cd2b63eac5cb2ce828e3b5f",
     "adpat/c/adapt_text.h": "ca345d79f80be7f12483eb086ea12d33fff032263221a2392246fee012087df1",
-    "adpat/c/cadapt.c": "3db8e3a34da0c4bab8c8428f028fcb1456db28f363dce6f5d4e97ca7c982198a"
+    "adpat/c/cadapt.c": "710599a960ff8917fc14377dd11dd835d54c9f33a535939a0efc041dab561cb1"
   },
-  "makefile_sha256": "9ae8739e6d04a9c2504b7af5f3b472c0d34f1d7b7ac9bbd9d8073bd50d2281fa",
+  "makefile_sha256": "f01d7520c4afa3b9a171554b66f7a0361ed743002174afab61360f3895b21499",
   "toolchain": {
     "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
     "cc_command": "cc",
@@ -23,17 +23,17 @@
     "make": "GNU Make 4.3"
   },
   "host": {
-    "platform": "Linux-6.18.44-fc-v33-x86_64-with-glibc2.39",
+    "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.39",
     "machine": "x86_64"
   },
   "outputs": {
     "adpat/c/build/cadapt": {
-      "sha256": "07a1f20b6bf58d9340733fe9492a4357c6a7c4a4b40ac93586584a1fdaff9da3",
-      "bytes": 479672
+      "sha256": "79874cadbff65a4514ea2ffdaf2c2827adaa64e6336545607da72ab6270f65c3",
+      "bytes": 587232
     },
     "adpat/c/build/libadapt.a": {
-      "sha256": "1e9f4c5a0b874778366abb877ff5a66163c15a4bc59fccd1158930cd867d58ec",
-      "bytes": 435768
+      "sha256": "2030aac038d93da6c1d83f80758b4818aab6737115338f4483bb6d6ce01244ae",
+      "bytes": 540296
     }
   }
 }

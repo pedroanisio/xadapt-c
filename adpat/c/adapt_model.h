@@ -39,6 +39,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+
 #ifdef ADAPT_SHADOW_CHECK
 #include <stdio.h>
 #endif
@@ -347,6 +348,24 @@ static const char *const CONTEXT_NAMES[HASHED] = {"o1",    "o2",     "o3",      
 #define SCAN_SLOTS (1u << 16)
 /* Stack, allocator slack and runtime overhead the memory bounds allow for. */
 #define HEADROOM ((uint64_t)8 << 20)
+
+/* Versions written by the current encoder. Older max profiles remain
+ * readable, but every plain max encode now writes the sizing byte. */
+static inline uint8_t encode_header_version(adapt_sizes sizes) {
+    if (sizes.bmp) {
+        return (uint8_t)((sizes.max ? ADAPT_MAX_BMP_VERSION : ADAPT_BMP_VERSION) + sizes.adaptive);
+    }
+    if (sizes.adaptive) {
+        return (uint8_t)((sizes.max ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + sizes.adaptive - 1);
+    }
+    if (sizes.max) {
+        return ADAPT_MAX_PRESSURE_VERSION;
+    }
+    if (sizes.text == ADAPT_TEXT_ON) {
+        return sizes.fast ? ADAPT_TEXT_FAST_VERSION : ADAPT_TEXT_VERSION;
+    }
+    return sizes.fast ? ADAPT_FAST_VERSION : ADAPT_FORMAT_VERSION;
+}
 
 /* ------------------------------------------------------------------------
  * container.rs — the x86 branch transform
@@ -944,7 +963,9 @@ static inline int32_t dot16_scalar(const int16_t *w, const int32_t *x, size_t n)
  * int16 so the vector and scalar forms agree; the sum saturates at
  * +-32767. */
 static inline int32_t train16_delta(int32_t x, int32_t err) {
-    int32_t xs = x << 4;
+    /* Lanes are in [-2048, 2048]; multiplication is defined for negative
+     * inputs too, and the scaled value fits int32 before saturation. */
+    int32_t xs = x * 16;
     xs = xs > 32767 ? 32767 : (xs < -32768 ? -32768 : xs);
     return (xs * err + 16384) >> 15;
 }
