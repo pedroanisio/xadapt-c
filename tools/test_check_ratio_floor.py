@@ -287,15 +287,15 @@ class FloorCheckTest(unittest.TestCase):
         locked = floor.load_floor(floor.ROOT / "tools" / "ratio_floor.json")
         by_name = {f.fixture: f for f in locked.floors}
         self.assertEqual(sorted(by_name), ["enwik8", "enwik8-16MiB", "enwik8-8MiB", "enwik9"])
-        self.assertEqual(by_name["enwik8-8MiB"].max_container_bytes, 1_686_110)
+        self.assertEqual(by_name["enwik8-8MiB"].max_container_bytes, 1_680_015)
         self.assertEqual(by_name["enwik8-8MiB"].input_bytes, 8 * 1024 * 1024)
-        self.assertEqual(by_name["enwik8-16MiB"].max_container_bytes, 3_266_940)
-        self.assertEqual(by_name["enwik8"].max_container_bytes, 17_978_253)
-        self.assertEqual(by_name["enwik9"].max_container_bytes, 147_896_517)
+        self.assertEqual(by_name["enwik8-16MiB"].max_container_bytes, 3_254_114)
+        self.assertEqual(by_name["enwik8"].max_container_bytes, 17_883_525)
+        self.assertEqual(by_name["enwik9"].max_container_bytes, 146_899_997)
         self.assertEqual(by_name["enwik8"].input_md5, "a1fa5ffddb56f4953e226637dabbb36a")
         self.assertEqual(by_name["enwik9"].input_md5, "e206c3450ac99950df65bf70ef61a12d")
         self.assertEqual(locked.arguments, ["encode", "--max", "--allocation", "context"])
-        # re-locked 2026-09-15 on the second max model binary (LOCKS.md), a
+        # re-locked 2026-09-16 on the class-width-proof binary (LOCKS.md), a
         # quiet host: CPU seconds, the median of three runs on the enwik8 rows
         self.assertEqual({f.measure for f in locked.floors}, {"cpu"})
         self.assertEqual(by_name["enwik8-8MiB"].seconds, 12.2)

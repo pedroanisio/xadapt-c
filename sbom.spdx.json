@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "adapt-0.12.0",
-  "documentNamespace": "urn:uuid:03fec298-056d-51ff-b1a2-d6b2585e32e9",
+  "documentNamespace": "urn:uuid:c40699a6-5e1f-5eee-ab2d-dfd335fd306f",
   "creationInfo": {
-    "created": "2026-09-16T00:23:23Z",
+    "created": "2026-09-16T09:43:27Z",
     "creators": [
       "Tool: tools/provenance.py",
       "Person: Pedro Anisio de Luna e Silva (pedroanisio@faz.ai)"
@@ -22,7 +22,7 @@
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": true,
       "packageVerificationCode": {
-        "packageVerificationCodeValue": "73d4e87fda314d9b40346e799bacfe02a51bf94d"
+        "packageVerificationCodeValue": "e61a93c9f3236d3bd7cf0a121e0a6096d8f4da76"
       },
       "hasFiles": [
         "SPDXRef-File-adapt-h",
@@ -222,11 +222,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "98bd05075f0629bb6480a564f1e721949978a805"
+          "checksumValue": "cc1270e1b414a8061ba603fcd889837ab3ad5a38"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "6ca0af0b23aa71d1ba16aed51471ea30507d56856ee3436b4417e4d1a910c1f1"
+          "checksumValue": "8bb87356c3f2f949894176dd1bdbe6f9aa99eb7d63ac3e2f3367c630f4943b0a"
         }
       ],
       "licenseConcluded": "MIT",
@@ -244,11 +244,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "e3e14a8c795aac954554c86dc360962bf7d0fa25"
+          "checksumValue": "5c242c7ecac565dfc3e4425063092d08d7cd0115"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "a6e42d1d251a89c5fa01d2c61d126406305c139227365bde17b07992391b79f8"
+          "checksumValue": "dadc1fcecc3133c170a084e39adc91e2ffa0c379d89132d2a62cc30379211700"
         }
       ],
       "licenseConcluded": "MIT",
@@ -288,11 +288,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "fc77ca738a726967532b3efca6ebbee912b4f019"
+          "checksumValue": "3ef7e3b2ef1f6ffcb03ea447d9441b1873d04966"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "bb550fe7474c029972cb0be4bf22de1f30b845b6fb18c92de90dd10fe8a9d750"
+          "checksumValue": "edbdce57a3bb7eb135ea465052acb32627f0a8a828462fd49e2721bb8d66d3f4"
         }
       ],
       "licenseConcluded": "MIT",

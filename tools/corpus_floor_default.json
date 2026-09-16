@@ -29,10 +29,10 @@
       "fixture": "silesia/mr",
       "input_bytes": 9970564,
       "input_md5": "38e623e3093b7bf2003ca4b1bbc19927",
-      "max_container_bytes": 2180392,
+      "max_container_bytes": 2174744,
       "wall_seconds": 9.35,
       "min_bytes_per_second": 1065840.685152775,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 2,174,744 B with the class-history width proved on the whole first block (an encoder policy, no format change), make corpus-floor on AMD Ryzen 5 5600X, quiet host, --verify, round trip verified; the throughput floor is unchanged"
     },
     {
       "fixture": "silesia/nci",

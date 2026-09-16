@@ -42,6 +42,18 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Performance
 
+- The class-history width is proved on the whole first block when the
+  32 KiB sample cannot rank it (an input of 4 MiB and up whose sample
+  puts a width within 1/256 of none): the block's verdict is the file's
+  on every corpus row, and the eight-byte width the sample kept missing
+  is worth 0.1–0.35 % on text and binaries alike. The recall index grows
+  to the format's 2^24 entries under `--max` when the tier has room. On
+  the first 8 MiB of enwik8 1,686,110 → 1,680,015 bytes (−0.36 %), on
+  the first 32 MiB −0.44 %; encoder policies only, no format change.
+  Development builds (`-DADAPT_SIZES_OVERRIDE`) read `ADAPT_SIZES`,
+  `ADAPT_CLASS_CODE` and `ADAPT_DROP_MASK` to code an input under a
+  named model shape: the pressure proxy for the `-7` objective
+  (LOCKS.md).
 - The second max model, bit 7 of the sized max profile's sizing byte
   (`adapt_sizes.model2`, `ADAPT_SIZING_MODEL2`), written by every `--max`
   encode: the first-layer arbiters' weights as int16 in 1/32768 with a

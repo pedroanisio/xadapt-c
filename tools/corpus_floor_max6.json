@@ -15,10 +15,10 @@
       "fixture": "silesia/dickens",
       "input_bytes": 10192446,
       "input_md5": "88334708559f6db57d79096bc0aca07e",
-      "max_container_bytes": 2118816,
+      "max_container_bytes": 2116336,
       "wall_seconds": 13.34,
       "min_bytes_per_second": 764308.9190428917,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs; lowered 2026-09-15 to 2,124,454 B with the max profile's 1/32 arbiter start under the text transform (sizing bit 6 of versions 58/61), make corpus-floor on an Intel Xeon container, round trip verified | 2026-09-15: lowered to 2,118,816 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs; lowered 2026-09-15 to 2,124,454 B with the max profile's 1/32 arbiter start under the text transform (sizing bit 6 of versions 58/61), make corpus-floor on an Intel Xeon container, round trip verified | 2026-09-15: lowered to 2,118,816 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-15: lowered to 2,116,336 B with the class-history width proved on the whole first block (an encoder policy, no format change), make corpus-floor on AMD Ryzen 5 5600X, quiet host, --verify, round trip verified; the throughput floor is unchanged"
     },
     {
       "fixture": "silesia/mozilla",
@@ -78,10 +78,10 @@
       "fixture": "silesia/samba",
       "input_bytes": 21606400,
       "input_md5": "154eaea7ea70e89f6339ff0abf4112ca",
-      "max_container_bytes": 2954116,
+      "max_container_bytes": 2948585,
       "wall_seconds": 36.31,
       "min_bytes_per_second": 595119.0434494637,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 2,954,116 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 2,954,116 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-15: lowered to 2,948,585 B with the class-history width proved on the whole first block (an encoder policy, no format change), make corpus-floor on AMD Ryzen 5 5600X, quiet host, --verify, round trip verified; the throughput floor is unchanged"
     },
     {
       "fixture": "silesia/sao",

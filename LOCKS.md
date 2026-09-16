@@ -2,6 +2,127 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-15 — The class-history width proved on the first block, the recall index's cap under --max, and the -7 objective measured
+
+**Decision.** Two encoder policies, no format change (every sizing bit
+and every model unchanged; a file written before decodes as before):
+
+1. *The class-history width is proved on the whole first block when
+   the sample cannot rank it.* `choose_model` ranked the three widths
+   on a 32 KiB sample with a 1/1024 margin toward none. A class history
+   earns its keep slowly — its eight-byte key spans 2^24 histories — so
+   the sample put it within a thousandth of none whichever way the file
+   went: on the first 8 MiB of enwik8 the sample had eight bytes 14 in
+   12,037 ahead of none, the first 256 KiB block 282 in 82,357, the file
+   0.34 %. Now, on an input the sizer gave a table of 2^21 blocks or
+   more (4 MiB and up at the tiers that hold it, `CLASS_PROOF_TABLE_LOG`)
+   whose sample puts a width within 1/256 of none (`CLASS_BAND`), that
+   width — the sample's favorite, or the narrower of the two when it
+   favored none — is coded against none on the whole block and taken
+   only where it codes the block smaller; the block coding is kept for
+   the set proof, which no longer repeats it. Measured with every width
+   forced on every corpus row (`--max -6` and the default command): the
+   block's verdict is the file's on every row it decides, and the
+   eight-byte width beats the sample's choice on dickens (−0.12 %),
+   samba (−0.19 %), mr (−0.26 % default) with no row worse. The proof
+   costs two block codings on encode when it runs: +4.3 % instructions
+   on the 8 MiB proxy, +0.4 % on enwik8, nothing on decode.
+2. *The recall index grows to the format's 2^24 entries under `--max`*
+   when the tier has room (`RECALL_LOG_SPARE` 24; the normal and fast
+   profiles keep 22, `RECALL_LOG_SPARE_NORMAL`): on the first 32 MiB of
+   enwik8, 2^22 → 2^24 entries 6,297,375 → 6,287,528 B (−0.16 %); at
+   `-9` enwik8 gets 2^23.
+
+Together on the 8 MiB proxy 1,686,110 → **1,680,015 B (−0.36 %)**, on
+the 32 MiB slice 6,297,375 → **6,269,551 B (−0.44 %)**, the bytes
+identical in a clang build and on the baseline instruction set. The
+landing runs (`tools/check_ratio_floor.py --verify`, quiet host, every
+round trip verified byte for byte): enwik8-16MiB 3,266,940 →
+**3,254,114 B** (−0.39 %), enwik8 17,978,253 → **17,883,525 B**
+(−0.53 %, 120.4 CPU s), enwik9 147,896,517 → **146,899,997 B**
+(−0.67 %, 1,183.6 CPU s); the CPU floors stand (the proof's two block
+codings cost 2–5 % on encode, within the 10 % tolerance).
+
+**What was found on the way.** The round's first candidate, an int16
+arbiter rate normalized by each set's running |error| (the NLMS step),
+measured −0.36 % on the proxy — and every byte of it was the sample's
+class-history verdict moving to eight bytes; the rate alone was worth
+−0.04 % at +2.4 % decode cycles, and it cost every binary corpus row
+0.05–0.2 %. Dropped. Rule from it: when a lever moves bytes, diff
+`cadapt info` (class history, contexts, recall, table) between the two
+binaries before crediting the model.
+
+**The `-7` objective** (operator, 2026-09-15: enwik9 must reach the
+`-11` container, 143,307,006 B, at the `-7` tier, 186 MiB). Where it
+stands: enwik9 at `-7` on the previous binary is **156,680,572 B**
+(table 2^23 blocks / 128 MiB, window 16 MiB, recall 2^20, compact side
+tables; 1,259 wall s; 181 MiB peak) — 8.5 % to go; on this binary,
+with the width's proof taking the eight-byte class history there,
+**156,316,451 B** (−0.23 %; 1,170 s) — 8.3 % to go. The gap decomposed
+on the first 32 MiB of enwik8 under the `-7` shape (table 2^18, window
+2^19, recall 2^15, compact — the same bytes per block, window per byte
+and recall per byte as enwik9 at `-7`; `ADAPT_SIZES` in a build with
+`-DADAPT_SIZES_OVERRIDE`) against the `-11` shape (2^21 / 2^24 / 2^19):
+7,027,692 vs 6,557,825 B, 7.2 %. The table eight times larger alone:
+−5.7 %; the recall index sixteen times: −1.0 %, with the window to use
+it −1.7 %; the window alone: 0 (the index's reach, not the window,
+bounds recall — at `-7` the index turns over every 2^20 positions of a
+16 MiB window; at `-11` every 2^24 of 512 MiB); the full side tables:
+−0.43 %. The table's exchange rate at this pressure: −1.55 % (2×),
+−3.3 % (4×), −5.7 % (8×). Claims at the `-7` shape: 59 % hit, 41 % miss,
+68 % of evictions taking a block claimed once and never re-hit.
+
+Measured at the `-7` shape, each alone (bytes vs 7,027,692):
+- the lean set: −0.09 % at −3.4 % instructions;
+- a pressure set dropping the eight kinds of non-positive marginal
+  value there (o6, o8, word3, field, word, sparse2, record, indirect):
+  −0.58 % at −15 % instructions, and +0.01 % at the `-11` shape — text
+  hardly needs them at either pressure; set 4 with the lean bit, which
+  the format has today: −0.22 %;
+- window and index rebalanced at equal memory (2^17 / 2^17): −0.19 %;
+- recall insertion at one position in 4 / 8 / 16 (content-defined):
+  −0.06 / +0.02 / +0.16 %; dense recent ways beside sparse far ways:
+  −0.06 %;
+- admission control (a block on a context's second claim, an aged bit
+  sketch): +0.17 to +0.30 % — the first observation is worth more than
+  the eviction it causes;
+- a hashed order-5 indirect context (what followed, two bytes) in o6's
+  slot, at equal memory (half the table + the successors): +0.87 % —
+  worth −0.42 % against the half table, a third of what the table's own
+  doubling buys;
+- PPMd-style information inheritance (a fresh block starts with the
+  next lower order's states): +3.8 %.
+Kind ablation at the `-7` shape (dropping one; + is worse): o1 +0.28,
+o2 +0.20, o3 +0.08, o4 +0.05, o6 −0.10, word −0.04, field −0.05,
+sparse +0.08, record −0.01, class +0.40, word2 +0.04, sparse2 −0.02,
+indirect −0.01, nibbles +0.11, nest +0.64, o5 +0.02, o8 −0.09, wordlc
++0.03, word3 −0.07, wordc +0.09 %.
+
+Also measured and not landed: a `-12` tier (4 GiB) with a 2^27-block
+table, enwik9 at `-11` 143,307,006 → 141,532,476 B (−1.24 %, 2.7 GiB
+peak, 1,381 wall s) — the opposite of the objective, so reverted
+(`TABLE_LOG_MAX` 27, a `-12` preset of 4,096 MiB, a size_t guard in
+`model_new`; a reader before it would refuse such a file). The normal profile's
+21-byte class history wins at file level on webster (−1.4 %), reymont
+(−2.1 %) and samba (−0.35 %) and loses on dickens (+0.44 %), and no
+256 KiB sample ranks it (the block prefers eight bytes on all four):
+a proof longer than a block is what it needs, and the throughput floors
+do not hold one.
+
+**Consequences.**
+- The floors are re-locked below on this binary; the `-6` and default
+  corpus floors are lowered where the gate found smaller containers.
+- Development builds (`-DADAPT_SIZES_OVERRIDE`) read `ADAPT_SIZES`
+  (table:window:recall:compact:lean), `ADAPT_CLASS_CODE` and
+  `ADAPT_DROP_MASK`: the pressure proxy for the `-7` objective is the
+  32 MiB slice at `18:19:15:1:0`, class 1, against `21:24:19:0:0`.
+- The `-7` objective is 8.5 % away and 85 % of it is table pressure; the
+  levers above sum to about 1 %. What remains is structural: denser
+  blocks for the kinds that cannot recur at this pressure, or a model
+  that spends its 128 MiB on something other than nibble blocks.
+
+**Status.** Landed 2026-09-15 on branch `ratio-speed`.
+
 ## 2026-09-15 — The second max model: int16 arbiters, four re-purposed context slots, four-way recall, a fifth arbiter
 
 **Decision.** Bit 7 of the sized max profile's sizing byte
