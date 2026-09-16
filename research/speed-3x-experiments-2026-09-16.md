@@ -343,6 +343,25 @@ throughput product for callers who want it and never a route to the
 benchmark. And any figure quoted for it must come from a full fixture: the
 8 MiB proxy guards the model, not the shape of this curve.
 
+### The profile ladder on one host, with `--mid`
+
+Every profile on the whole of enwik8, this container, rebased onto `0baa265`.
+The `--max` row is the locked container byte for byte and the `--mid` row is
+`0baa265`'s figure byte for byte, so the ladder is comparable end to end:
+
+| Profile | Container | vs `--max` lean | Wall |
+|---|---|---|---|
+| `--max --allocation context --contexts lean` | 17,902,645 B | — | 131.7 s |
+| `--max` | 18,008,117 B | +0.59 % | 150.7 s |
+| default (normal) | 18,500,473 B | +3.34 % | 86.5 s |
+| default `--contexts lean` | 18,545,680 B | +3.59 % | 78.8 s |
+| **`--mid`** | **18,761,302 B** | +4.80 % | **56.3 s** |
+| `--fast` | 21,663,531 B | +21.0 % | 35.6 s |
+
+`--mid` is 2.3× the speed of the locked command for 4.8 % of ratio, and 1.5×
+the default for 1.4 % — the only point on this ladder that moves speed by more
+than the few percent every lever in this note reached.
+
 ## The experiments
 
 Each is independent: it can be built, measured and accepted or rejected on its
@@ -362,12 +381,12 @@ own, against the locked floors. Complexity is XS to XL, never time.
 | **B5** | Update skipping on saturated cells | open | 1.1–1.25× expected | small | M |
 | **B6** | Arbiter weights refreshed per nibble, not per bit | open | 1.2–1.4× expected | measured | L |
 | **B7** | Profile-guided layout of the per-bit path | open | 1.0–1.05× expected | 0 | S |
-| **C1** | LZP bypass as an input-detected path | **refuted on text** | 1.4× ceiling at a 32 % error rate | gated | M |
+| **C1** | LZP bypass as an input-detected path | **refuted twice** | 1.4× ceiling here; main measured −1.2 % cycles for +0.24 % | gated | M |
 | **C2** | Run-length and zero-run transforms ahead of the model | open | large on records | 0 (reversible) | M |
 | **C3** | Fixed-stride delta detection | open | large on tables | 0 (reversible) | M |
 | **C4** | Small-alphabet packing | open | large on 2–16 symbol data | 0 (reversible) | M |
 | **C5** | Per-block model choice from a measured cost estimate | open | 1.2–2× on mixed input | ~0 | M |
-| **D1** | A `--high` rung between `--fast` and `--max` | **priced by B2** | 1.20× at +0.45 %, 1.28× at +1.05 % | its own lock | L |
+| **D1** | A rung between `--fast` and the default | **landed as `--mid`** | 1.4× encode at +1.4 % on enwik8 | its own versions 76–79 | L |
 
 ### Group A — parallel encoding, which trades memory for time
 
@@ -531,38 +550,48 @@ rows, against encoding each row separately.
 
 ### Group D — the product answer
 
-**D1. A `--high` rung between `--fast` and `--max`, priced by B2's curve.**
-This is what `mcm` actually sells, and its ladder shows why: a rung at +1.3 %
-of bytes for −23 % of time is a rung many callers want. B2 supplies this
-rung's content and its price, measured rather than argued — five kinds out for
-1.20× at +0.448 %, six for 1.24× at +0.667 %, eight for 1.28× at +1.050 % —
-and the B-group experiments that miss the `--max` floors by a small margin
-join it later.
+**D1. A rung between `--fast` and the default — landed as `--mid`
+(`0baa265`), not by this note.** While the measurements above were running, the
+profile this section proposed was built and merged: the normal profile's
+tables under seven fixed hashed contexts (orders 2, 3, 4 and 6, word, record
+and the class history; order-1, field and sparse left out) with the first
+arbiter alone as the verdict and both estimation stages kept, on versions
+76–79. Its shape comes from the lpaq family as Mahoney's *Data Compression
+Explained* describes it, re-implemented from that description (`DLV-4`).
 
-Landing it takes a new format version: `DLV-1` holds a published version's
-model fixed, all eight `CONTEXT_SETS` codes are used and every bit of the
-sizing byte is spoken for, so the leaner set cannot ride an existing number.
-Steps, in order — confirm the knee on the mixed corpus and on enwik9, since
-the set that dominates 8 MiB of English Wikipedia is not yet known to dominate
-records, binaries or CJK; choose the point; take the next free version pair
-(76/77) with its decoder side and its vectors; lock its own floors so the
-`--max` floors are untouched; and record the choice in `LOCKS.md`.
+On the reference host it gives enwik8 18,761,302 B, 1.4 % over the default's
+18,500,473 B, for 29 % less encode time and 24 % less decode time; enwik9
+172,472,731 B at +2.4 % for 28 % and 26 %. That is a far better exchange rate
+than the slot deletion measured above, which returned 1.11× for 0.79 % against
+`--max --contexts lean`, and it is the right comparison: a rung is worth
+building against the *default*, where the arbiters it removes are a larger
+share of the work, not against the max profile whose time has moved into the
+table claims.
 
-The decision it needs from the operator is the one number this note cannot
-supply: how much ratio the rung may spend. A version number is permanent —
-every container it writes must decode forever — so it is worth spending once,
-on a point chosen from the curve above.
+The two results agree on mechanism and disagree on where to spend it. `--mid`
+drops three kinds and four of five arbiters together; this note's B2 curve
+dropped kinds alone and found the mixer nearly free at the max profile's
+working-set size. Dropping arbiters is what pays, and the reverted speed batch
+(`b3b7b4e`) had already measured the one-arbiter normal profile at +1.05 % for
+−19 % cycles before either.
+
+What is left for `bench/slot_price.py` is the choice `--mid` fixed by hand:
+its LOCKS entry chose the three dropped kinds by leaving each of ten out in
+turn on 8 MiB of enwik8, which is what the tool automates, and the cross-corpus
+rows above say an 8 MiB text fixture is not enough to fix a set — the same six
+kinds cost 0.129 % on `mozilla` and 5.375 % on `xml`. Pricing `--mid`'s own
+seven kinds across the acceptance corpus is the next use of the tool.
+
 
 ## Position
 
-Build D1 as a **wider set table with a per-file choice**, not as one leaner
-set, and decide first whether 1.11× is worth a permanent version number. That
-is what the lever returns on the whole of enwik8 for 0.79 % of ratio, at the
-locked memory and with the model smaller than the one it replaces; the 1.25×
-to 1.27× the acceptance rows showed was measured on 4 to 8 MiB prefixes and
-the full-file row says such prefixes overstate it. The per-file part is not
-optional either way: the same six kinds cost 0.129 % on `mozilla` and 5.375 %
-on `xml`. The codec already has the mechanism, in the eight `CONTEXT_SETS` a
+Price `--mid`'s seven fixed kinds across the acceptance corpus with
+`bench/slot_price.py`, because that profile fixed its set from one 8 MiB text
+fixture and the cross-corpus rows above show a set chosen that way does not
+transfer — the same six kinds cost 0.129 % on `mozilla` and 5.375 % on `xml`.
+Slot deletion on its own is not worth a version number: 1.11× for 0.79 % on a
+full file, against `--mid`'s 1.4× for 1.4 %. The lever that pays is dropping
+*arbiters*, which `--mid` does and this note's B2 curve did not touch. The codec already has the mechanism, in the eight `CONTEXT_SETS` a
 file chooses from in its first block; what the price tables add is evidence
 for which sets belong in that table and a rule for picking one.
 
