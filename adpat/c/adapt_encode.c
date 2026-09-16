@@ -119,6 +119,7 @@ adapt_sizes adapt_sizes_fast(adapt_sizes sizes) {
     }
     sizes.set_code = 0;
     sizes.period = 0;
+    sizes.contexts = ADAPT_CONTEXTS_AUTO;
     return sizes;
 }
 
@@ -786,6 +787,9 @@ static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_cod
  * less than a thousandth lost the whole file by seven. */
 static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
                                  uint8_t *class_out, uint8_t *set_out, uint16_t *period_out, adapt_error *error) {
+    /* ADAPT_CONTEXTS_LEAN: the set is given (set 3, and `lean` under the
+     * max profile, both already in `sizes`); the width is still chosen */
+    const int set_given = sizes.contexts == ADAPT_CONTEXTS_LEAN;
     size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
     /* The period first: the contexts every trial runs depend on it. */
     sizes.period = sizes.fast ? 0 : adapt_detect_period(block, head);
@@ -811,7 +815,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     none = coded_len[0];
     if (none < CLASS_EVIDENCE) {
         *class_out = 0;
-        *set_out = 0;
+        *set_out = set_given ? sizes.set_code : 0;
         return ADAPT_OK;
     }
     best_size = none - none / 1024;
@@ -851,6 +855,11 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     }
 #endif
     full = coded_len[class_code];
+    if (set_given) {
+        *class_out = class_code;
+        *set_out = sizes.set_code;
+        return ADAPT_OK;
+    }
     /* The fast profile's sets all cost the decoder the same, so every one
      * is tried and the smallest taken, on the terms below: it must beat
      * the first set by SET_MARGIN of the sample, and a choice on a
@@ -1882,9 +1891,15 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     } else {
         sizes.text = 0;
     }
+    /* the lean set when asked for: set 3, and the lean bit under the max
+     * profile (the fast profile has its own menu and refuses it) */
+    if (sizes.contexts == ADAPT_CONTEXTS_LEAN) {
+        sizes.set_code = 3;
+        sizes.lean = (uint8_t)(sizes.max && !sizes.adaptive && !sizes.bmp);
+    }
     if (n == 0 || (entropy_256(block, n) >= SKIP_ENTROPY_256 && !repeats_within(block, n, scan))) {
         sizes.class_code = 0;
-        sizes.set_code = 0;
+        sizes.set_code = sizes.contexts == ADAPT_CONTEXTS_LEAN ? 3 : 0;
         sizes.period = 0;
     } else {
         status = choose_model(sizes, block, n, framed, framed_cap, &sizes.class_code, &sizes.set_code, &sizes.period, error);
@@ -2328,7 +2343,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);

@@ -241,6 +241,9 @@ extern "C" {
 #define ADAPT_TEXT_METADATA_LAST_VERSION 71u
 #define ADAPT_TEXT_AUTO 0u
 #define ADAPT_TEXT_ON 1u
+/* adapt_sizes.contexts: the encoder's choice of the context set. */
+#define ADAPT_CONTEXTS_AUTO 0u
+#define ADAPT_CONTEXTS_LEAN 1u
 #define ADAPT_TEXT_OFF 2u
 /* The input length from which the sizing policies leave the transform to
  * the first block's look (ADAPT_TEXT_AUTO); below it, or with the length
@@ -434,11 +437,22 @@ typedef struct adapt_sizes {
      * ADAPT_COMPACT_TABLE_LOG); a decoder sets it from the version, so an
      * older max file keeps its full tables. */
     uint8_t compact;
-    /* 1 when a compact model also leaves out its lean set's three contexts
-     * (ADAPT_MAX_LEAN_VERSION); never without `compact`. The context
-     * policy sets it with `compact` at a table of ADAPT_COMPACT_TABLE_LOG
-     * blocks or fewer; a decoder sets it from the version. */
+    /* 1 when the max model leaves out its lean set's three contexts (o8,
+     * word3, wordc: ADAPT_MAX_LEAN_VERSION, or the sizing byte's
+     * ADAPT_SIZING_LEAN). The context policy sets it with `compact` at a
+     * table of ADAPT_COMPACT_TABLE_LOG blocks or fewer; ADAPT_CONTEXTS_LEAN
+     * sets it with the full side tables too, for speed. A decoder sets it
+     * from the version or the sizing byte. */
     uint8_t lean;
+    /* How the encoder chooses the context set: ADAPT_CONTEXTS_AUTO (the
+     * default, 0) by coding the first block under each candidate,
+     * ADAPT_CONTEXTS_LEAN takes the lean set outright — set 3 (word and
+     * field left out) and, under the max profile, `lean` (o8, word3,
+     * wordc) — the trade of about 0.1 % of bytes for about 12 % less
+     * encode time and 8 % less decode time measured on text (LOCKS.md);
+     * the class-history width is still chosen. Never with `fast`. The
+     * header records the set the encoder took; a decoder leaves this 0. */
+    uint8_t contexts;
     /* The context table's fraction, 0 to 7 (ADAPT_SIZING_FRAC_MAX): it
      * holds (8 + table_frac) << (table_log - 3) blocks. Only the sized max
      * profile carries it (ADAPT_MAX_SIZED_VERSION); every other version

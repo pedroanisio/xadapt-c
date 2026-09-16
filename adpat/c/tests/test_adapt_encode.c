@@ -561,6 +561,54 @@ static void reset(reader *r, const uint8_t *src, size_t len, size_t chunk, write
  * ADAPT_MAX_LEAN_VERSION while the table stays at that size; decoded by
  * the same reader; never at the default budget on a large input, where
  * the bytes are the locked ones. */
+/* ADAPT_CONTEXTS_LEAN: the lean set taken outright — set 3 and, under the
+ * max profile, the lean bit with the full side tables, a combination the
+ * format now allows; the normal profile takes set 3; the fast profile
+ * refuses the policy; the containers decode. */
+static void test_lean_contexts(void) {
+    size_t n = 60000, i, back_len = 0;
+    uint8_t *data = malloc(n);
+    uint8_t *coded = malloc(n + 4096);
+    uint8_t *back = NULL;
+    reader r;
+    writer w;
+    adapt_sizes s, fast;
+    adapt_error error;
+    for (i = 0; i < n; i++) {
+        data[i] = (uint8_t)"the quick brown fox jumps over the lazy dog, "[i % 45];
+    }
+    CHECK_STATUS(adapt_sizes_for_input_max(1, n, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    s = adapt_sizes_max(s);
+    CHECK(s.lean == 0 && s.compact == 0);
+    s.lean = 1;
+    CHECK(adapt_sizes_valid(s)); /* the lean bit no longer needs the compact tables */
+    s.lean = 0;
+    s.contexts = ADAPT_CONTEXTS_LEAN;
+    CHECK(adapt_sizes_valid(s));
+    fast = adapt_sizes_fast(s);
+    CHECK(fast.contexts == ADAPT_CONTEXTS_AUTO && adapt_sizes_valid(fast));
+    fast.contexts = ADAPT_CONTEXTS_LEAN;
+    CHECK(!adapt_sizes_valid(fast));
+    reset(&r, data, n, 1000, &w, coded, n + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error), ADAPT_OK);
+    CHECK(w.len > 9 && coded[4] == ADAPT_MAX_PRESSURE_VERSION && (coded[6] >> 5) == 3 &&
+          (coded[8] & (ADAPT_SIZING_LEAN | ADAPT_SIZING_COMPACT)) == ADAPT_SIZING_LEAN);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == n && memcmp(back, data, n) == 0);
+    adapt_free(back);
+    back = NULL;
+    CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    s.contexts = ADAPT_CONTEXTS_LEAN;
+    reset(&r, data, n, 1000, &w, coded, n + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error), ADAPT_OK);
+    CHECK(w.len > 7 && coded[4] == ADAPT_FORMAT_VERSION && (coded[6] >> 5) == 3);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == n && memcmp(back, data, n) == 0);
+    adapt_free(back);
+    free(coded);
+    free(data);
+}
+
 static void test_compact_side_tables(void) {
     adapt_sizes s, full;
     adapt_error error;
@@ -639,7 +687,11 @@ static void test_compact_side_tables(void) {
     full = s;
     full.compact = 0;
     full.lean = 1;
-    CHECK(!adapt_sizes_valid(full));
+    CHECK(adapt_sizes_valid(full)); /* the lean set with the full tables: --contexts lean */
+    full.max = 0;
+    CHECK(!adapt_sizes_valid(full)); /* the lean bit is the max profile's */
+    full = s;
+    full.compact = 0;
     full.lean = 0;
     CHECK(adapt_sizes_valid(full));
     full = adapt_sizes_fast(adapt_sizes_max(s));
@@ -2018,6 +2070,7 @@ int main(int argc, char **argv) {
     SHARD(test_context_allocation());
     SHARD(test_compact_side_tables());
     SHARD(test_class_width_proof());
+    SHARD(test_lean_contexts());
     SHARD(test_fast_fits_where_normal_fits());
     SHARD(test_roundtrips());
     SHARD(test_streams());

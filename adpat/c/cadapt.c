@@ -575,6 +575,7 @@ static void print_usage(FILE *stream) {
             "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -11]\n"
             "                [--threads <n>] [--segment-bytes <bytes>]\n"
             "                [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation window|context]\n"
+            "                [--contexts auto|lean]\n"
             "  cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]\n"
             "  cadapt info   <file>\n"
             "  cadapt --version\n"
@@ -609,6 +610,10 @@ static void print_usage(FILE *stream) {
             "for it whatever the input, --transform none refuses it.\n"
             "--allocation context grows the context table before the recall window;\n"
             "window is the default. Either policy can win depending on the input.\n"
+            "--contexts lean takes the lean context set outright (word and field left out;\n"
+            "under --max o8, word3 and wordc too) instead of choosing the set from the first\n"
+            "block: on text about 12 %% less encode time and 8 %% less decode time for about\n"
+            "0.1 %% more bytes; auto, the default, chooses. Not with --fast.\n"
             "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
             "preset: 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB; -10 and -11 are\n"
             "1 and 2 GiB, above xz's ladder. A preset below the smallest model of the\n"
@@ -3502,7 +3507,7 @@ done:
 }
 
 static int encode_command(int argc, char **argv) {
-    static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", "--allocation", NULL};
+    static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", "--allocation", "--contexts", NULL};
     static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", "-0", "-1", "-2", "-3",
                                         "-4",      "-5",       "-6",          "-7",     "-8",    "-9", "-10", "-11", NULL};
     args a;
@@ -3510,7 +3515,7 @@ static int encode_command(int argc, char **argv) {
     char *output = NULL;
     int force, verify, alongside, rc, known_length;
     unsigned adaptive = 0;
-    int bmp_transform_requested = 0, context_first = 0;
+    int bmp_transform_requested = 0, context_first = 0, lean_contexts = 0;
     int text_transform = ADAPT_TEXT_AUTO;
     uint64_t profile_memory;
     uint64_t max_memory = ADAPT_DEFAULT_MAX_MEMORY, length = 0, hundredths, threads, segment_bytes = ADAPT_SEGMENT_BYTES;
@@ -3567,6 +3572,14 @@ static int encode_command(int argc, char **argv) {
         if (strcmp(text, "context") == 0) context_first = 1;
         else if (strcmp(text, "window") != 0)
             return usage_error("--allocation: expected window or context: %s", text);
+    }
+    text = value_of(&a, "--contexts");
+    if (text != NULL) {
+        if (strcmp(text, "lean") == 0) lean_contexts = 1;
+        else if (strcmp(text, "auto") != 0)
+            return usage_error("--contexts: expected auto or lean: %s", text);
+        if (lean_contexts && has_flag(&a, "--fast"))
+            return usage_error("--contexts lean applies to the normal and max profiles, not --fast%s", "");
     }
     text = value_of(&a, "--adaptive");
     if (text != NULL) {
@@ -3755,6 +3768,7 @@ static int encode_command(int argc, char **argv) {
 #endif
     sizes.archive = (uint8_t)is_folder;
     sizes.bmp = (uint8_t)bmp_transform_requested;
+    sizes.contexts = (uint8_t)(lean_contexts ? ADAPT_CONTEXTS_LEAN : ADAPT_CONTEXTS_AUTO);
     /* the text transform: the policy's choice by the length, unless asked
      * for or refused; never over the adaptive predictors or the BMP transform */
     if (text_transform != ADAPT_TEXT_AUTO) sizes.text = (uint8_t)text_transform;
@@ -4117,7 +4131,10 @@ static int info_command(int argc, char **argv) {
         }
     }
     printf("profile         %s%s%s\n", sizes.max && sizes.adaptive ? "max-" : "", sizes.adaptive ? adaptive_name(sizes.adaptive) : (sizes.fast ? "fast" : (sizes.max ? "max" : "normal")),
-           sizes.lean ? " (compact side tables, lean contexts)" : sizes.compact ? " (compact side tables)" : "");
+           sizes.lean && sizes.compact ? " (compact side tables, lean contexts)"
+           : sizes.lean                ? " (lean contexts)"
+           : sizes.compact             ? " (compact side tables)"
+                                       : "");
     printf("x86 transform   %s\n", sizes.x86 ? "yes" : "no");
     printf("text transform  %s\n", sizes.text == ADAPT_TEXT_ON ? "yes" : "no");
     printf("arbiter start   %s\n", sizes.low_start ? "1/32" : "1/4");

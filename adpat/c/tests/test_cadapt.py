@@ -188,6 +188,36 @@ class AllocationTest(CodecTest):
         self.assertTrue((restored / "empty").is_dir())
 
     @LONG
+    def test_lean_contexts_take_the_set_outright_and_decode(self):
+        # --contexts lean writes set 3 (word and field left out) and, under
+        # --max, the lean bit with the full side tables — a sizing byte the
+        # readers before it refused — for less time; auto keeps the trial's
+        # choice and the bytes of the default. The normal profile takes set
+        # 3 alone. Every container decodes to the input.
+        block = (SOURCE * ((1 << 18) // len(SOURCE) + 1))[: 1 << 18]
+        lean = self.run_codec("encode", "-", "--max", "--contexts", "lean", data=block)
+        self.assertEqual(lean.returncode, 0, lean.stderr)
+        self.assertEqual(lean.stdout[4], 72)
+        self.assertEqual(lean.stdout[6] >> 5, 3)
+        self.assertEqual(lean.stdout[8] & 3, 2, "the lean bit without the compact tables")
+        auto = self.run_codec("encode", "-", "--max", "--contexts", "auto", data=block)
+        plain = self.run_codec("encode", "-", "--max", data=block)
+        self.assertEqual(auto.stdout, plain.stdout)
+        normal = self.run_codec("encode", "-", "--contexts", "lean", data=block)
+        self.assertEqual(normal.returncode, 0, normal.stderr)
+        self.assertEqual(normal.stdout[4], 19)
+        self.assertEqual(normal.stdout[6] >> 5, 3)
+        for container in (lean.stdout, normal.stdout):
+            back = self.run_codec("decode", "-", data=container)
+            self.assertEqual(back.returncode, 0, back.stderr)
+            self.assertEqual(back.stdout, block)
+        named = self.root / "lean.adpt"
+        run = self.run_codec("encode", self.source, "-o", named, "--max", "--contexts", "lean")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        info = self.run_codec("info", named)
+        self.assertIn(b"contexts        all but word, field, o8, word3, wordc\n", info.stdout)
+        self.assertIn(b"profile         max (lean contexts)\n", info.stdout)
+
     def test_named_input_sizes_stop_at_its_target_and_spend_the_slack(self):
         # The named file's length is known, so its table stops at the input's
         # target: 4 MiB, the shortest input whose target is 2^21, reaches it
@@ -1194,6 +1224,8 @@ class SurfaceTest(unittest.TestCase):
             (("encode", self.source, "--max-memory", "lots"), b"--max-memory"),
             (("encode", self.source, "--max-memory", str(64 << 20)), b"--max-memory is a decode option"),
             (("encode", self.source, "-12"), b"unknown option -12"),
+            (("encode", self.source, "--contexts", "bogus"), b"--contexts"),
+            (("encode", self.source, "--contexts", "lean", "--fast"), b"--contexts lean applies"),
             (("encode", self.source, "--threads", "0"), b"--threads"),
             (("encode", self.source, "--threads", "2", "--segment-bytes", "100"), b"--segment-bytes"),
             (("encode", self.source, "--segment-bytes", "262144"), b"needs --threads"),

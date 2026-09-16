@@ -204,10 +204,8 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         if (version == ADAPT_MAX_PRESSURE_VERSION && !s.model2) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
-        /* the lean set is never run with the full side tables */
-        if (s.lean && !s.compact) {
-            return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
-        }
+        /* the lean set ran only with the compact side tables until
+         * ADAPT_CONTEXTS_LEAN, which takes it with the full ones */
         s.table_frac = (uint8_t)((sizing >> ADAPT_SIZING_FRAC_SHIFT) & ADAPT_SIZING_FRAC_MAX);
     }
     if (s.bmp) {

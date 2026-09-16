@@ -3036,7 +3036,9 @@ static inline int sizes_valid(adapt_sizes s) {
            (!s.fast || s.period == 0) && s.segmented <= 1 && s.max <= 1 && !(s.fast && s.max) && s.x86 <= 1 &&
            s.archive <= 1 && s.adaptive <= 3 && (!s.adaptive || !s.fast) &&
            s.bmp <= 1 && (!s.bmp || (!s.fast && !s.x86 && !s.archive)) &&
-           s.compact <= 1 && (!s.compact || (s.max && !s.adaptive && !s.bmp)) && s.lean <= 1 && (!s.lean || s.compact) &&
+           s.compact <= 1 && (!s.compact || (s.max && !s.adaptive && !s.bmp)) && s.lean <= 1 &&
+           (!s.lean || (s.max && !s.adaptive && !s.bmp)) && s.contexts <= ADAPT_CONTEXTS_LEAN &&
+           (s.contexts == ADAPT_CONTEXTS_AUTO || !s.fast) &&
            s.table_frac <= ADAPT_SIZING_FRAC_MAX && (s.table_frac == 0 || (s.max && !s.adaptive && !s.bmp)) &&
            s.text <= ADAPT_TEXT_OFF && (s.text != ADAPT_TEXT_ON || (!s.adaptive && !s.bmp && !s.x86)) &&
            s.low_start <= 1 && (!s.low_start || (s.max && !s.adaptive && !s.bmp)) &&
