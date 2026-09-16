@@ -205,3 +205,23 @@ python3 bench/telemetry.py run --corpus static/corpus/scripts/cyrillic-ru.zip --
 The measurements the rows gave are in
 [research/scripts-measurement.md](../research/scripts-measurement.md).
 
+
+## The redundancy probe
+
+`redundancy_probe.c` prices the two front-end shortcuts that make
+byte-oriented context-mixing compressors fast, against an input, before
+either is built into the codec: a Bloom-style LZP literal-prediction bypass,
+and a flag-free gate on contexts that have settled on one following byte.
+It reads the input and writes nothing, so it reports what a shortcut could
+*cover*, never what it would cost in container bytes — that number comes from
+an encode. Standard library only; no codec source or constant is involved.
+
+```sh
+cc -std=c99 -O2 -o /tmp/redundancy-probe bench/redundancy_probe.c
+/tmp/redundancy-probe static/corpus/enwik8 --limit 8388608
+/tmp/redundancy-probe static/corpus/enwik8 --limit 8388608 --min-seen 8
+python3 -B bench/test_redundancy_probe.py          # builds its own copy
+```
+
+The measurements it gave, and the experiments they rank, are in
+[research/speed-3x-experiments-2026-09-16.md](../research/speed-3x-experiments-2026-09-16.md).
