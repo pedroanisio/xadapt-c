@@ -1224,6 +1224,8 @@ typedef struct model {
     /* model2's pressure-gated parts (MODEL2_PRESSURE_LOG): the o8 and
      * word3 slots re-purposed, and the fifth arbiter */
     int slots_on, extra_on;
+    /* groups of eight slots the vector lane path runs: ceil((1 + hashed) / 8) */
+    int lane_groups;
     size_t mix34_row_mask;
     size_t apm2_mask;
     /* The record period in bytes, or 0: when set, the record and field
@@ -2124,9 +2126,12 @@ static inline ADAPT_TARGET_V3 void context_lanes_v3(model *m) {
     const __m256i one = _mm256_set1_epi32(1), c512 = _mm256_set1_epi32(512), c4096 = _mm256_set1_epi32(4096);
     const __m256i zero = _mm256_setzero_si256(), two = _mm256_set1_epi32(2), three = _mm256_set1_epi32(3);
     __m256i l1[3], l2[3];
+    /* the groups the file's slots fill: a set that leaves kinds out ends
+     * short of the third, and its lanes past the last slot stay zero */
+    const int groups = m->lane_groups;
     int g;
     size_t i;
-    for (g = 0; g < 3; g++) {
+    for (g = 0; g < groups; g++) {
         /* the eight cells by scalar loads: a gather is microcoded on the
          * cores this runs on, and dearer than the inserts */
         const uint8_t *cur = m->cur + 8 * g;
@@ -2144,16 +2149,21 @@ static inline ADAPT_TARGET_V3 void context_lanes_v3(model *m) {
         l2[g] = _mm256_or_si256(_mm256_and_si256(q, _mm256_cmpeq_epi32(mode, one)),
                                 _mm256_and_si256(down, _mm256_cmpeq_epi32(mode, two)));
     }
-    for (g = 0; g < 3; g++) {
+    for (g = 0; g < groups; g++) {
         _mm256_storeu_si256((__m256i *)(void *)(m->st + (1 + HASHED) + 8 * g), l1[g]);
     }
-    for (g = 0; g < 3; g++) {
+    for (g = 0; g < groups; g++) {
         _mm256_storeu_si256((__m256i *)(void *)(m->st + 2 * (1 + HASHED) + 8 * g), l2[g]);
     }
     {
+        /* the last group's lanes past the last slot, in each plane, up
+         * to the plane's end (a third group spills into the next plane,
+         * which is stored after it); the lanes beyond the groups were
+         * zeroed once, at model_new, and no store reaches them */
         int32_t *st_ = m->st;
         const size_t from = 1 + m->hashed;
-        for (i = from; i <= HASHED; i++) {
+        const size_t to = (size_t)groups * 8 < 1 + HASHED ? (size_t)groups * 8 : 1 + HASHED;
+        for (i = from; i < to; i++) {
             st_[i] = 0;
             st_[(1 + HASHED) + i] = 0;
             st_[2 * (1 + HASHED) + i] = 0;
@@ -2175,9 +2185,10 @@ static inline ADAPT_TARGET_V3 void memories_learn_v3(model *m, uint32_t bit, siz
     uint8_t *const *cbase = m->cbase;
     uint8_t *cur = m->cur;
     const size_t slots = 1 + m->hashed;
+    const int groups = m->lane_groups;
     int g;
     size_t i;
-    for (g = 0; g < 3; g++) {
+    for (g = 0; g < groups; g++) {
         __m256i c = _mm256_loadu_si256((const __m256i *)(const void *)(m->cellv + 8 * g));
         __m256i n = _mm256_and_si256(c, m255);
         __m256i p = _mm256_srli_epi32(c, 10);
@@ -2196,7 +2207,7 @@ static inline ADAPT_TARGET_V3 void memories_learn_v3(model *m, uint32_t bit, siz
      * of them cannot be forwarded and would wait for every one to
      * commit. The state stores are bytes, which could alias anything,
      * so the bounds and pointers are locals. */
-    for (g = 0; g < 3; g++) {
+    for (g = 0; g < groups; g++) {
         uint64_t word = 0;
         size_t base = (size_t)g * 8, k, n;
         if (base >= slots) {
@@ -2800,6 +2811,7 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
             }
         }
         m->runs = (set & NO_RUNS) ? 0 : RUNS_OF(m->max);
+        m->lane_groups = (int)((1 + m->hashed + 7) / 8);
     }
     m->hmask = ((size_t)1 << sizes.window_log) - 1;
     for (i = 0; i < RUNS * RUN_BUCKETS; i++) {
