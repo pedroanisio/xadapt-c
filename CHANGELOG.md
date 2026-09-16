@@ -18,10 +18,14 @@ The binary reports `0.12.0`; the tag is pending.
 - `cadapt 0.12.0 --max --allocation context` is listed on the Large Text
   Compression Benchmark (mattmahoney.net/dc/text.html, 2026-09-15): enwik9
   150,063,628 B plus a 209,893 B decompressor, total 150,273,521 B, rank
-  30 of 226, 661 MB, note 114. The README states the two goals against
-  that table — the smallest memory of every entry ranked above (already
-  so: the next is 1,542 MB) and a top-20 place (below 125,099,359 B total
-  on that day's table). `tools/ltcb/transcribe_ltcb_table.py` transcribes
+  30 of 226, 661 MB, note 114. The enwik9 goal is now the canonical
+  top-20 figure of that table (operator, 2026-09-16; `DLV-3`, LOCKS.md):
+  place 20's total 125,099,359 B less the 209,893 B decompressor less one
+  byte — **enwik9 at most 124,889,465 B** — computed from the snapshot by
+  `tools/ltcb/ltcb_goal.py`, which also states the memory claim (661 MB,
+  the least of every entry ranked above; the least above is 1,542 MB);
+  `tools/test_docs.py` holds the README and `docs/CONSTRAINTS.md` to the
+  figures it prints. `tools/ltcb/transcribe_ltcb_table.py` transcribes
   the page's main table into `research/ltcb-main-table.csv` under the
   rules `research/ltcb-tables.md` records, checked by reproducing the 224
   hand-transcribed rows of the previous snapshot; the snapshot is the page

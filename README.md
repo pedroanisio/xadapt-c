@@ -513,20 +513,25 @@ by [tools/ltcb/transcribe_ltcb_table.py](tools/ltcb/transcribe_ltcb_table.py)
 under the rules [research/ltcb-tables.md](research/ltcb-tables.md) records;
 the submission itself is [docs/ltcb-submission.md](docs/ltcb-submission.md).
 
-Two goals stand on this table, beside `DLV-3`'s rows (enwik8 17 MB;
-enwik9 below 130 MB), which stay the judge of nothing but themselves:
+Two goals stand on this table (`DLV-3`, which keeps the rows the judge
+of nothing but themselves):
 
+- **A place in the top 20 — the canonical enwik9 goal.** Place 20 on the
+  2026-09-15 table is paq8px_v206fix1 at 125,099,359 B of enwik9 plus
+  decompressor, so the goal is **enwik9 at most 124,889,465 B** with the
+  entry's 209,893 B decompressor (that total, less the zip, less one byte:
+  a tie does not overtake). The figure is computed from the snapshot by
+  [tools/ltcb/ltcb_goal.py](tools/ltcb/ltcb_goal.py) and never typed —
+  the table moves as entries are added, a re-fetched snapshot moves the
+  figure, and `make check` (`tools/test_docs.py`) holds this section and
+  `docs/CONSTRAINTS.md` to the figure the tool prints.
 - **The leader on memory footprint.** At 661 MB the entry already uses
-  the least memory of anything ranked above it — the next is drt|lpaq9m
-  at 1,542 MB, and every entry in the top 20 uses 3,751 MB or more (gmix
-  v1) — and it is to stay the smallest of every entry it overtakes: a
-  gain that needs a larger model than the tier holds is not this goal's
-  gain (`RUN-1`).
-- **A place in the top 20.** On the 2026-09-15 table the twentieth entry
-  (paq8px_v206fix1) totals 125,099,359 B, so the place needs enwik9 below
-  about 124.9 MB with the same decompressor — the table moves as entries
-  are added, so the figure to beat is read from the snapshot, never from
-  memory.
+  the least memory of every entry ranked above it — the least above is
+  drt|lpaq9m at 1,542 MB, and every entry in the top 20 uses 3,751 MB or
+  more (gmix v1) — and it is to stay the smallest of every entry it
+  overtakes: a gain that needs a larger model than the tier holds is not
+  this goal's gain (`RUN-1`). The same tool states the claim from the
+  snapshot.
 
 ## Benchmark ownership
 

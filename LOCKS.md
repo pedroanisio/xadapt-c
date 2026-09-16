@@ -293,6 +293,45 @@ before any release, and the vectors `text-max2.adpt`/`abc-max2.adpt`
 the sizing bit, decoder, encoder, C and CLI tests, the man page, README
 and CHANGELOG; the SBOM regenerated.
 
+## 2026-09-16 — The enwik9 goal is the Large Text Compression Benchmark's top-20 threshold, read from the snapshot
+
+**Decision.** (Operator's, 2026-09-16: "make the number for TOP 20 the
+canonical".) `DLV-3`'s enwik9 goal is a place in the top 20 of the
+benchmark, and the number it means is computed from
+`research/ltcb-main-table.csv` by `tools/ltcb/ltcb_goal.py`: the total
+(enwik9 plus decompressor zip, the ranked quantity) of the entry holding
+place 20, less the entry's own decompressor, less one byte. On the
+snapshot of 2026-09-15 — the day `cadapt 0.12.0 --max --allocation
+context` was listed at rank 30 of 226 with 150,063,628 B, a 209,893 B
+decompressor and 661 MB — place 20 is paq8px_v206fix1 at 125,099,359 B,
+so the goal is **enwik9 at most 124,889,465 B**. The second goal on the
+table is the memory footprint: the least of every entry ranked above
+(already so: drt|lpaq9m at 1,542 MB is the least above), to be kept as
+entries are overtaken. `tools/test_docs.py` holds `README.md` and
+`docs/CONSTRAINTS.md` to the figures the tool prints.
+
+**Why.** "Below 130 MB" (the DLV-3 entry below) placed the codec at
+rank 23 of that table; the operator's goal is the top 20, and a target
+typed from memory drifts as the table does — two entries were added
+between the snapshot of 2026-09-14 and the listing. Reading the figure
+from the snapshot makes a re-fetch the only way it moves, and the docs
+test makes a moved figure a failed check, not a stale sentence. The
+figure is a total less a decompressor because the benchmark ranks the
+total; a smaller decompressor is as good as a smaller container.
+
+**Consequences.**
+- The goal figure quoted anywhere is `python3 tools/ltcb/ltcb_goal.py`'s
+  for the tracked snapshot; a snapshot refresh (`transcribe_ltcb_table.py`)
+  that moves place 20 fails `make check` until the documents follow.
+- enwik8's 17 MB stays as stated; DLV-3's rule that the rows judge nothing
+  but themselves is unchanged.
+- The memory claim is checked the same way: the README asserts the least
+  memory above, and the docs test fails if a smaller-memory entry appears
+  above the codec's rank.
+
+**Status.** Landed 2026-09-16 with the tool, its tests, the docs test,
+DLV-3's wording, the README section and this entry.
+
 ## 2026-09-15 — Throughput floors are CPU seconds, checked as the median of runs; a shared host gates relatively
 
 **Decision.** The floors of `tools/ratio_floor.json` are seconds of CPU

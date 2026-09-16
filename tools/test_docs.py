@@ -27,6 +27,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tools" / "ltcb"))
+import ltcb_goal  # noqa: E402
 import render_floors as floors  # noqa: E402
 
 README = ROOT / "README.md"
@@ -138,6 +140,36 @@ class FloorsTest(unittest.TestCase):
         self.assertEqual(floors.replace_block(stale, floors.MARKDOWN_START, floors.MARKDOWN_END, floors.markdown(data), README), text)
         with self.assertRaises(floors.RenderError):
             floors.replace_block("no markers", floors.MARKDOWN_START, floors.MARKDOWN_END, "x", README)
+
+
+class GoalTest(unittest.TestCase):
+    """The enwik9 goal is the LTCB top-20 threshold, computed from the
+    snapshot by tools/ltcb/ltcb_goal.py; the documents that state it quote
+    the figures it prints, so a refreshed snapshot that moves the place
+    fails here until the documents follow."""
+
+    def figures(self) -> ltcb_goal.Goal:
+        return ltcb_goal.compute()
+
+    def test_constraints_state_the_goal_from_the_snapshot(self) -> None:
+        g = self.figures()
+        text = (ROOT / "docs" / "CONSTRAINTS.md").read_text(encoding="utf-8")
+        row = next(line for line in text.splitlines() if line.startswith("| `DLV-3`"))
+        for figure in (f"{g.target_enwik9:,} B", f"{g.threshold_total:,} B", f"{g.decompressor_bytes:,} B",
+                       f"top {g.place}", "tools/ltcb/ltcb_goal.py"):
+            self.assertIn(figure, row, f"DLV-3 does not state {figure!r}")
+
+    def test_readme_states_the_goal_and_the_memory_claim(self) -> None:
+        g = self.figures()
+        text = README.read_text(encoding="utf-8")
+        section = text[text.index("## The Large Text Compression Benchmark"):]
+        section = " ".join(section[: section.index("\n## ", 1)].split())  # prose wraps; figures do not
+        least_mb, least_who = g.least_memory_above
+        for figure in (f"{g.target_enwik9:,} B", f"{g.threshold_total:,} B", g.threshold_program,
+                       f"rank {g.rank} of {g.entries}", f"{g.total:,} B", f"{g.memory_mb:,.0f} MB",
+                       f"{least_mb:,.0f} MB", least_who, "tools/ltcb/ltcb_goal.py"):
+            self.assertIn(figure, section, f"the README's benchmark section does not state {figure!r}")
+        self.assertTrue(g.leads_memory_above, "the README claims the least memory above; the snapshot says otherwise")
 
 
 class LayoutTest(unittest.TestCase):
