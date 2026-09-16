@@ -313,6 +313,14 @@ static const uint32_t CLASS_WIDTHS[3] = {0, 8, 21};
 #define NO_RUNS (1u << 31)
 /* The contexts a lean compact model leaves out (adapt_sizes.lean). */
 #define LEAN_DROPPED (1u << H_O8 | 1u << H_WORD3 | 1u << H_WORDC)
+/* The contexts the mid profile leaves out of the normal profile's ten:
+ * measured on the first 8 MiB of enwik8 under one arbiter with the
+ * class width pinned, each kind left out in turn, field cost nothing,
+ * sparse 0.09 %, order-1 0.14 %, every other kind 0.21 % (record) to
+ * 0.91 % (the class history); the three together 0.26 % for 18 % fewer
+ * cycles. The seven kept are orders 2, 3, 4 and 6, word, record and
+ * the class history: with the class lanes, one lane group of eight. */
+#define MID_DROPPED (1u << H_O1 | 1u << H_FIELD | 1u << H_SPARSE)
 /* The context sets a file may choose, by header code: a mask of hashed
  * contexts the model leaves out (see CONTEXT_SETS in model.rs). */
 static const uint32_t CONTEXT_SETS[ADAPT_CONTEXT_SETS] = {
@@ -360,6 +368,9 @@ static inline uint8_t encode_header_version(adapt_sizes sizes) {
     }
     if (sizes.max) {
         return ADAPT_MAX_PRESSURE_VERSION;
+    }
+    if (sizes.mid) {
+        return sizes.text == ADAPT_TEXT_ON ? ADAPT_TEXT_MID_VERSION : ADAPT_MID_VERSION;
     }
     if (sizes.text == ADAPT_TEXT_ON) {
         return sizes.fast ? ADAPT_TEXT_FAST_VERSION : ADAPT_TEXT_VERSION;
@@ -1224,6 +1235,8 @@ typedef struct model {
     /* model2's pressure-gated parts (MODEL2_PRESSURE_LOG): the o8 and
      * word3 slots re-purposed, and the fifth arbiter */
     int slots_on, extra_on;
+    /* the mid profile: the normal path with its first arbiter alone */
+    int mid;
     /* groups of eight slots the vector lane path runs: ceil((1 + hashed) / 8) */
     int lane_groups;
     size_t mix34_row_mask;
@@ -2319,6 +2332,13 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     m->wset2 = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (size_t)(m->c8 & 0xFF);
     m->wset3 = ((size_t)(m->h[1] >> 48) & m->mix34_row_mask) * 256 + (m->c0 & 255);
     m->wset4 = m->wset4_row + (m->c0 & 255);
+    if (!fast && !max && m->mid) {
+        /* the mid profile: the first arbiter alone is the verdict, the
+         * estimation stages take it as they take the final arbiter's */
+        m->pmix = m->squashed[dot(m->weights + m->wset * ARBITER_STRIDE(fast, max), m->st, LANES(fast, max), v3) + 2047];
+        m->pfinal = m->pmix;
+        goto estimate;
+    }
     if (m2) {
         /* model2: the int16 arbiters, and the fifth keyed by the bytes
          * since a space and the previous byte's class */
@@ -2379,6 +2399,7 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
     m->stf[FINAL_INPUTS_ON(m, m2) - 1] = 256;
     m->wsetf = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (m->c0 & 255);
     m->pfinal = m->squashed[dot(m->wfinal[m->wsetf].w, m->stf, FINAL_INPUTS_ON(m, m2), 0) + 2047];
+estimate:
     /* secondary estimation keyed by the previous byte and the partial
      * byte, and a second stage keyed by an order-2 hash with the partial
      * byte, averaged; three parts of it to one of the arbiters' verdict */
@@ -2529,7 +2550,7 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
     } else {
         int32_t *w = m->weights + m->wset * ARBITER_STRIDE(fast, max);
         train(w, w + LANES(fast, max), m->st, LANES(fast, max), target - m->pmix, m->mixer_rate);
-        if (!fast) {
+        if (!fast && !m->mid) {
             int32_t *w2 = m->weights2 + m->wset2 * ARBITER_STRIDE(0, max);
             int32_t *w3 = m->weights3 + m->wset3 * ARBITER_STRIDE(0, max);
             int32_t *w4 = m->weights4 + m->wset4 * ARBITER_STRIDE(0, max);
@@ -2539,7 +2560,9 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
         }
     }
     if (!fast) {
-        train(m->wfinal[m->wsetf].w, &m->wfinal[m->wsetf].n, m->stf, FINAL_INPUTS_ON(m, m2), target - m->pfinal, m->mixer_rate);
+        if (!m->mid) {
+            train(m->wfinal[m->wsetf].w, &m->wfinal[m->wsetf].n, m->stf, FINAL_INPUTS_ON(m, m2), target - m->pfinal, m->mixer_rate);
+        }
         /* secondary estimation: move both neighbours toward the outcome,
          * in both stages */
         g = (int32_t)(bit << 16) + (int32_t)(bit << APM_RATE) - (int32_t)bit * 2;
@@ -2769,6 +2792,7 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
     m->table_lines = sizes.table_frac != 0 ? blocks / WAYS : 0;
     m->class_bits = 3 * CLASS_WIDTHS[sizes.class_code];
     m->fast = sizes.fast != 0;
+    m->mid = sizes.mid != 0;
     m->max = sizes.max != 0;
     m->compact = sizes.compact != 0;
     m->low_start = sizes.low_start != 0;
@@ -2791,7 +2815,7 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
     {
         uint32_t set = m->fast ? FAST_SETS[sizes.set_code] : CONTEXT_SETS[sizes.set_code];
         /* the max profile's kinds run only under it */
-        uint32_t dropped = set | (sizes.class_code == 0 ? (1u << H_CLASS) : 0) | (m->max ? 0 : MAX_KINDS) |
+        uint32_t dropped = set | (sizes.class_code == 0 ? (1u << H_CLASS) : 0) | (m->max ? 0 : MAX_KINDS) | (m->mid ? MID_DROPPED : 0) |
                            (sizes.lean ? LEAN_DROPPED : 0);
 #ifdef ADAPT_SIZES_OVERRIDE
         {
@@ -3075,7 +3099,8 @@ static inline int sizes_valid(adapt_sizes s) {
            s.table_frac <= ADAPT_SIZING_FRAC_MAX && (s.table_frac == 0 || (s.max && !s.adaptive && !s.bmp)) &&
            s.text <= ADAPT_TEXT_OFF && (s.text != ADAPT_TEXT_ON || (!s.adaptive && !s.bmp && !s.x86)) &&
            s.low_start <= 1 && (!s.low_start || (s.max && !s.adaptive && !s.bmp)) &&
-           s.model2 <= 1 && (!s.model2 || s.max);
+           s.model2 <= 1 && (!s.model2 || s.max) &&
+           s.mid <= 1 && (!s.mid || (!s.fast && !s.max && !s.adaptive && !s.bmp && s.set_code == 0));
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {

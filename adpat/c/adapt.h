@@ -239,6 +239,20 @@ extern "C" {
 #define ADAPT_TEXT_METADATA_OFFSET 5u
 #define ADAPT_TEXT_METADATA_VERSION 67u
 #define ADAPT_TEXT_METADATA_LAST_VERSION 71u
+/* The mid profile (adapt_sizes.mid, `cadapt encode --mid`): the normal
+ * profile's tables, tiers and estimation stages with seven hashed
+ * contexts fixed by the profile (orders 2, 3, 4 and 6, word, record and
+ * the class history; the width still chosen per file) and its first
+ * arbiter alone as the verdict — no second, third, fourth or final
+ * arbiter. Measured on the first 8 MiB of enwik8 against the normal
+ * profile: 1,726,147 -> 1,748,849 bytes (+1.3 %) at 490 -> 310 cycles
+ * per bit (-37 %), 2.6 times faster than the max profile. Versions 76
+ * (78 with metadata), 77 under the text transform (79 with metadata). */
+#define ADAPT_MID_VERSION 76u
+#define ADAPT_TEXT_MID_VERSION 77u
+#define ADAPT_MID_METADATA_OFFSET 2u
+#define ADAPT_MID_METADATA_VERSION 78u
+#define ADAPT_TEXT_MID_METADATA_VERSION 79u
 #define ADAPT_TEXT_AUTO 0u
 #define ADAPT_TEXT_ON 1u
 /* adapt_sizes.contexts: the encoder's choice of the context set. */
@@ -404,6 +418,12 @@ typedef struct adapt_sizes {
     uint8_t class_code;
     uint8_t set_code;
     uint8_t fast;
+    /* 1 for the mid profile (ADAPT_MID_VERSION): the normal profile's
+     * tables and stages, seven fixed hashed contexts, one arbiter. Never
+     * with `fast`, `max`, `adaptive` or `bmp`; set_code is 0 (the profile
+     * names its set), compact, lean and model2 are 0. adapt_sizes_mid
+     * turns normal sizes to it, as `adapt encode --mid` does. */
+    uint8_t mid;
     /* The record period in bytes, or 0; found by the encoder on the first
      * block's sample (adapt_detect_period), carried after the fixed header
      * when nonzero, always 0 under the fast profile. */
@@ -543,6 +563,10 @@ void adapt_fast_contexts(adapt_sizes sizes, char *buf, size_t len);
  * ADAPT_FAST_TABLE_LOG_MAX, the set code cleared for the encoder to
  * choose. */
 adapt_sizes adapt_sizes_fast(adapt_sizes sizes);
+/* `sizes` for the mid profile: the normal profile's sizes with `mid` set,
+ * the set code cleared (the profile's set is fixed), the max profile's
+ * flags cleared. */
+adapt_sizes adapt_sizes_mid(adapt_sizes sizes);
 /* `sizes` for the max profile: the normal profile's sizes and choices
  * with `max` set, as `adapt encode --max` does. */
 adapt_sizes adapt_sizes_max(adapt_sizes sizes);

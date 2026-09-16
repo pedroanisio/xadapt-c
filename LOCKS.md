@@ -2,6 +2,84 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-16 — `--mid`: a third profile, the normal tables under seven fixed contexts and one arbiter
+
+**Decision (operator, 2026-09-16: "do not abandon, merge into main").**
+A new encode profile, `--mid` (`adapt_sizes.mid`,
+`adapt_sizes_mid()`), between `--fast` and the default: the normal
+profile's tables (context, recall, window and both estimation stages
+sized as the tier sizes them for the default) with seven fixed hashed
+contexts — orders 2, 3, 4 and 6, word, record and the class history;
+order-1, field and sparse left out (`MID_DROPPED`) — and the first
+arbiter alone as the verdict, the second, third, fourth and final
+arbiters neither run nor trained. The set is the profile's, so the
+first block's set trial is skipped and only the class-history width is
+chosen. Versions 76 (plain) and 77 (under the text transform), 78 and
+79 with metadata (`ADAPT_MID_METADATA_OFFSET` = 2); a reader older than
+this release refuses them, every earlier file decodes as before, and
+the default, `--fast` and `--max` streams are byte for byte what main
+wrote before this entry. `cadapt info` prints "profile mid". Not with
+`--fast`, `--max`, `--adaptive`, `--transform bmp` or `--contexts lean`
+(`sizes_valid` refuses the combinations, the CLI names them).
+
+**Origin (DLV-4).** The shape — one mixer over a handful of orders plus
+a word context, two SSE stages after it — is the lpaq family's as
+Mahoney's *Data Compression Explained* (mattmahoney.net/dc/dce.html)
+describes it, and what the mcm study of 2026-09-16 measured at 230–280
+cycles per bit on this host. Re-implemented on this codec's own
+machinery from that description; no code from either was read into the
+tree (mcm is GPL-3).
+
+**Which contexts to drop** was measured on the first 8 MiB of enwik8
+with the one-arbiter verdict in force and the class width pinned at
+eight bytes, each of the ten kinds left out in turn (all ten:
+1,744,249 B at 392 cycles per bit): field cost nothing (−40 B), sparse
+0.09 %, order-1 0.14 %; every other kind 0.21 % (record) to 0.91 % (the
+class history), orders 3 and 4 0.59 % and 0.77 %. The three together
+cost 0.26 % for 18 % fewer cycles (1,748,849 B at 320). Seven kinds
+with the class history's lanes is one lane group of eight, so the
+vector lane path runs one group instead of two.
+
+**Measured** on the reference host, quiet, encode alone with
+`--no-verify`, decode to a file compared byte for byte, CPU seconds,
+one run each (the 8 MiB proxy interleaved, cycles by `perf stat`):
+
+| | default | `--mid` | Δ |
+|---|---|---|---|
+| 8 MiB proxy bytes | 1,726,147 | 1,748,849 | +1.32 % |
+| 8 MiB proxy encode / decode cycles per bit (two interleaved rounds) | 496–498 / 460–462 | 313–314 / 346–347 | −37 % / −25 % |
+| enwik8 bytes | 18,500,473 | 18,761,302 | +1.41 % |
+| enwik8 encode | 70.3 s | 50.2 s | −28.6 % |
+| enwik8 decode | 74.8 s | 56.9 s | −24.0 % |
+| enwik9 bytes | 168,451,193 | 172,472,731 | +2.39 % |
+| enwik9 encode | 712.6 s | 509.7 s | −28.5 % |
+| enwik9 decode | 753.9 s | 557.9 s | −26.0 % |
+
+Against the locked baseline (`--max --allocation context --contexts
+lean`: enwik8 17,902,645 B in 107.4 s, enwik9 146,797,785 B in
+1,056.2 s) the mid profile is 2.1 times faster for 4.8 % more bytes on
+enwik8 and 17.5 % more on enwik9: at enwik9 the distance is the normal
+profile's, not the seven kinds' — the normal tables hold a 2^20 recall
+index and no run memories where the max profile at `-9` holds 2^24 and
+both. `--fast`, for comparison, is 1,890,381 B on the proxy (+9.5 %) at
+169 cycles per bit.
+
+**Consequences.**
+- No floor moves and no default moves: the locked command and the
+  corpus commands write the same bytes (`make corpus-floor` holds under
+  both, 2026-09-16); the profile is the caller's choice, and the
+  operator's standing rule — bytes are not traded for time in a
+  default — is untouched by it.
+- The mid profile's tables are the normal profile's by construction;
+  a mid profile over the max profile's recall and run memories (the
+  bytes at enwik9's size) is a new entry, not an edit of this one.
+- `ADAPT_MID_METADATA_OFFSET` is 2 where the other families use 3 or 4:
+  the four versions are consecutive (76 plain, 77 text, 78 and 79 with
+  metadata), so the offset from a stream version to its metadata
+  version is 2.
+
+**Status.** Landed 2026-09-16.
+
 ## 2026-09-16 — The baseline is the lean context set: the floors locked on `--max --allocation context --contexts lean`
 
 **Decision (operator, 2026-09-16).** The reference configuration the

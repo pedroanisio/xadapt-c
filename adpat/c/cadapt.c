@@ -3,7 +3,7 @@
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
- *   cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -11]
+ *   cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --mid | --max] [-0 .. -11]
  *                 [--threads <n>] [--segment-bytes <bytes>]
  *   cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
  *   cadapt info   <file>
@@ -572,7 +572,7 @@ static void print_usage(FILE *stream) {
             "cadapt — the adapt self-adaptive lossless codec, in C\n"
             "\n"
             "usage:\n"
-            "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -11]\n"
+            "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --mid | --max] [-0 .. -11]\n"
             "                [--threads <n>] [--segment-bytes <bytes>]\n"
             "                [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation window|context]\n"
             "                [--contexts auto|lean]\n"
@@ -584,10 +584,12 @@ static void print_usage(FILE *stream) {
             "encode writes <input>.adpt and decode strips that suffix (or appends .out).\n"
             "Existing output files are kept unless --force is given. --fast writes the\n"
             "fast profile, which decodes about three times faster for about a twelfth\n"
-            "more bytes; --max the max profile, which writes\n"
+            "more bytes; --mid the mid profile, seven fixed contexts and one arbiter over\n"
+            "the normal profile's tables, about a quarter less time for 1.4 %% (enwik8) to\n"
+            "2.4 %% (enwik9) more bytes; --max the max profile, which writes\n"
             "fewer bytes for about three times the time in the same memory; the default is\n"
-            "the normal profile. Normal/fast/max streams use versions %u/%u/%u;\n"
-            "named files and folders include metadata in versions %u/%u/%u.\n"
+            "the normal profile. Normal/fast/mid/max streams use versions %u/%u/%u/%u;\n"
+            "named files and folders include metadata in versions %u/%u/%u/%u.\n"
             "--adaptive rates/sparse/retained select experimental causal predictors\n"
             "over normal or --max. auto spools the\n"
             "source once to temporary disk and selects the smallest complete container\n"
@@ -599,8 +601,8 @@ static void print_usage(FILE *stream) {
             "--transform bmp explicitly selects that reversible transform. Search\n"
             "uses up to eight encodes, temporary disk of input plus two containers, and\n"
             "verifies only with --verify (one model, also for pipes).\n",
-            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_PRESSURE_VERSION,
-            ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_MAX_PRESSURE_METADATA_VERSION);
+            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MID_VERSION, ADAPT_MAX_PRESSURE_VERSION,
+            ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_MID_METADATA_VERSION, ADAPT_MAX_PRESSURE_METADATA_VERSION);
     fprintf(stream,
             "The text transform (versions 62--66, 67--71 with metadata) replaces a word both\n"
             "sides have seen three times by a code the model reads as one symbol; the book\n"
@@ -3515,7 +3517,7 @@ done:
 }
 
 typedef struct encode_options {
-    int force, verify, no_verify, fast, max;
+    int force, verify, no_verify, fast, mid, max;
     unsigned adaptive;
     int bmp, context_first, lean_contexts, text_transform;
     uint64_t max_memory, threads, segment_bytes;
@@ -3576,6 +3578,10 @@ static int encode_parse_profile(encode_options *options, const args *a) {
         }
     }
     if (options->fast && options->max) return usage_error("--fast and --max are two profiles; pass one%s", "");
+    if (options->mid && (options->fast || options->max)) return usage_error("--mid, --fast and --max are profiles; pass one%s", "");
+    if (options->mid && (options->adaptive != 0 || options->bmp))
+        return usage_error("--mid cannot be combined with --adaptive or --transform bmp%s", "");
+    if (options->mid && options->lean_contexts) return usage_error("--contexts lean does not apply to --mid, whose set is fixed%s", "");
     if (options->verify && options->no_verify) {
         return usage_error("--verify and --no-verify cannot be used together%s", "");
     }
@@ -3607,7 +3613,7 @@ static int encode_parse_budget(encode_options *options, const args *a) {
 
 static int encode_parse_options(encode_job *job, int argc, char **argv) {
     static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", "--allocation", "--contexts", NULL};
-    static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--max", "-0", "-1", "-2", "-3",
+    static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--mid", "--max", "-0", "-1", "-2", "-3",
                                         "-4", "-5", "-6", "-7", "-8", "-9", "-10", "-11", NULL};
     encode_options *options = &job->options;
     const char *input;
@@ -3637,6 +3643,7 @@ static int encode_parse_options(encode_job *job, int argc, char **argv) {
     options->verify = has_flag(&a, "--verify");
     options->no_verify = has_flag(&a, "--no-verify");
     options->fast = has_flag(&a, "--fast");
+    options->mid = has_flag(&a, "--mid");
     options->max = has_flag(&a, "--max");
     options->text_transform = ADAPT_TEXT_AUTO;
     rc = encode_parse_profile(options, &a);
@@ -3714,6 +3721,7 @@ static int encode_choose_sizes(encode_job *job) {
         return EXIT_OTHER;
     }
     if (options->fast) *sizes = adapt_sizes_fast(*sizes);
+    if (options->mid) *sizes = adapt_sizes_mid(*sizes);
     if (options->max && options->adaptive == 0) *sizes = adapt_sizes_max(*sizes);
 #ifdef ADAPT_SIZES_OVERRIDE
     /* Development-only sizes, past the tier, for pressure experiments. */
@@ -4081,7 +4089,7 @@ static int info_command(int argc, char **argv) {
             printf("contexts        all but %s\n", dropped);
         }
     }
-    printf("profile         %s%s%s\n", sizes.max && sizes.adaptive ? "max-" : "", sizes.adaptive ? adaptive_name(sizes.adaptive) : (sizes.fast ? "fast" : (sizes.max ? "max" : "normal")),
+    printf("profile         %s%s%s\n", sizes.max && sizes.adaptive ? "max-" : "", sizes.adaptive ? adaptive_name(sizes.adaptive) : (sizes.fast ? "fast" : sizes.mid ? "mid" : (sizes.max ? "max" : "normal")),
            sizes.lean && sizes.compact ? " (compact side tables, lean contexts)"
            : sizes.lean                ? " (lean contexts)"
            : sizes.compact             ? " (compact side tables)"

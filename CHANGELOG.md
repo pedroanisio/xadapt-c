@@ -54,6 +54,21 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Added
 
+- `--mid` on encode (`adapt_sizes.mid`, `adapt_sizes_mid()`): a third
+  profile between `--fast` and the default, versions 76/77 (plain, under
+  the text transform) and 78/79 with metadata. It runs the normal
+  profile's tables with seven fixed contexts — orders 2, 3, 4 and 6,
+  word, record and the class history; order-1, field and sparse left
+  out — and the first arbiter alone as the verdict, the two estimation
+  stages kept. The shape is the one Mahoney's *Data Compression
+  Explained* gives for the lpaq family, re-implemented here (DLV-4).
+  Against the default: enwik8 18,761,302 B (+1.4 %) in 29 % less
+  encode time and 24 % less decode time, enwik9 172,472,731 B (+2.4 %)
+  in 28 % and 26 % less; the 8 MiB proxy +1.3 % at 37 % / 25 % fewer
+  cycles. An opt-in profile: no default and no floor moves. `cadapt
+  info` prints "profile mid". Not with `--fast`, `--max`,
+  `--adaptive`, `--transform bmp` or `--contexts lean`. The enwik8 and
+  enwik9 measurements are in LOCKS.md.
 - `--contexts auto|lean` on encode (`adapt_sizes.contexts`,
   `ADAPT_CONTEXTS_LEAN`): `lean` takes the lean context set outright —
   word and field left out and, under `--max`, o8, word3 and wordc (the

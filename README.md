@@ -23,7 +23,8 @@ are read and no longer written). Every `--max` encode is now the sized
 version 72 (75 with metadata), its sizing byte's bit 7 naming the second max model —
 int16 arbiters, four re-purposed context slots, four-way recall buckets
 and a fifth arbiter (the `Second max model` entry in `LOCKS.md`) — so
-21, 24, 53, 54, 56 and 57 are read and no longer written. The decoder
+21, 24, 53, 54, 56 and 57 are read and no longer written. The mid
+profile writes 76 (78 with metadata), 77 (79) under the text transform. The decoder
 reads every version ever published; versions 10–18 and the unused
 numbers (55, 59, 60, 73, 74) are refused. The CLI uses native filesystem APIs to
 restore metadata.
@@ -97,7 +98,7 @@ strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
 ## Command line
 
 ```
-cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --max] [-0 .. -11]
+cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --mid | --max] [-0 .. -11]
               [--threads <n>] [--segment-bytes <bytes>]
               [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation window|context]
               [--contexts auto|lean]
@@ -141,8 +142,16 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
 
 - `--fast` writes the fast profile (version 20 or 23): two hashed contexts, one
   arbiter, about three times the decoding speed for more bytes (5 % on the
-  49 KB `text` vector, about a twelfth on enwik8). `--max` writes the max
-  profile (version 21 or 24): ten more contexts, run memories and a wider
+  49 KB `text` vector, about a twelfth on enwik8). `--mid` writes the mid
+  profile (version 76, 78 with metadata; 77 and 79 under the text
+  transform): the normal profile's tables and estimation stages with seven
+  fixed hashed contexts (orders 2, 3, 4 and 6, word, record, the class
+  history) and its first arbiter alone — measured against the normal
+  profile, 1.4 % more bytes on enwik8 (18,761,302 against 18,500,473)
+  in 29 % less encode time and 24 % less decode time, 2.4 % more on
+  enwik9 in 28 % and 26 % less; 2.1 to 2.4 times faster than `--max`
+  for 4.8 % (enwik8) to 17.5 % (enwik9) more bytes. `--max`
+  writes the max profile (version 21 or 24): ten more contexts, run memories and a wider
   second estimation stage, fewer bytes for about 1.8 times the time; its
   smallest model is larger (`--help` prints both minimums), so the low tiers
   clamp higher under `--max`.
@@ -477,6 +486,7 @@ stays readable (`DLV-1` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)):
 | 72 | max, sized | 75 | sizing byte with model2 bit 7 required; pressure-gated slots and fifth arbiter; every current `--max` encode |
 | 62 / 63 | normal / fast, text transform | 67 / 68 | the book of words built as the file is coded |
 | 64–66 | max, compact, lean, text transform | 69–71 | read only: the max profile writes 72 (75) under the transform |
+| 76 / 77 | mid, plain / under the text transform | 78 / 79 | the normal profile's tables, seven fixed contexts, one arbiter |
 | 55, 59, 60 | refused | — | no format |
 
 The encoder writes 19–24 by default, 53/54 (56/57) when a small tier under

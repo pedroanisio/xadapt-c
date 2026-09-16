@@ -119,6 +119,34 @@ static int sink_write(void *context, const uint8_t *buf, size_t len) {
     return 0;
 }
 
+/* The mid profile's versions: 76 plain, 77 under the text transform, 78
+ * and 79 the same with metadata; 80 is no version; a set code is refused
+ * (the profile's set is fixed). */
+static void test_mid_versions(void) {
+    uint8_t file[ADAPT_HEADER_BYTES];
+    adapt_sizes sizes;
+    adapt_error error;
+    memcpy(file, "ADPT", 4);
+    file[4] = ADAPT_MID_VERSION;
+    file[5] = 20;
+    file[6] = 16;
+    file[7] = 20;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.mid == 1 && sizes.fast == 0 && sizes.max == 0 && sizes.text == 0 && !adapt_header_has_metadata(file));
+    file[4] = ADAPT_TEXT_MID_VERSION;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.mid == 1 && sizes.text == ADAPT_TEXT_ON && !adapt_header_has_metadata(file));
+    file[4] = ADAPT_MID_METADATA_VERSION;
+    CHECK(adapt_header_has_metadata(file));
+    file[4] = ADAPT_TEXT_MID_METADATA_VERSION;
+    CHECK(adapt_header_has_metadata(file));
+    file[4] = (uint8_t)(ADAPT_TEXT_MID_METADATA_VERSION + 1);
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
+    file[4] = ADAPT_MID_VERSION;
+    file[6] = (uint8_t)(16 | 3 << 5);
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+}
+
 static void test_vector(const char *name, const char *source) {
     size_t file_len, want_len, out_len;
     uint8_t *file = read_file(name, &file_len);
@@ -556,10 +584,10 @@ static void test_framing(void) {
     file[4] = 4;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
-    /* past the last text version nothing is named */
-    file[4] = ADAPT_MAX_PRESSURE_METADATA_VERSION + 1;
+    /* past the mid profile's last version nothing is named */
+    file[4] = ADAPT_TEXT_MID_METADATA_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_MAX_PRESSURE_METADATA_VERSION + 1);
+    CHECK(error.detail == ADAPT_TEXT_MID_METADATA_VERSION + 1);
     /* the text versions front the five models in order, and their
      * metadata variants five higher carry a record; nothing else does */
     {
@@ -1620,7 +1648,9 @@ int main(int argc, char **argv) {
     SHARD(test_vector("abc-max.adpt", "abc.bin"));
     SHARD(test_vector("text.adpt", "text.bin"));
     SHARD(test_vector("text-fast.adpt", "text.bin"));
+    SHARD(test_vector("text-mid.adpt", "text.bin"));
     SHARD(test_vector("text-max.adpt", "text.bin"));
+    SHARD(test_mid_versions());
     SHARD(test_vector("text-compact.adpt", "text.bin"));
     SHARD(test_vector("text-lean.adpt", "text.bin"));
     SHARD(test_vector("records.adpt", "records.bin"));

@@ -818,6 +818,8 @@ static void test_vector_profile(const char *name, const char *source, int profil
         sizes = adapt_sizes_fast(sizes);
     } else if (profile == 2) {
         sizes = adapt_sizes_max(sizes);
+    } else if (profile == 3) {
+        sizes = adapt_sizes_mid(sizes);
     }
     reset(&r, src, src_len, 4096, &w, coded, src_len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error),
@@ -904,6 +906,52 @@ static void test_vector_segments(const char *name, const char *source, uint64_t 
     free(coded);
     free(want);
     free(src);
+}
+
+/* The mid profile: the normal profile's sizes with `mid`, refused beside
+ * the other profiles or with a set code, written as ADAPT_MID_VERSION,
+ * its seven kinds named by adapt_dropped_contexts, and decoded. */
+static void test_mid_profile(void) {
+    size_t n = 60000, i, back_len = 0;
+    uint8_t *data = malloc(n);
+    uint8_t *coded = malloc(n + 4096);
+    uint8_t *back = NULL;
+    char dropped[64];
+    reader r;
+    writer w;
+    adapt_sizes s, other;
+    adapt_error error;
+    for (i = 0; i < n; i++) {
+        data[i] = (uint8_t)"the quick brown fox jumps over the lazy dog, "[i % 45];
+    }
+    CHECK_STATUS(adapt_sizes_for_input(1, n, ADAPT_DEFAULT_MAX_MEMORY, &s, &error), ADAPT_OK);
+    s = adapt_sizes_mid(s);
+    CHECK(s.mid == 1 && s.fast == 0 && s.max == 0 && s.set_code == 0 && adapt_sizes_valid(s));
+    other = s;
+    other.fast = 1;
+    CHECK(!adapt_sizes_valid(other));
+    other = s;
+    other.max = 1;
+    CHECK(!adapt_sizes_valid(other));
+    other = s;
+    other.set_code = 3;
+    CHECK(!adapt_sizes_valid(other));
+    other = adapt_sizes_fast(s);
+    CHECK(other.mid == 0 && adapt_sizes_valid(other));
+    other = adapt_sizes_max(s);
+    CHECK(other.mid == 0 && adapt_sizes_valid(other));
+    adapt_dropped_contexts(s, dropped, sizeof(dropped));
+    CHECK(strcmp(dropped, "o1, field, sparse") == 0);
+    reset(&r, data, n, 1000, &w, coded, n + 4096);
+    CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error), ADAPT_OK);
+    CHECK(w.len > 8 && coded[4] == ADAPT_MID_VERSION && (coded[6] >> 5) == 0);
+    CHECK_STATUS(adapt_read_header(coded, w.len, &other, &error), ADAPT_OK);
+    CHECK(other.mid == 1 && other.fast == 0 && other.max == 0 && other.text == 0);
+    CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
+    CHECK(back_len == n && memcmp(back, data, n) == 0);
+    adapt_free(back);
+    free(coded);
+    free(data);
 }
 
 static void test_streams(void) {
@@ -2097,6 +2145,8 @@ int main(int argc, char **argv) {
     SHARD(test_vector_profile("text.adpt", "text.bin", 0));
     SHARD(test_vector_profile("text-fast.adpt", "text.bin", 1));
     SHARD(test_vector_profile("text-max2.adpt", "text.bin", 2));
+    SHARD(test_vector_profile("text-mid.adpt", "text.bin", 3));
+    SHARD(test_mid_profile());
     SHARD(test_vector_profile("records.adpt", "records.bin", 0));
     SHARD(test_vector_segments("segmented.adpt", "segmented.bin", 2, ADAPT_BLOCK_BYTES));
     /* FMT-8: two scripts that are three and two bytes a character, pinned

@@ -188,6 +188,37 @@ class AllocationTest(CodecTest):
         self.assertTrue((restored / "empty").is_dir())
 
     @LONG
+    def test_mid_profile_writes_its_versions_and_decodes(self):
+        # --mid: the normal profile's tables with seven fixed contexts and
+        # one arbiter, version 76 for a pipe, 78 for a named file (with
+        # metadata), 77 under the text transform; info names it; every
+        # container decodes to the input.
+        block = (SOURCE * ((1 << 18) // len(SOURCE) + 1))[: 1 << 18]
+        piped = self.run_codec("encode", "-", "--mid", data=block)
+        self.assertEqual(piped.returncode, 0, piped.stderr)
+        self.assertEqual(piped.stdout[4], 76)
+        self.assertEqual(piped.stdout[6] >> 5, 0)
+        back = self.run_codec("decode", "-", data=piped.stdout)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertEqual(back.stdout, block)
+        named = self.root / "mid.adpt"
+        run = self.run_codec("encode", self.source, "-o", named, "--mid")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(named.read_bytes()[4], 78)
+        info = self.run_codec("info", named)
+        self.assertIn(b"profile         mid\n", info.stdout)
+        self.assertIn(b"contexts        all but o1, field, sparse\n", info.stdout)
+        restored = self.root / "mid.out"
+        run = self.run_codec("decode", named, "-o", restored)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(restored.read_bytes(), self.source.read_bytes())
+        forced = self.run_codec("encode", "-", "--mid", "--transform", "text", data=block)
+        self.assertEqual(forced.returncode, 0, forced.stderr)
+        self.assertEqual(forced.stdout[4], 77)
+        back = self.run_codec("decode", "-", data=forced.stdout)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertEqual(back.stdout, block)
+
     def test_lean_contexts_take_the_set_outright_and_decode(self):
         # --contexts lean writes set 3 (word and field left out) and, under
         # --max, the lean bit with the full side tables — a sizing byte the
@@ -1225,6 +1256,10 @@ class SurfaceTest(unittest.TestCase):
             (("encode", self.source, "--max-memory", str(64 << 20)), b"--max-memory is a decode option"),
             (("encode", self.source, "-12"), b"unknown option -12"),
             (("encode", self.source, "--contexts", "bogus"), b"--contexts"),
+            (("encode", self.source, "--mid", "--fast"), b"pass one"),
+            (("encode", self.source, "--mid", "--max"), b"pass one"),
+            (("encode", self.source, "--mid", "--adaptive", "rates"), b"--mid cannot be combined"),
+            (("encode", self.source, "--mid", "--contexts", "lean"), b"does not apply to --mid"),
             (("encode", self.source, "--contexts", "lean", "--fast"), b"--contexts lean applies"),
             (("encode", self.source, "--threads", "0"), b"--threads"),
             (("encode", self.source, "--threads", "2", "--segment-bytes", "100"), b"--segment-bytes"),
@@ -1573,6 +1608,7 @@ class CommandTest(CodecTest):
         expectations = {
             "text.adpt": (b"format          adapt container version 19", b"declared bytes  49152", b"class history   8 bytes", b"contexts        all but field, record", b"profile         normal"),
             "text-fast.adpt": (b"format          adapt container version 20", b"contexts        o2, o4", b"profile         fast"),
+            "text-mid.adpt": (b"format          adapt container version 76", b"contexts        all but o1, field, sparse\n", b"profile         mid\n"),
             "text-max.adpt": (b"format          adapt container version 21", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter start   1/4\n"),
             "text-compact.adpt": (b"format          adapt container version 53", b"contexts        all but word, field\n", b"profile         max (compact side tables)\n"),
             "text-lean.adpt": (b"format          adapt container version 54", b"contexts        all but word, field, o8, word3, wordc\n", b"profile         max (compact side tables, lean contexts)\n"),

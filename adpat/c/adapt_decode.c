@@ -36,6 +36,12 @@ static int header_has_text(const uint8_t *header) {
     return header[4] >= ADAPT_TEXT_VERSION && header[4] <= ADAPT_TEXT_METADATA_LAST_VERSION;
 }
 
+/* The mid profile's four versions: plain, under the text transform, and
+ * each with metadata (ADAPT_MID_METADATA_OFFSET on). */
+static int header_is_mid(const uint8_t *header) {
+    return header[4] >= ADAPT_MID_VERSION && header[4] <= ADAPT_TEXT_MID_METADATA_VERSION;
+}
+
 static int header_has_bmp(const uint8_t *header) {
     return (header[4] >= ADAPT_BMP_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
            (header[4] >= ADAPT_MAX_BMP_VERSION && header[4] <= ADAPT_MAX_BMP_METADATA_LAST_VERSION);
@@ -46,6 +52,7 @@ int adapt_header_has_metadata(const uint8_t *header) {
                               header[4] == ADAPT_MAX_COMPACT_METADATA_VERSION || header[4] == ADAPT_MAX_LEAN_METADATA_VERSION ||
                               header[4] == ADAPT_MAX_SIZED_METADATA_VERSION || header[4] == ADAPT_MAX_PRESSURE_METADATA_VERSION ||
                               (header[4] >= ADAPT_TEXT_METADATA_VERSION && header[4] <= ADAPT_TEXT_METADATA_LAST_VERSION) ||
+                              header[4] == ADAPT_MID_METADATA_VERSION || header[4] == ADAPT_TEXT_MID_METADATA_VERSION ||
                               (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_MAX_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION) ||
@@ -78,7 +85,8 @@ size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_
         return 0;
     }
     memcpy(out, header, len);
-    out[4] = (uint8_t)(header[4] + (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET : 3));
+    out[4] = (uint8_t)(header[4] + (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET
+                                    : header_is_mid(header) ? ADAPT_MID_METADATA_OFFSET : 3));
     crc = adapt_crc32(out, total - 4);
     for (i = 0; i < 4; i++) {
         out[total - 4 + i] = (uint8_t)(crc >> (8 * i));
@@ -130,10 +138,16 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         if (!adapt_metadata_read(header + n - ADAPT_METADATA_HEADER_BYTES, &metadata)) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
-        version = (uint8_t)(version - (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET : 3));
+        version = (uint8_t)(version - (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET
+                                       : header_is_mid(header) ? ADAPT_MID_METADATA_OFFSET : 3));
     }
     s.max = 0;
     s.text = 0;
+    s.mid = 0;
+    if (version == ADAPT_TEXT_MID_VERSION) {
+        s.text = ADAPT_TEXT_ON;
+        version = ADAPT_MID_VERSION;
+    }
     if (version >= ADAPT_TEXT_VERSION && version <= ADAPT_TEXT_LAST_VERSION) {
         /* the text versions front the models in the order of their own */
         static const uint8_t fronted[] = {ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
@@ -153,6 +167,9 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     s.lean = 0;
     if (version == ADAPT_FORMAT_VERSION) {
         s.fast = 0;
+    } else if (version == ADAPT_MID_VERSION) {
+        s.fast = 0;
+        s.mid = 1;
     } else if (version == ADAPT_FAST_VERSION) {
         s.fast = 1;
     } else if (version == ADAPT_MAX_VERSION) {
@@ -267,7 +284,8 @@ uint32_t adapt_class_width(adapt_sizes sizes) {
 }
 
 void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len) {
-    uint32_t mask = (sizes.set_code < ADAPT_CONTEXT_SETS ? CONTEXT_SETS[sizes.set_code] : 0) | (sizes.lean ? LEAN_DROPPED : 0);
+    uint32_t mask = (sizes.set_code < ADAPT_CONTEXT_SETS ? CONTEXT_SETS[sizes.set_code] : 0) | (sizes.lean ? LEAN_DROPPED : 0) |
+                    (sizes.mid ? MID_DROPPED : 0);
     /* the max profile's kinds are not the normal profile's to drop */
     size_t kinds = sizes.max ? HASHED : BASE_HASHED;
     size_t i, at = 0;

@@ -97,14 +97,33 @@ uint64_t adapt_verified_memory_bound(adapt_sizes sizes) {
 adapt_sizes adapt_sizes_max(adapt_sizes sizes) {
     sizes.max = 1;
     sizes.fast = 0;
+    sizes.mid = 0;
     sizes.adaptive = 0;
     sizes.bmp = 0;
     sizes.bmp_offset = sizes.bmp_width = sizes.bmp_rows = 0;
     return sizes;
 }
 
+adapt_sizes adapt_sizes_mid(adapt_sizes sizes) {
+    sizes.mid = 1;
+    sizes.fast = 0;
+    sizes.max = 0;
+    sizes.compact = 0;
+    sizes.lean = 0;
+    sizes.table_frac = 0;
+    sizes.low_start = 0;
+    sizes.model2 = 0;
+    sizes.adaptive = 0;
+    sizes.bmp = 0;
+    sizes.bmp_offset = sizes.bmp_width = sizes.bmp_rows = 0;
+    sizes.set_code = 0;
+    sizes.contexts = ADAPT_CONTEXTS_AUTO;
+    return sizes;
+}
+
 adapt_sizes adapt_sizes_fast(adapt_sizes sizes) {
     sizes.fast = 1;
+    sizes.mid = 0;
     sizes.max = 0;
     sizes.compact = 0;
     sizes.lean = 0;
@@ -788,8 +807,9 @@ static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_cod
 static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
                                  uint8_t *class_out, uint8_t *set_out, uint16_t *period_out, adapt_error *error) {
     /* ADAPT_CONTEXTS_LEAN: the set is given (set 3, and `lean` under the
-     * max profile, both already in `sizes`); the width is still chosen */
-    const int set_given = sizes.contexts == ADAPT_CONTEXTS_LEAN;
+     * max profile, both already in `sizes`); the width is still chosen.
+     * The mid profile's set is the profile's (set 0 with MID_DROPPED). */
+    const int set_given = sizes.contexts == ADAPT_CONTEXTS_LEAN || sizes.mid;
     size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
     /* The period first: the contexts every trial runs depend on it. */
     sizes.period = sizes.fast ? 0 : adapt_detect_period(block, head);
@@ -2327,7 +2347,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
