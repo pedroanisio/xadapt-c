@@ -1242,5 +1242,35 @@
         }
       }
     ]
+  },
+  "full_enwik8": {
+    "note": "the same sets on the whole 100 MB file, not the 8 MiB proxy; the baseline row is the locked container byte for byte",
+    "input_bytes": 100000000,
+    "results": [
+      {
+        "set": "locked lean",
+        "mask": 0,
+        "bytes": 17902645,
+        "seconds": 145.6
+      },
+      {
+        "set": "five kinds out",
+        "mask": 46208,
+        "bytes": 18012916,
+        "seconds": 131.7
+      },
+      {
+        "set": "six kinds out",
+        "mask": 46464,
+        "bytes": 18043921,
+        "seconds": 131.0
+      },
+      {
+        "set": "eight kinds out",
+        "mask": 46481,
+        "bytes": 18329218,
+        "seconds": 128.0
+      }
+    ]
   }
 }

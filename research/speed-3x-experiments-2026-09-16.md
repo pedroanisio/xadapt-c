@@ -8,16 +8,18 @@ the named reference's own README. -->
 Part of [adapt](../README.md).
 
 Deleting the context slots a file does not need is the only one of these
-codecs' speed techniques that pays here, and it pays **per file, not as a
-fixed set**: the six kinds the enwik8 price table names return 1.25× to 1.27×
-on text, executables and database records alike, for between 0.13 % and 1.47 %
-of ratio — and 5.38 % on XML, which is what rules out shipping them as a
-constant. The other four techniques were built or configured and measured in
-the same session, and all four are refuted: the two front-end bypasses on
-text, deriving the segment size from the input length at fixed memory, and
-padding the arbiter rows to whole cache lines. Threefold at the locked ratio
-*and* the locked memory is not among them; the slot lever saturates at 1.43×
-even with every context gone.
+codecs' speed techniques that pays here, and on the whole of enwik8 it pays
+**1.11× for 0.79 % of ratio** — not the 1.24× the 8 MiB proxy showed, because
+at full length the per-bit time moves toward the table claims the deletion
+does not touch. It also has to be chosen per file rather than fixed: the same
+six kinds cost 0.13 % on executables and 5.38 % on XML. The other four
+techniques were built or configured and measured in the same session, and all
+four are refuted: the two front-end bypasses on text, deriving the segment
+size from the input length at fixed memory, and padding the arbiter rows to
+whole cache lines. Threefold at the locked ratio *and* the locked memory is
+not among them, and nothing here comes close — the slot lever saturates at
+1.43× on the proxy even with every context gone, and less than that on a real
+file.
 
 Every number below is from a run; the experiments still unbuilt say so.
 
@@ -308,6 +310,39 @@ from the first block — with a wider table of sets and a rule that picks from
 it. `bench/slot_price.py` is what builds that table; this session built the
 tool and four of its rows.
 
+### On the whole of enwik8 the rung is 1.11×, not 1.24×: the proxy overstates it
+
+Every slot figure above is on the first 8 MiB, the CI proxy. Run on the whole
+100 MB file, the same sets return roughly half the speedup for slightly more
+ratio:
+
+| Set | Container | vs locked | bits/byte | Seconds | Speedup | Throughput |
+|---|---|---|---|---|---|---|
+| locked (`--contexts lean`) | 17,902,645 B | — | 1.4322 | 145.6 | 1.00× | 687 KB/s |
+| five kinds out | 18,012,916 B | +0.616 % | 1.4410 | 131.7 | 1.11× | 759 KB/s |
+| six kinds out | 18,043,921 B | +0.789 % | 1.4435 | 131.0 | **1.11×** | 763 KB/s |
+| eight kinds out | 18,329,218 B | +2.383 % | 1.4663 | 128.0 | 1.14× | 781 KB/s |
+
+The baseline row is the locked enwik8 container byte for byte, so the binary
+under the masks is the locked one. Six kinds out was 1.24× for 0.667 % on the
+proxy and is **1.11× for 0.789 %** on the file: the proxy overstates the gain
+by about a factor of two and understates the cost. At full length the context
+table is under real pressure and the per-bit time moves toward the claims and
+the table misses, so the arbiter lanes the deletion removes are a smaller
+share of what is left. Eight kinds out buys 0.03× more for three times the
+ratio, which is the same collapse the proxy showed, arriving sooner.
+
+This reprices the rung against its reference. `mcm` gives up 1.3 % of ratio
+for 23 % of its time; six kinds out gives up 0.79 % for 10 %. Per point of
+ratio that is about two thirds of `mcm`'s rate, not better than it — the
+proxy's apparent advantage was an artefact of the fixture's length.
+
+It also settles what the rung is for. Every set moves enwik8 *away* from
+`DLV-3`'s 17 MB goal, from 17.90 MB to 18.01–18.33 MB, so slot deletion is a
+throughput product for callers who want it and never a route to the
+benchmark. And any figure quoted for it must come from a full fixture: the
+8 MiB proxy guards the model, not the shape of this curve.
+
 ## The experiments
 
 Each is independent: it can be built, measured and accepted or rejected on its
@@ -521,10 +556,12 @@ on a point chosen from the curve above.
 ## Position
 
 Build D1 as a **wider set table with a per-file choice**, not as one leaner
-set. That is the one lever these codebases offer that was measured to pay
-here — 1.25× to 1.27× on three of four acceptance rows, at the locked memory,
-with the model smaller than the one it replaces — and the fourth row is why it
-cannot be a constant: the same six kinds cost 0.129 % on `mozilla` and 5.375 %
+set, and decide first whether 1.11× is worth a permanent version number. That
+is what the lever returns on the whole of enwik8 for 0.79 % of ratio, at the
+locked memory and with the model smaller than the one it replaces; the 1.25×
+to 1.27× the acceptance rows showed was measured on 4 to 8 MiB prefixes and
+the full-file row says such prefixes overstate it. The per-file part is not
+optional either way: the same six kinds cost 0.129 % on `mozilla` and 5.375 %
 on `xml`. The codec already has the mechanism, in the eight `CONTEXT_SETS` a
 file chooses from in its first block; what the price tables add is evidence
 for which sets belong in that table and a rule for picking one.
@@ -555,7 +592,7 @@ get there. Parallel encoding reaches 2.1–2.3× and costs 6 % of ratio at fixed
 memory, or four times the memory at fixed ratio. The front-end bypasses that
 make `mcm` fast are worth 1.08× to 1.4× on this text, at error rates that
 would cost more ratio than they save. What is genuinely available is a
-per-file rung at 1.25×, costing a tenth of a percent on some inputs and a few
-percent on others, and a threaded mode for callers who have the memory to
-spend. A threefold single-core codec at this ratio is a different codec, not a
+per-file rung at about 1.1× on a full file, costing a tenth of a percent on
+some inputs and several percent on others, and a threaded mode for callers who
+have the memory to spend. A threefold single-core codec at this ratio is a different codec, not a
 tuning of this one.
