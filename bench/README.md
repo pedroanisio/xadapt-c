@@ -225,3 +225,30 @@ python3 -B bench/test_redundancy_probe.py          # builds its own copy
 
 The measurements it gave, and the experiments they rank, are in
 [research/speed-3x-experiments-2026-09-16.md](../research/speed-3x-experiments-2026-09-16.md).
+
+## The slot price table
+
+`slot_price.py` measures what each of the max profile's twenty hashed
+contexts is worth. Every context costs three arbiter lanes of every coded bit
+and one claim of every nibble, so a context that earns little is a context the
+encoder is paying for. The tool encodes a fixture once per kind with that kind
+dropped, compares the container against the baseline, and — with `--frontier`
+— walks the kinds cheapest first to map what deleting several at once costs in
+bytes and returns in seconds.
+
+It builds and drives a development codec (`-DADAPT_SIZES_OVERRIDE`), whose
+`ADAPT_DROP_MASK` exists for this ablation. Containers written under a mask
+decode only under the same mask, so the tool's containers are never a
+deliverable; its numbers are, and running it again reproduces them.
+
+```sh
+make                                              # the codec the end-to-end test needs
+python3 -B bench/slot_price.py --fixture static/corpus/enwik8 --limit 8MiB
+python3 -B bench/slot_price.py --fixture static/corpus/enwik8 --limit 8MiB \
+        --frontier --json bench/results/slot-price-enwik8.json
+python3 -B bench/test_slot_price.py               # stub-driven, plus one real point
+```
+
+The tables it gave for enwik8 and for three Silesia rows, and the rung they
+price, are in
+[research/speed-3x-experiments-2026-09-16.md](../research/speed-3x-experiments-2026-09-16.md).
