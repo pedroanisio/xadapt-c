@@ -109,13 +109,45 @@ peak, 1,381 wall s) — the opposite of the objective, so reverted
 a proof longer than a block is what it needs, and the throughput floors
 do not hold one.
 
+*Correction, 2026-09-16.* The `-7` shape above ran with the second max
+model's pressure-gated parts off (`MODEL2_PRESSURE_LOG` reads the
+table's size, 2^18 there); enwik9 at `-7` runs them (2^23). With
+`ADAPT_MODEL2_SLOTS=1` the faithful `-7` shape is **6,974,653 B**
+(the parts are worth −0.75 % at this pressure), the gap to the `-11`
+shape 6.4 %, the table alone (2^21) −5.0 %, 2^19 −1.51 %. Re-measured
+there, each alone: the first-nibble claim skipped for o6/word3/wordc/
+wordlc −0.09 %; o4 case-folded −0.03 %; a mixer set keyed by the count
+of fresh blocks +0.29 %; the pressure sets +0.14 to +0.36 % (the kinds
+of negative marginal value cover one another — o6 −0.09, indirect
+−0.06, field −0.05, sparse2 −0.05, word −0.04, word3 −0.04, record
+−0.02, o5 0.00 %; nest +0.60, class +0.30, o1 +0.18, o2 +0.15 %);
+half-size blocks for every kind but o1–o3, emulated as an upper bound
+(those three confined to half of a doubled table): −1.48 % of the
+doubling's −1.51 %; a victim store restoring nodes 1–3 of evicted
+blocks that had two observations: −0.57 % for half the table's memory
+again (the table's own +50 %: about −0.9 %); a four-byte entry taking a
+context's first claims, a block only at its second or third root
+observation: −0.20 % for the table's memory again (the doubling:
+−1.51 %), +1.1 % at equal memory. Every scheme that keeps less than a
+block for a context's first visits loses to spending the bytes on
+blocks: the first observation is worth its block.
+
 **Consequences.**
 - The floors are re-locked below on this binary; the `-6` and default
   corpus floors are lowered where the gate found smaller containers.
 - Development builds (`-DADAPT_SIZES_OVERRIDE`) read `ADAPT_SIZES`
-  (table:window:recall:compact:lean), `ADAPT_CLASS_CODE` and
-  `ADAPT_DROP_MASK`: the pressure proxy for the `-7` objective is the
-  32 MiB slice at `18:19:15:1:0`, class 1, against `21:24:19:0:0`.
+  (table:window:recall:compact:lean), `ADAPT_CLASS_CODE`,
+  `ADAPT_DROP_MASK` and `ADAPT_MODEL2_SLOTS`: the pressure proxy for the
+  `-7` objective is the 32 MiB slice at `18:19:15:1:0`, class 1, slots
+  on, against `21:24:19:0:0`.
+- What the `-7` objective can reach with this model family: the levers
+  measured sum to about 2 % (half-size blocks at most −1.5 %, the
+  window and index rebalanced −0.2 %, the rest ±0.1 %), enwik9 at `-7`
+  about 152–153 M; 143,307,006 B is the `-11` container and, with that
+  2 %, would be reached from `-10` (1 GiB). An eight-fold table
+  economy at 186 MiB has no measured path: the table is a cache under a
+  compulsory-miss workload, and no admission, replacement, inheritance
+  or successor structure recovers what the missing blocks would hold.
 - The `-7` objective is 8.5 % away and 85 % of it is table pressure; the
   levers above sum to about 1 %. What remains is structural: denser
   blocks for the kinds that cannot recur at this pressure, or a model

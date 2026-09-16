@@ -2742,6 +2742,16 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
     m->low_start = sizes.low_start != 0;
     m->model2 = sizes.model2 != 0;
     m->slots_on = m->model2 && (legacy_model2 || sizes.table_log >= MODEL2_PRESSURE_LOG);
+#ifdef ADAPT_SIZES_OVERRIDE
+    {
+        /* development builds only (see cadapt.c): ADAPT_MODEL2_SLOTS=1 runs
+         * the pressure-gated parts under a small table, so a small input
+         * under a named shape meets the model a long input does; such a
+         * file decodes only under the same setting */
+        const char *o = getenv("ADAPT_MODEL2_SLOTS");
+        if (o != NULL && m->model2) m->slots_on = o[0] == '1';
+    }
+#endif
     m->extra_on = m->slots_on;
     m->mix34_row_mask = MIX34_ROW_MASK(m->compact);
     m->apm2_mask = APM2_CONTEXTS(m->max, m->compact) - 1;
