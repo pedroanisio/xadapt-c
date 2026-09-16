@@ -2,6 +2,39 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-16 — The baseline is the lean context set: the floors locked on `--max --allocation context --contexts lean`
+
+**Decision (operator, 2026-09-16).** The reference configuration the
+floors lock and the benchmarks report is `encode --max --allocation
+context --contexts lean` — the previous entry's option, taken as the
+baseline. The default command is unchanged (`auto` still chooses the
+set, and the mixed corpus floors still lock the default command and
+`--max -6`); what changes is the command `tools/ratio_floor.json`
+names, so `make gate`, `make ratio-floor` and the codecbench `cadapt`
+codecs run the lean set from here on.
+
+**Re-locked** with `tools/check_ratio_floor.py --verify` on the
+reference host, quiet, every round trip verified byte for byte (CPU
+seconds, the median of three runs on the enwik8 rows):
+
+| fixture | container | CPU s | before (auto) |
+|---|---|---|---|
+| enwik8-8MiB | 1,681,725 B | 11.7 | 1,680,015 B, 12.2 s |
+| enwik8-16MiB | 3,258,121 B | 21.7 | 3,254,114 B, 22.2 s |
+| enwik8 | 17,902,645 B | 117.1 | 17,883,525 B, 118.2 s |
+| enwik9 | 146,797,785 B | 1,156.4 | 146,899,997 B, 1,159.2 s |
+
+**Consequences.**
+- A future lever is measured against these numbers with the lean set
+  in force; a lever that pays only through the five kinds the lean set
+  leaves out (word, field, o8, word3, wordc) no longer shows here.
+- The enwik8 rows are 0.1 % larger than the `auto` floors they
+  replace and 4 % faster; enwik9 is smaller and faster. "Floors may
+  only improve" is kept per command: the `auto` command's floors are
+  not lowered, they are no longer the locked command.
+
+**Status.** Landed 2026-09-16.
+
 ## 2026-09-16 — `--contexts lean`: the lean context set outright, time for bytes on text
 
 **Decision.** A new encode option, `--contexts auto|lean`

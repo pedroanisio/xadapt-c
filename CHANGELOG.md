@@ -44,6 +44,14 @@ The binary reports `0.12.0`; the tag is pending.
   verified bytes reach the output callback. Immutable historical fixtures
   cover memory, streaming and threaded APIs, text, metadata and segments.
 
+### Changed
+
+- The locked baseline: `tools/ratio_floor.json` names `encode --max
+  --allocation context --contexts lean` and its floors are re-locked on
+  that command (enwik8 17,902,645 B in 117.1 CPU s, enwik9 146,797,785 B;
+  LOCKS.md). The default command and the mixed corpus floors are
+  unchanged.
+
 ### Added
 
 - `--contexts auto|lean` on encode (`adapt_sizes.contexts`,

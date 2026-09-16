@@ -570,15 +570,15 @@ corpus floors, locked from single wall-clock runs at a 25 % tolerance,
 stay in wall seconds until they are re-locked.
 
 <!-- floors:start -->
-Locked 2026-09-15 on AMD Ryzen 5 5600X 6-Core Processor, `cadapt encode --max --allocation context`; a change may only
+Locked 2026-09-16 on AMD Ryzen 5 5600X 6-Core Processor, `cadapt encode --max --allocation context --contexts lean`; a change may only
 improve on these (`make gate` checks the first, `make ratio-floor` the rest):
 
 | Fixture | Input | Container floor | Time floor |
 |---|---:|---:|---:|
-| enwik8-8MiB | 8,388,608 B | 1,680,015 B | 12.2 CPU s |
-| enwik8-16MiB | 16,777,216 B | 3,254,114 B | 22.2 CPU s |
-| enwik8 | 100,000,000 B | 17,883,525 B | 118.2 CPU s |
-| enwik9 | 1,000,000,000 B | 146,899,997 B | 1,159.2 CPU s |
+| enwik8-8MiB | 8,388,608 B | 1,681,725 B | 11.7 CPU s |
+| enwik8-16MiB | 16,777,216 B | 3,258,121 B | 21.7 CPU s |
+| enwik8 | 100,000,000 B | 17,902,645 B | 117.1 CPU s |
+| enwik9 | 1,000,000,000 B | 146,797,785 B | 1,156.4 CPU s |
 <!-- floors:end -->
 
 Their thresholds and verification behavior
