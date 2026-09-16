@@ -42,6 +42,17 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Security
 
+- Preserve existing targets when forced folder publication fails. Use atomic
+  rename or exchange instead of deleting the destination first; refuse
+  unsupported replacement and retain previous entries if cleanup fails.
+- Put POSIX file outputs inside private staging wrappers and retain their
+  file and directory handles through metadata, publication and cleanup.
+  Replacing a staging name cannot publish an unrelated file, change its
+  metadata or remove the replacement during rollback.
+- Journal deferred directory and root metadata to temporary disk instead
+  of retaining every attribute in RAM. Replay after checksum validation
+  keeps memory bounded, preserves ACL/umask ordering and fails closed on
+  temporary-storage errors.
 - Anchor POSIX folder restoration, metadata, cleanup and publication to
   retained directory handles inside a private wrapper. Replacing the staging
   pathname cannot redirect writes or delete unrelated files during rollback.
@@ -86,6 +97,12 @@ The binary reports `0.12.0`; the tag is pending.
   worker as well as when it decodes in parallel.
 
 ### Fixed
+
+- Restore Linux access ACLs after other attributes, preserving read-only ACLs
+  together with user attributes on regular files, sparse files, directories
+  and folder roots.
+- Decode valid empty segmented containers with either thread count while
+  preserving malformed-table, checksum and memory-budget rejection.
 - Restore nested folders under restrictive umasks, including `0777`. Keep
   temporary entries accessible to the owner, then apply recorded permissions
   or the saved umask for legacy archives. Publish read-only roots with their

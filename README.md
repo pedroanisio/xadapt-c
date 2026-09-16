@@ -246,12 +246,17 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
     `trusted.*` belong to the kernel and to root and are left alone. A
     directory's attributes are applied after its children, with its
     metadata, so a default ACL is not inherited by children the archive
-    records differently. Linux restoration removes inherited access and default
+    records differently. Access ACLs are applied after other attributes so a
+    read-only ACL cannot prevent their restoration. Linux restoration removes inherited access and default
     ACLs before creating children, so destination ACLs cannot add permissions
     absent from the archive. On macOS the attributes `listxattr` reports are
     packed and restored; macOS ACLs are not attributes there and are not
     preserved. Windows packs no attributes and refuses to restore an archive
-    that carries any. Attribute values are limited to 64 KiB.
+    that carries any. Attribute values are limited to 64 KiB. Deferred directory
+    and root attributes are journaled to temporary disk and replayed after the
+    archive checksum passes, keeping memory independent of their count. The
+    journal is automatically removed on success or failure; storage errors
+    fail restoration before publication.
   - *Not preserved.* Creation and status-change times (filesystem-managed),
     and ownership (which needs root to restore and is not in `FMT-7`).
 - Encoding standard input has no source filesystem metadata. Decoding to
@@ -264,7 +269,9 @@ complete, so an interrupted run leaves no partial target. Without
 meanwhile but is unavailable on filesystems without hard links (FAT, exFAT,
 some network mounts); pass `--force` there.
 
-On POSIX, folders are restored inside a private `0700` wrapper. Retained
+On POSIX, file outputs and folders are staged inside a private `0700` wrapper.
+File metadata is applied through a retained file handle; publication uses
+`linkat()` or `renameat()` relative to retained directory handles. Retained
 directory handles anchor restoration, metadata, cleanup and publication even
 if another process replaces the staging name. A wrapper renamed by another
 process may remain as an empty directory after completion.
@@ -276,6 +283,15 @@ Folder publication without `--force` uses an atomic no-replace rename on
 Linux and macOS; Windows rename also refuses existing destinations. If the
 platform or filesystem lacks the operation, the command fails and asks for
 `--force` rather than risking replacement after a separate existence check.
+
+Forced folder publication preserves the existing target until an atomic rename
+or exchange succeeds. POSIX rename replaces empty directories; replacing a file
+or symbolic link uses Linux/macOS atomic exchange. If the filesystem lacks that
+operation, the command refuses replacement and preserves the target. Windows
+folder publication refuses existing targets even with `--force`. Replaced
+entries are never recursively deleted. If cleanup after an exchange fails, the
+command reports that publication succeeded and retains the previous target in
+the private staging wrapper for recovery.
 
 On POSIX, `SIGINT`, `SIGTERM`, `SIGHUP`, `SIGPIPE` and `SIGXFSZ` (file-size
 limit) cancel encoding or decoding through the normal cleanup path. Blocked stream I/O wakes to discard

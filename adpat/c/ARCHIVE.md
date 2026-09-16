@@ -62,6 +62,15 @@ permissions never change, including while the root and entries receive their
 recorded permissions. Replacing the wrapper's pathname with a symlink or
 another directory cannot redirect restoration, cleanup or publication.
 
+Forced publication keeps the existing target until rename or exchange succeeds.
+POSIX rename atomically replaces empty directories; Linux/macOS exchange can
+replace files and symbolic links, retaining the previous entry inside the
+wrapper until publication completes. An unavailable exchange refuses safely.
+Windows refuses existing folder targets even with `--force`. Cleanup never
+recurses into an exchanged entry. If that cleanup or final mode restoration
+fails, the published output remains and the previous target is retained in the
+wrapper; the error names the wrapper so the caller can recover it.
+
 Temporary entries retain owner access even under umask `0777`. Once their
 contents are complete, entries receive their recorded modes; version-1 files
 and directories receive `0666 & ~umask` and `0777 & ~umask`, respectively.
@@ -84,13 +93,35 @@ destination parent, including when the archive is empty.
 
 ## Private file staging
 
-On POSIX, temporary output files are created with owner-only access and kept
-at mode `0600` during processing and verification. Linux staging files also
+On POSIX, temporary output files live inside a private `0700` wrapper and
+stay at mode `0600` during processing and verification. The CLI retains the
+parent, wrapper and file handles. Metadata is applied to the held file;
+publication and rollback resolve `contents` relative to the held wrapper.
+Replacing the wrapper pathname cannot redirect metadata or publication, and
+cleanup leaves a replacement entry alone. Linux staging files also
 have inherited ACLs removed before final permissions are applied. Successful publication
 applies the recorded source mode, or `0666 & ~umask` when no metadata is present.
 Failure removes the temporary file. This protects decoded plaintext while
 validation is still pending, including when the destination directory is
 readable by other users.
+
+## Bounded deferred metadata
+
+Directory metadata and root/directory attributes are written to an
+automatically removed temporary journal. A fixed footer links each record
+to the previous one, so replay visits children before parents and the root
+last, without retaining an index or attribute collection in memory. One
+attribute buffer and one bounded path are enough, regardless of entry count.
+Replay begins only after the container checksum and archive syntax pass.
+Access ACLs are replayed after all other attributes, before final metadata.
+Directory replay remembers the ACL's journal offset and reuses the same value
+buffer; regular and sparse files retain only their current access ACL (at most
+64 KiB) until the metadata callback. A read-only ACL therefore cannot prevent
+restoration of later user attributes. A directory handle stays open across
+access-ACL and mode changes. Legacy
+entries still receive the captured umask-derived modes. Journal creation,
+write or replay failure discards staging; temporary disk use grows with
+metadata size and the decoded archive remains subject to `--max-output`.
 
 ## Verification
 

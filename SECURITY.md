@@ -27,12 +27,17 @@ untrusted:
   component. Symbolic links may be restored but cannot serve as parents;
   hard-link sources must resolve to regular files inside that root. Windows
   also rejects native backslash and drive/stream syntax in archive paths.
+  POSIX single-file outputs use the same private wrapper and retained
+  handles for metadata, publication and rollback, including when another
+  process replaces the visible staging name.
 - Memory is bounded by what the container's header names (at most about
   1.2 GiB by the format's own limits) and by `--max-memory`; output by
   `--max-output`. For folders, that output cap applies both to the decoded
   archive stream and to the combined logical sizes of restored files,
   including sparse holes and each hard-link alias. The sink checks this
-  cumulative limit before creating, extending or linking a file.
+  cumulative limit before creating, extending or linking a file. Deferred
+  root and directory attributes use an automatically removed disk journal,
+  with bounded memory and replay only after checksum verification.
 - Threaded decoding reserves the container buffer before reading it and
   counts retained input even when only one worker fits. A file that would
   exceed the input-buffer budget, or a pipe of unknown size, uses streaming

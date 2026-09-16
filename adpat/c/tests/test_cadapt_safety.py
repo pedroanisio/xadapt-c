@@ -98,6 +98,245 @@ class SafetyTest(unittest.TestCase):
             time.sleep(0.01)
         self.fail("codec did not create staging")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux publication fault injection")
+    def test_forced_folder_publication_preserves_target_on_rename_failure(self):
+        source = self.root / "fail-rename.c"
+        library = self.root / "fail-rename.so"
+        source.write_text("""#include <errno.h>
+#include <stdlib.h>
+int renameat(int a, const char *b, int c, const char *d) {
+    (void)a; (void)b; (void)c; (void)d;
+    errno = getenv("CADAPT_TEST_EXCHANGE_FAILURE") ? ENOTDIR : EIO;
+    return -1;
+}
+int renameat2(int a, const char *b, int c, const char *d, unsigned int flags) {
+    (void)a; (void)b; (void)c; (void)d; (void)flags;
+    errno = getenv("CADAPT_TEST_EXCHANGE_UNSUPPORTED") ? ENOSYS : EIO;
+    return -1;
+}
+""")
+        subprocess.run(["cc", "-shared", "-fPIC", str(source), "-o", str(library)],
+                       check=True, capture_output=True, timeout=30)
+        for exchange_failure in (False, True, "unsupported"):
+            for kind in ("file", "directory", "symlink"):
+                with self.subTest(kind=kind, exchange_failure=exchange_failure):
+                    target = self.root / f"target-{kind}-{exchange_failure}"
+                    if kind == "directory":
+                        target.mkdir()
+                    elif kind == "symlink":
+                        target.symlink_to("unresolved-original")
+                    else:
+                        target.write_bytes(b"original valuable content")
+                    before = target.lstat()
+                    env = dict(os.environ, LD_PRELOAD=str(library))
+                    if exchange_failure:
+                        env["CADAPT_TEST_EXCHANGE_FAILURE"] = "1"
+                    if exchange_failure == "unsupported":
+                        env["CADAPT_TEST_EXCHANGE_UNSUPPORTED"] = "1"
+                    run = subprocess.run([str(CADAPT), "decode", "-", "-o", str(target), "--force"],
+                                         input=archive([entry(2, "new", b"replacement")]),
+                                         capture_output=True, env=env, timeout=30)
+                    self.assertEqual(run.returncode, 1, run.stderr)
+                    self.assertTrue(os.path.lexists(target), run.stderr)
+                    self.assertEqual(target.lstat().st_ino, before.st_ino, run.stderr)
+                    if kind == "file":
+                        self.assertEqual(target.read_bytes(), b"original valuable content")
+                    elif kind == "symlink":
+                        self.assertEqual(os.readlink(target), "unresolved-original")
+                    else:
+                        self.assertEqual(list(target.iterdir()), [])
+                    self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipUnless(sys.platform.startswith(("linux", "darwin")), "atomic POSIX exchange")
+    def test_forced_folder_publication_replaces_files_links_and_empty_directories(self):
+        victim = self.root / "victim"
+        victim.write_bytes(b"unrelated")
+        for kind in ("file", "directory", "symlink"):
+            with self.subTest(kind=kind):
+                target = self.root / f"target-{kind}"
+                if kind == "directory":
+                    target.mkdir()
+                elif kind == "symlink":
+                    target.symlink_to(victim)
+                else:
+                    target.write_bytes(b"old")
+                decoded = self.decode("-", archive([entry(2, "new", b"replacement")]),
+                                      "-o", target, "--force")
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                self.assertFalse(target.is_symlink())
+                self.assertEqual((target / "new").read_bytes(), b"replacement")
+                self.assertEqual(victim.read_bytes(), b"unrelated")
+                self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux access ACLs and user attributes")
+    def test_read_only_acls_and_user_attributes_roundtrip_together(self):
+        for kind in ("file", "sparse", "directory", "root"):
+            with self.subTest(kind=kind):
+                source = self.root / f"source-{kind}"
+                source.mkdir()
+                item = source if kind == "root" else source / "child"
+                if kind == "file":
+                    item.write_bytes(b"payload")
+                elif kind == "sparse":
+                    with item.open("wb") as out:
+                        out.seek(1 << 20)
+                        out.write(b"payload")
+                elif kind == "directory":
+                    item.mkdir()
+                owner = 4 if kind in ("file", "sparse") else 5
+                acl = struct.pack("<I", 2) + b"".join(
+                    struct.pack("<HHI", tag, permissions, uid)
+                    for tag, permissions, uid in ((1, owner, 0xffffffff), (2, 4, os.getuid()),
+                                                  (4, 0, 0xffffffff), (16, 4, 0xffffffff),
+                                                  (32, 0, 0xffffffff))
+                )
+                attributes = {"user.keep": b"important metadata", "user.empty": b""}
+                if kind in ("directory", "root"):
+                    attributes["system.posix_acl_default"] = acl
+                for key, value in attributes.items():
+                    os.setxattr(item, key, value)
+                os.setxattr(item, "system.posix_acl_access", acl)
+                mode = item.stat().st_mode & 0o777
+                self.addCleanup(item.chmod, 0o700)
+                container = self.root / f"{kind}.adpt"
+                encoded = subprocess.run([str(CADAPT), "encode", str(source), "-o", str(container)],
+                                         capture_output=True, timeout=30)
+                self.assertEqual(encoded.returncode, 0, encoded.stderr)
+                destination = self.root / f"restored-{kind}"
+                decoded = self.decode(container, None, "-o", destination)
+                self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                restored = destination if kind == "root" else destination / "child"
+                self.addCleanup(restored.chmod, 0o700)
+                self.assertEqual(restored.stat().st_mode & 0o777, mode)
+                self.assertEqual(os.getxattr(restored, "system.posix_acl_access"), acl)
+                for key, value in attributes.items():
+                    self.assertEqual(os.getxattr(restored, key), value)
+                if kind in ("file", "sparse"):
+                    self.assertEqual(restored.read_bytes(), item.read_bytes())
+
+    @unittest.skipUnless(HAS_THREADS, "threaded encoder")
+    def test_empty_threaded_container_decodes_with_either_thread_count(self):
+        source = self.root / "empty"
+        source.write_bytes(b"")
+        for profile in ((), ("--fast",), ("--max",), ("--transform", "text")):
+            with self.subTest(profile=profile):
+                container = self.root / "empty.adpt"
+                encoded = subprocess.run([str(CADAPT), "encode", str(source), "-o", str(container),
+                                          "--force", "--threads", "2", *profile],
+                                         capture_output=True, timeout=30)
+                self.assertEqual(encoded.returncode, 0, encoded.stderr)
+                for threads in (1, 2):
+                    destination = self.root / f"empty-{threads}"
+                    decoded = self.decode(container, None, "-o", destination, "--force", "--threads", threads)
+                    self.assertEqual(decoded.returncode, 0, decoded.stderr)
+                    self.assertEqual(destination.read_bytes(), b"")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux resource limits")
+    def test_deferred_root_and_directory_attributes_use_bounded_memory(self):
+        # The checksum is deliberately wrong: no attribute should be applied,
+        # but the entire metadata stream must fit without retaining its values.
+        for root_attributes in (False, True):
+            with self.subTest(root_attributes=root_attributes):
+                raw = bytearray(b"ADPTARC4" if root_attributes else b"ADPTARC3")
+                if root_attributes:
+                    raw += struct.pack("<H", 1024)
+                for i in range(1024):
+                    if not root_attributes:
+                        raw += entry(1, f"d{i:04}")[:-2] + b"\x01\x00"
+                    raw += name(f"user.a{i:04}") + struct.pack("<I", 65536) + b"x" * 65536
+                raw += b"\0"
+                source = self.root / "metadata.adpt"
+                with source.open("wb") as out:
+                    out.write(HEADER[:5] + bytes((HEADER[5] | 128,)) + HEADER[6:])
+                    for at in range(0, len(raw), 256 << 10):
+                        chunk = raw[at:at + (256 << 10)]
+                        out.write(struct.pack("<BII", 2, len(chunk), len(chunk)) + chunk)
+                    out.write(struct.pack("<BQI", 3, len(raw), zlib.crc32(raw) ^ 1))
+                del raw
+                destination = self.root / "output"
+                run = self.decode(source, None, "-o", destination, "--max-memory", 32 << 20,
+                                  memory_limit=64 << 20)
+                self.assertEqual(run.returncode, 1, run.stderr)
+                self.assertIn(b"checksum mismatch", run.stderr)
+                self.assertFalse(destination.exists())
+                self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux file-size limits")
+    def test_metadata_journal_storage_failure_cleans_staging(self):
+        import resource
+
+        def constrain():
+            resource.setrlimit(resource.RLIMIT_FSIZE, (1024, 1024))
+
+        attribute = name("user.large") + struct.pack("<I", 32768) + b"x" * 32768
+        destination = self.root / "output"
+        run = subprocess.run([str(CADAPT), "decode", "-", "-o", str(destination)],
+                             input=archive([entry(1, "dir")[:-2] + b"\x01\x00" + attribute]),
+                             capture_output=True, preexec_fn=constrain, timeout=30)
+        self.assertEqual(run.returncode, 128 + signal.SIGXFSZ, run.stderr)
+        self.assertIn(b"cannot defer directory metadata", run.stderr)
+        self.assertFalse(destination.exists())
+        self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX staging identities")
+    def test_file_staging_replacement_cannot_redirect_publication_or_metadata(self):
+        raw = b"verified file contents"
+        for corrupt in (False, True):
+            for force in (False, True):
+                with self.subTest(corrupt=corrupt, force=force):
+                    case = self.root / f"case-{corrupt}-{force}"
+                    case.mkdir()
+                    victim = case / "victim"
+                    victim.write_bytes(b"unrelated")
+                    victim.chmod(0o600)
+                    os.utime(victim, ns=(1600000000000000000, 1600000000000000000))
+                    expected = victim.stat()
+                    output = case / "output"
+                    if force:
+                        output.write_bytes(b"existing")
+                    header = b"ADPT" + bytes((22, 10, 10, 16))
+                    header += struct.pack("<IqIqI", 0o644, 1700000000, 0, 1700000000, 0)
+                    header += struct.pack("<I", zlib.crc32(header))
+                    command = [str(CADAPT), "decode", "-", "-o", str(output)]
+                    if force:
+                        command.append("--force")
+                    process = subprocess.Popen(command, stdin=subprocess.PIPE,
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    self.addCleanup(lambda p=process: p.poll() is None and p.kill())
+                    process.stdin.write(header + struct.pack("<BII", 2, len(raw), len(raw)) + raw)
+                    process.stdin.flush()
+                    deadline = time.monotonic() + 10
+                    while True:
+                        stages = list(case.glob(".cadapt-*.part"))
+                        if stages:
+                            stage = stages[0]
+                            content = stage / "contents" if stage.is_dir() else stage
+                            if content.is_file() and content.stat().st_size == len(raw):
+                                break
+                        self.assertIsNone(process.poll())
+                        self.assertLess(time.monotonic(), deadline)
+                        time.sleep(0.01)
+                    moved = case / "moved-stage"
+                    stage.rename(moved)
+                    stage.symlink_to(victim)
+                    _, stderr = process.communicate(struct.pack("<BQI", 3, len(raw), zlib.crc32(raw) ^ corrupt),
+                                                    timeout=30)
+                    actual = victim.stat()
+                    self.assertEqual((actual.st_mode, actual.st_mtime_ns),
+                                     (expected.st_mode, expected.st_mtime_ns))
+                    self.assertEqual(victim.read_bytes(), b"unrelated")
+                    self.assertTrue(stage.is_symlink(), "cleanup removed an entry it did not create")
+                    if corrupt:
+                        self.assertNotEqual(process.returncode, 0, stderr)
+                        self.assertEqual(output.read_bytes() if force else output.exists(),
+                                         b"existing" if force else False)
+                    else:
+                        self.assertEqual(process.returncode, 0, stderr)
+                        self.assertFalse(output.is_symlink())
+                        self.assertEqual(output.read_bytes(), raw)
+                    if moved.is_dir():
+                        self.assertEqual(list(moved.iterdir()), [])
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "POSIX staging identity and Linux xattrs")
     def test_replaced_staging_name_cannot_redirect_restore_cleanup_or_publication(self):
         attribute = name("user.identity") + struct.pack("<I", 8) + b"archived"
@@ -420,13 +659,14 @@ class SafetyTest(unittest.TestCase):
                         deadline = time.monotonic() + 10
                         while time.monotonic() < deadline:
                             staged = list(self.root.glob(f".cadapt-{process.pid}-*.part"))
-                            if staged and staged[0].stat().st_size >= 4096:
+                            if staged and (staged[0] / "contents").exists() and (staged[0] / "contents").stat().st_size >= 4096:
                                 break
                             self.assertIsNone(process.poll(), "decoder exited before trailer")
                             time.sleep(0.01)
                         else:
                             self.fail("decoder did not stage the data block")
-                        self.assertEqual(staged[0].stat().st_mode & 0o777, 0o600)
+                        self.assertEqual(staged[0].stat().st_mode & 0o777, 0o700)
+                        self.assertEqual((staged[0] / "contents").stat().st_mode & 0o777, 0o600)
                         self.assertFalse(output.exists())
                         process.stdin.write(struct.pack("<BQI", 3, len(raw), zlib.crc32(raw) ^ corrupt))
                         process.stdin.close()

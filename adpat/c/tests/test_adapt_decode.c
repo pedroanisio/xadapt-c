@@ -253,6 +253,42 @@ static void test_segmented_framing(void) {
     CHECK_STATUS(decode_bytes(EMPTY_SEGMENTED, sizeof(EMPTY_SEGMENTED), limits, &error), ADAPT_OK);
     CHECK_STATUS(adapt_declared_len(EMPTY_SEGMENTED, sizeof(EMPTY_SEGMENTED), &length, &error), ADAPT_OK);
     CHECK(length == 0);
+    {
+        adapt_limits empty_limits = limits;
+        adapt_stats stats = {0};
+        sink output = {file, 0, 0, 0};
+        uint64_t required = adapt_decode_memory_bound(sizes) + sizeof(EMPTY_SEGMENTED);
+        empty_limits.max_memory = required;
+        empty_limits.max_output = 0;
+        for (i = 1; i <= 2; i++) {
+            CHECK_STATUS(adapt_decode_threads(EMPTY_SEGMENTED, sizeof(EMPTY_SEGMENTED), empty_limits, i,
+                                             sink_write, &output, &stats, NULL), ADAPT_OK);
+            CHECK(output.len == 0 && stats.input_bytes == 0 && stats.output_bytes == sizeof(EMPTY_SEGMENTED));
+            CHECK(stats.segments == 1 && stats.workers == 1);
+        }
+        empty_limits.max_memory--;
+        CHECK_STATUS(adapt_decode_threads(EMPTY_SEGMENTED, sizeof(EMPTY_SEGMENTED), empty_limits, 2,
+                                         sink_write, &output, NULL, &error), ADAPT_ERROR_MEMORY_LIMIT);
+        CHECK(error.detail == required && error.limit == required - 1);
+        empty_limits.max_memory = required;
+        /* Only one segment with both lengths zero is the empty container.
+         * Neither a half-empty entry nor a mismatched count is permitted. */
+        for (i = 9; i <= 17; i += 4) {
+            memcpy(file, EMPTY_SEGMENTED, sizeof(EMPTY_SEGMENTED));
+            file[i]++;
+            CHECK_STATUS(adapt_decode_threads(file, sizeof(EMPTY_SEGMENTED), empty_limits, 2,
+                                             sink_write, &output, NULL, NULL), ADAPT_ERROR_BAD_BLOCK);
+        }
+        memcpy(file, EMPTY_SEGMENTED, sizeof(EMPTY_SEGMENTED));
+        file[sizeof(EMPTY_SEGMENTED) - 12] = 1; /* nonempty declaration */
+        CHECK_STATUS(adapt_decode_threads(file, sizeof(EMPTY_SEGMENTED), empty_limits, 2,
+                                         sink_write, &output, NULL, NULL), ADAPT_ERROR_BAD_BLOCK);
+        memcpy(file, EMPTY_SEGMENTED, sizeof(EMPTY_SEGMENTED));
+        file[sizeof(EMPTY_SEGMENTED) - 1] = 1;
+        CHECK_STATUS(adapt_decode_threads(file, sizeof(EMPTY_SEGMENTED), empty_limits, 2,
+                                         sink_write, &output, NULL, NULL), ADAPT_ERROR_CHECKSUM);
+        CHECK(output.len == 0);
+    }
     for (i = 0; i < sizeof(EMPTY_SEGMENTED); i++) {
         CHECK_STATUS(decode_bytes(EMPTY_SEGMENTED, i, limits, &error), ADAPT_ERROR_TRUNCATED);
     }

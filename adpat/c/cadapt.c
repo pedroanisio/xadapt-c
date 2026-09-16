@@ -202,10 +202,10 @@ static int metadata_read_path(const char *path, int nofollow, adapt_metadata *m)
     return 0;
 }
 
+#ifdef _WIN32
 static int metadata_apply(const char *path, int symlink_entry, const adapt_metadata *m) {
     adapt_metadata restored;
     int rc;
-#ifdef _WIN32
     struct __utimbuf64 times;
     if (symlink_entry || m->atime_nanoseconds != 0 || m->mtime_nanoseconds != 0) {
         return ENOTSUP;
@@ -215,20 +215,6 @@ static int metadata_apply(const char *path, int symlink_entry, const adapt_metad
     if (_utime64(path, &times) != 0 || _chmod(path, (int)(m->mode & (_S_IREAD | _S_IWRITE))) != 0) {
         return errno;
     }
-#else
-    struct timespec times[2];
-    times[0].tv_sec = (time_t)m->atime_seconds;
-    times[0].tv_nsec = (long)m->atime_nanoseconds;
-    times[1].tv_sec = (time_t)m->mtime_seconds;
-    times[1].tv_nsec = (long)m->mtime_nanoseconds;
-    if ((int64_t)times[0].tv_sec != m->atime_seconds || (int64_t)times[1].tv_sec != m->mtime_seconds) {
-        return ERANGE;
-    }
-    if (utimensat(AT_FDCWD, path, times, symlink_entry ? AT_SYMLINK_NOFOLLOW : 0) != 0 ||
-        (!symlink_entry && chmod(path, (mode_t)m->mode) != 0)) {
-        return errno;
-    }
-#endif
     /* Filesystems may silently clamp dates or round away precision even
      * when their setter succeeds. Refuse publication if fidelity was lost. */
     rc = metadata_read_path(path, symlink_entry, &restored);
@@ -242,6 +228,8 @@ static int metadata_apply(const char *path, int symlink_entry, const adapt_metad
     }
     return 0;
 }
+
+#endif
 
 #ifndef _WIN32
 /* A directory handle keeps metadata tied to the restored inode even when
@@ -321,30 +309,6 @@ static void attrs_free(attrs *a) {
     a->values = NULL;
     a->lens = NULL;
     a->count = 0;
-}
-
-/* Retain an attribute until its directory can be finalized. */
-static int attrs_append(attrs *a, const char *name, const uint8_t *value, size_t len) {
-    uint32_t n = a->count;
-    char **names = realloc(a->names, (n + 1) * sizeof(*names));
-    uint8_t **values = names == NULL ? NULL : realloc(a->values, (n + 1) * sizeof(*values));
-    size_t *lens = values == NULL ? NULL : realloc(a->lens, (n + 1) * sizeof(*lens));
-    if (names != NULL) a->names = names;
-    if (values != NULL) a->values = values;
-    if (lens != NULL) a->lens = lens;
-    if (names == NULL || values == NULL || lens == NULL) return ENOMEM;
-    a->names[n] = malloc(strlen(name) + 1);
-    a->values[n] = malloc(len + 1);
-    if (a->names[n] == NULL || a->values[n] == NULL) {
-        free(a->names[n]);
-        free(a->values[n]);
-        return ENOMEM;
-    }
-    strcpy(a->names[n], name);
-    memcpy(a->values[n], value, len);
-    a->lens[n] = len;
-    a->count = n + 1;
-    return 0;
 }
 
 /* The bytes an entry's attribute trailer takes in the archive. */
@@ -996,10 +960,12 @@ typedef struct staged {
     /* Folders live inside a private wrapper whose mode never changes.
      * Publication moves "contents" out through guard_fd, not s->path. */
     int parent_fd, guard_fd, root_fd;
+    int directory; /* contents is a directory or a regular output file */
     char *target_name;
 #endif
 } staged;
 
+#ifdef _WIN32
 static int file_exists(const char *path) {
     FILE *f = fopen(path, "rb");
     if (f != NULL) {
@@ -1008,6 +974,13 @@ static int file_exists(const char *path) {
     }
     return errno != ENOENT;
 }
+#endif
+
+#ifndef _WIN32
+static int staged_guard_open(staged *s, const char *target, int force, int directory);
+static void staged_dir_release(staged *s);
+static void staged_dir_discard(staged *s);
+#endif
 
 static void staged_discard(staged *s) {
     if (s->file != NULL) {
@@ -1015,40 +988,41 @@ static void staged_discard(staged *s) {
         s->file = NULL;
     }
     if (s->path != NULL) {
+#ifndef _WIN32
+        staged_dir_discard(s);
+#else
         remove(s->path);
         free(s->path);
         s->path = NULL;
+#endif
     }
 }
 
 /* Open a staging file in the target's directory. Returns an exit code, or
  * 0 with `s` ready to write. */
 static int staged_open(staged *s, const char *target, int force) {
+#ifndef _WIN32
+    mode_t mask = umask(0);
+    umask(mask);
+    s->mode = (unsigned)(0666 & ~mask);
+    return staged_guard_open(s, target, force, 0);
+#else
     size_t dir_len, i;
     const char *slash;
     int attempt;
     s->path = NULL;
     s->file = NULL;
-#ifndef _WIN32
-    {
-        mode_t mask = umask(0);
-        umask(mask);
-        s->mode = (unsigned)(0666 & ~mask);
-    }
-#endif
     if (!force && file_exists(target)) {
         fprintf(stderr, "error: %s exists; pass --force to overwrite\n", target);
         return EXIT_OTHER;
     }
     slash = strrchr(target, '/');
-#ifdef _WIN32
     {
         const char *back = strrchr(target, '\\');
         if (back != NULL && (slash == NULL || back > slash)) {
             slash = back;
         }
     }
-#endif
     dir_len = slash == NULL ? 0 : (size_t)(slash - target) + 1;
     for (attempt = 0; attempt < 128; attempt++) {
         char name[64];
@@ -1068,11 +1042,7 @@ static int staged_open(staged *s, const char *target, int force) {
          * discarded; probing first cannot establish that ownership.
          * Keep incomplete plaintext private. The final recorded or
          * umask-derived mode is applied only after decoding succeeds. */
-#ifdef _WIN32
         fd = _open(path, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
-#else
-        fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
-#endif
         if (fd < 0) {
             int e = errno;
             free(path);
@@ -1081,32 +1051,10 @@ static int staged_open(staged *s, const char *target, int force) {
             }
             return other_error(target, strerror(e));
         }
-#ifndef _WIN32
-        /* A restrictive umask or inherited ACL must not prevent the
-         * owner from reopening the private file for verification. */
-        {
-            int e = clear_inherited_acl(fd);
-            if (e == 0 && fchmod(fd, 0600) != 0) e = errno;
-            if (e != 0) {
-                close(fd);
-                remove(path);
-                free(path);
-                return other_error(target, strerror(e));
-            }
-        }
-#endif
-#ifdef _WIN32
         s->file = _fdopen(fd, "wb");
-#else
-        s->file = fdopen(fd, "wb");
-#endif
         if (s->file == NULL) {
             int e = errno;
-#ifdef _WIN32
             _close(fd);
-#else
-            close(fd);
-#endif
             remove(path);
             free(path);
             return other_error(target, strerror(e));
@@ -1115,6 +1063,7 @@ static int staged_open(staged *s, const char *target, int force) {
         return 0;
     }
     return other_error(target, "cannot create a unique staging file");
+#endif
 }
 
 /* Publish the staged file as `target`. Returns an exit code or 0. */
@@ -1131,38 +1080,38 @@ static int staged_publish(staged *s, const char *target, int force, const adapt_
         return other_error(target, strerror(e));
     }
     s->file = NULL;
-    if (metadata != NULL && (rc = metadata_apply(s->path, 0, metadata)) != 0) {
-        char message[160];
-        snprintf(message, sizeof(message), "cannot restore metadata: %s", strerror(rc));
+#ifndef _WIN32
+    rc = metadata != NULL ? metadata_apply_fd(s->root_fd, metadata)
+                          : (fchmod(s->root_fd, (mode_t)s->mode) == 0 ? 0 : errno);
+    if (rc != 0) {
+        char message[256];
+        snprintf(message, sizeof(message), "cannot restore file metadata: %s", strerror(rc));
         staged_discard(s);
         return other_error(target, message);
     }
-#ifndef _WIN32
-    if (metadata == NULL && chmod(s->path, (mode_t)s->mode) != 0) {
-        int e = errno;
-        staged_discard(s);
-        return other_error(target, strerror(e));
+    {
+        rc = force ? renameat(s->guard_fd, "contents", s->parent_fd, s->target_name)
+                   : linkat(s->guard_fd, "contents", s->parent_fd, s->target_name, 0);
+        if (rc != 0) rc = errno;
     }
-    if (!force) {
-        /* Linking a complete file is atomic and refuses every existing
-         * directory entry, including one created after the initial check. */
-        rc = link(s->path, target);
-        if (rc != 0) {
-            int e = errno;
-            staged_discard(s);
-            return other_error(target, e == EEXIST ? "exists; pass --force to overwrite" : strerror(e));
-        }
+    if (rc != 0) {
         staged_discard(s);
-        return 0;
+        return other_error(target, rc == EEXIST ? "exists; pass --force to overwrite" : strerror(rc));
     }
+    /* linkat leaves the private name; renameat has already removed it. */
+    staged_discard(s);
+    return 0;
 #else
+    if (metadata != NULL && (rc = metadata_apply(s->path, 0, metadata)) != 0) {
+        staged_discard(s);
+        return other_error(target, strerror(rc));
+    }
     if (!force && file_exists(target)) {
         staged_discard(s);
         fprintf(stderr, "error: %s exists; pass --force to overwrite\n", target);
         return EXIT_OTHER;
     }
     remove(target);
-#endif
     rc = rename(s->path, target);
     if (rc != 0) {
         int e = errno;
@@ -1172,6 +1121,7 @@ static int staged_publish(staged *s, const char *target, int force, const adapt_
     free(s->path);
     s->path = NULL;
     return 0;
+#endif
 }
 
 /* ------------------------------------------------------------------------
@@ -1924,30 +1874,32 @@ static int packer_failure(const char *input, const packer *p) {
 /* The sink that restores an archive under a staging directory. Every
  * path has passed the unpacker's syntax rules; filesystem parents still
  * have to be resolved without following an archive's symbolic links. */
-typedef struct deferred_metadata {
-    char *path;
+/* A private, temporary journal retains attributes on disk. Each record
+ * ends in a fixed footer so replay needs only one bounded attribute and
+ * visits children before parents, without an in-memory directory index. */
+typedef struct metadata_record {
+    cadapt_off start;
+    uint32_t path_bytes, attributes;
+    int has_metadata;
     adapt_metadata metadata;
-    int has_metadata; /* version 1 directories use the saved umask instead */
-    /* the directory's attributes, applied with its metadata once its
-     * children exist: a default ACL set earlier would be inherited by
-     * children the archive records differently */
-    attrs attrs;
-    struct deferred_metadata *next;
-} deferred_metadata;
+} metadata_record;
 
 typedef struct restorer {
     const char *root;
 #ifndef _WIN32
     int root_fd, entry_fd; /* retain the current file through ACL and metadata callbacks */
     unsigned file_mode, directory_mode; /* final modes for version 1 entries */
+    uint8_t *file_acl; /* access ACL waits until other file attributes are set */
+    size_t file_acl_len;
 #endif
-    attrs root_attrs;
+    FILE *journal;
+    metadata_record pending;
+    char *pending_path;
     FILE *file;
     uint64_t restored_size, max_output;
     int error; /* errno of the failure */
     char *failed; /* the entry's path, malloc'd, or NULL */
     const char *why; /* a failure the errno does not name, or NULL */
-    deferred_metadata *directories;
 } restorer;
 
 /* Reserve apparent file bytes before creating a file or link. Holes and
@@ -1969,6 +1921,59 @@ static int restore_fail(restorer *r, const char *path, int e, const char *why) {
         strcpy(r->failed, path);
     }
     return e != 0 ? e : EIO;
+}
+
+static int journal_write(FILE *file, const void *data, size_t len) {
+    return fwrite(data, 1, len, file) == len ? 0 : (errno != 0 ? errno : EIO);
+}
+
+static int journal_read(FILE *file, void *data, size_t len) {
+    return fread(data, 1, len, file) == len ? 0 : EIO;
+}
+
+static int journal_flush_record(restorer *r) {
+    int rc = 0;
+    if (r->pending_path != NULL) {
+        rc = journal_write(r->journal, r->pending_path, r->pending.path_bytes);
+        if (rc == 0) rc = journal_write(r->journal, &r->pending, sizeof(r->pending));
+        free(r->pending_path);
+        r->pending_path = NULL;
+    }
+    return rc;
+}
+
+static int journal_begin(restorer *r, const char *path) {
+    size_t len = strlen(path) + 1;
+    int rc = journal_flush_record(r);
+    if (rc != 0) return rc;
+    if (len > ADAPT_ARCHIVE_PATH_MAX + 1u) return ENAMETOOLONG;
+    if (r->journal == NULL) {
+        r->journal = tmpfile();
+        if (r->journal == NULL) return errno != 0 ? errno : EIO;
+    }
+    memset(&r->pending, 0, sizeof(r->pending));
+    r->pending.start = cadapt_ftell(r->journal);
+    if (r->pending.start < 0) return errno != 0 ? errno : EIO;
+    r->pending_path = malloc(len);
+    if (r->pending_path == NULL) return ENOMEM;
+    memcpy(r->pending_path, path, len);
+    r->pending.path_bytes = (uint32_t)len;
+    return 0;
+}
+
+static int journal_attribute(restorer *r, const char *name, const uint8_t *value, size_t len) {
+    size_t name_len = strlen(name) + 1;
+    uint32_t lengths[2];
+    int rc;
+    if (name_len > ADAPT_ARCHIVE_ATTRIBUTE_NAME_MAX + 1u || len > ADAPT_ARCHIVE_ATTRIBUTE_VALUE_MAX ||
+        r->pending.attributes == UINT32_MAX) return EINVAL;
+    lengths[0] = (uint32_t)name_len;
+    lengths[1] = (uint32_t)len;
+    rc = journal_write(r->journal, lengths, sizeof(lengths));
+    if (rc == 0) rc = journal_write(r->journal, name, name_len);
+    if (rc == 0) rc = journal_write(r->journal, value, len);
+    if (rc == 0) r->pending.attributes++;
+    return rc;
 }
 
 #ifndef _WIN32
@@ -2118,19 +2123,8 @@ static int restore_directory(void *context, const char *path) {
     if (rc != 0) {
         return restore_fail(r, path, rc, rc == EEXIST ? "named twice in the archive" : NULL);
     }
-    {
-        deferred_metadata *item = calloc(1, sizeof(*item));
-        if (item == NULL) return restore_fail(r, path, ENOMEM, NULL);
-        item->path = malloc(strlen(path) + 1);
-        if (item->path == NULL) {
-            free(item);
-            return restore_fail(r, path, ENOMEM, NULL);
-        }
-        strcpy(item->path, path);
-        item->next = r->directories;
-        r->directories = item;
-    }
-    return 0;
+    rc = journal_begin(r, path);
+    return rc != 0 ? restore_fail(r, path, rc, "cannot defer directory metadata") : 0;
 }
 
 static int restore_file_open(void *context, const char *path, uint64_t size) {
@@ -2202,6 +2196,8 @@ static int restore_file_data(void *context, const uint8_t *data, size_t len) {
  * handle belongs to a version 1 file, or an entry whose parsing failed. */
 static int finish_legacy_file(restorer *r, int apply) {
     int rc = 0;
+    free(r->file_acl);
+    r->file_acl = NULL;
     if (r->entry_fd >= 0) {
         if (apply && fchmod(r->entry_fd, (mode_t)r->file_mode) != 0) rc = errno;
         close(r->entry_fd);
@@ -2380,15 +2376,23 @@ static int restore_attribute(void *context, const char *path, uint8_t kind, cons
     restorer *r = context;
     int rc;
     if (kind == ADAPT_ARCHIVE_DIRECTORY) {
-        deferred_metadata *d = r->directories;
-        if (d == NULL || strcmp(d->path, path) != 0) {
+        if (r->pending_path == NULL || strcmp(r->pending_path, path) != 0) {
             return restore_fail(r, path, EINVAL, "directory attributes without an entry");
         }
-        rc = attrs_append(&d->attrs, name, value, len);
-        return rc != 0 ? restore_fail(r, path, rc, NULL) : 0;
+        rc = journal_attribute(r, name, value, len);
+        return rc != 0 ? restore_fail(r, path, rc, "cannot defer directory metadata") : 0;
     }
 #ifndef _WIN32
     if (kind == ADAPT_ARCHIVE_FILE || kind == ADAPT_ARCHIVE_SPARSE) {
+        if (strcmp(name, "system.posix_acl_access") == 0) {
+            uint8_t *acl = malloc(len + 1);
+            if (acl == NULL) return restore_fail(r, path, ENOMEM, NULL);
+            memcpy(acl, value, len);
+            free(r->file_acl);
+            r->file_acl = acl;
+            r->file_acl_len = len;
+            return 0;
+        }
         rc = attr_apply(r->entry_fd, name, value, len);
     } else
 #endif
@@ -2401,25 +2405,30 @@ static int restore_attribute(void *context, const char *path, uint8_t kind, cons
 /* Root attributes precede the children on the wire but take effect last. */
 static int restore_root_attribute(void *context, const char *name, const uint8_t *value, size_t len) {
     restorer *r = context;
-    int rc = attrs_append(&r->root_attrs, name, value, len);
-    return rc != 0 ? restore_fail(r, "root", rc, NULL) : 0;
+    int rc = 0;
+    if (r->pending_path == NULL) rc = journal_begin(r, "");
+    if (rc == 0 && r->pending_path[0] != '\0') rc = EINVAL;
+    if (rc == 0) rc = journal_attribute(r, name, value, len);
+    return rc != 0 ? restore_fail(r, "root", rc, "cannot defer root metadata") : 0;
 }
 
 static int restore_metadata(void *context, const char *path, uint8_t kind, const adapt_metadata *metadata) {
     restorer *r = context;
     int rc;
     if (kind == ADAPT_ARCHIVE_DIRECTORY) {
-        deferred_metadata *item = r->directories;
-        if (item == NULL || strcmp(item->path, path) != 0) {
+        if (r->pending_path == NULL || strcmp(r->pending_path, path) != 0) {
             return restore_fail(r, path, EINVAL, "directory metadata without an entry");
         }
-        item->metadata = *metadata;
-        item->has_metadata = 1;
+        r->pending.metadata = *metadata;
+        r->pending.has_metadata = 1;
         return 0;
     }
 #ifndef _WIN32
     if (kind == ADAPT_ARCHIVE_FILE || kind == ADAPT_ARCHIVE_SPARSE) {
-        rc = metadata_apply_fd(r->entry_fd, metadata);
+        rc = r->file_acl == NULL ? 0 : attr_apply(r->entry_fd, "system.posix_acl_access", r->file_acl, r->file_acl_len);
+        free(r->file_acl);
+        r->file_acl = NULL;
+        if (rc == 0) rc = metadata_apply_fd(r->entry_fd, metadata);
         close(r->entry_fd);
         r->entry_fd = -1;
     } else
@@ -2430,36 +2439,105 @@ static int restore_metadata(void *context, const char *path, uint8_t kind, const
     return rc != 0 ? restore_fail(r, path, rc, "cannot restore metadata") : 0;
 }
 
-/* Reverse traversal order finalizes children before parents. On failure
- * release the records without applying any remaining metadata. */
+/* Only a checksummed archive may replay the journal. The workspace is
+ * bounded by the wire limits, independent of entry or attribute count. */
 static int finish_directory_metadata(restorer *r, int apply) {
     int rc = 0;
-    while (r->directories != NULL) {
-        deferred_metadata *item = r->directories;
-        r->directories = item->next;
-        if (apply && rc == 0) {
-            int e = restore_apply_metadata(r, item->path, 0, item->has_metadata ? &item->metadata : NULL, &item->attrs);
-            if (e != 0) {
-                rc = restore_fail(r, item->path, e, "cannot restore directory metadata or attributes");
-            }
+    cadapt_off end = 0;
+    char path[ADAPT_ARCHIVE_PATH_MAX + 1u];
+    char name[ADAPT_ARCHIVE_ATTRIBUTE_NAME_MAX + 1u];
+    uint8_t value[ADAPT_ARCHIVE_ATTRIBUTE_VALUE_MAX];
+    if (apply && r->journal != NULL) {
+        rc = journal_flush_record(r);
+        if (rc == 0 && fflush(r->journal) != 0) rc = errno != 0 ? errno : EIO;
+        if (rc == 0) {
+            end = cadapt_ftell(r->journal);
+            if (end < 0) rc = EIO;
         }
-        attrs_free(&item->attrs);
-        free(item->path);
-        free(item);
     }
-    if (apply && rc == 0) {
+    while (apply && rc == 0 && end > 0) {
+        metadata_record record;
+        cadapt_off path_at;
         uint32_t i;
-#ifdef _WIN32
-        int fd = -1;
-#else
+#ifndef _WIN32
         int fd = r->root_fd;
+        cadapt_off acl_at = -1;
+        uint32_t acl_len = 0;
 #endif
-        for (i = 0; i < r->root_attrs.count && rc == 0; i++) {
-            int e = attr_apply(fd, r->root_attrs.names[i], r->root_attrs.values[i], r->root_attrs.lens[i]);
-            if (e != 0) rc = restore_fail(r, "root", e, "cannot restore root extended attribute");
+        if (end < (cadapt_off)sizeof(record) ||
+            cadapt_fseek(r->journal, end - (cadapt_off)sizeof(record), SEEK_SET) != 0 ||
+            journal_read(r->journal, &record, sizeof(record)) != 0) { rc = EIO; break; }
+        path_at = end - (cadapt_off)sizeof(record) - record.path_bytes;
+        if (record.path_bytes == 0 || record.path_bytes > sizeof(path) || record.start < 0 ||
+            record.start > path_at || cadapt_fseek(r->journal, path_at, SEEK_SET) != 0 ||
+            journal_read(r->journal, path, record.path_bytes) != 0 || path[record.path_bytes - 1] != '\0' ||
+            strlen(path) + 1 != record.path_bytes || cadapt_fseek(r->journal, record.start, SEEK_SET) != 0) {
+            rc = EIO; break;
         }
+#ifndef _WIN32
+        /* Retain the directory before an access ACL can remove our read
+         * permission. Its timestamps/mode must use this same handle. */
+        if (path[0] != '\0') {
+            char *storage, *leaf;
+            int parent = restore_parent(r, path, &storage, &leaf);
+            fd = parent < 0 ? -1 : openat(parent, leaf, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+            if (fd < 0) rc = errno;
+            if (parent >= 0) close(parent);
+            free(storage);
+        }
+#endif
+        for (i = 0; i < record.attributes && rc == 0; i++) {
+            uint32_t lengths[2];
+            cadapt_off at = cadapt_ftell(r->journal);
+            if (at < 0 || path_at - at < (cadapt_off)sizeof(lengths) ||
+                journal_read(r->journal, lengths, sizeof(lengths)) != 0 ||
+                lengths[0] == 0 || lengths[0] > sizeof(name) || lengths[1] > sizeof(value) ||
+                (uint64_t)(path_at - at - (cadapt_off)sizeof(lengths)) < (uint64_t)lengths[0] + lengths[1] ||
+                journal_read(r->journal, name, lengths[0]) != 0 || name[lengths[0] - 1] != '\0' ||
+                strlen(name) + 1 != lengths[0] || journal_read(r->journal, value, lengths[1]) != 0) {
+                rc = EIO; break;
+            }
+#ifdef _WIN32
+            rc = attr_apply(-1, name, value, lengths[1]);
+#else
+            if (strcmp(name, "system.posix_acl_access") == 0) {
+                /* Replay this one value last without retaining a second
+                 * attribute buffer. Its mode may remove owner write access. */
+                acl_at = at + (cadapt_off)sizeof(lengths) + lengths[0];
+                acl_len = lengths[1];
+            } else {
+                rc = attr_apply(fd, name, value, lengths[1]);
+            }
+#endif
+        }
+        if (rc == 0 && cadapt_ftell(r->journal) != path_at) rc = EIO;
+#ifndef _WIN32
+        if (rc == 0 && acl_at >= 0) {
+            if (cadapt_fseek(r->journal, acl_at, SEEK_SET) != 0 ||
+                journal_read(r->journal, value, acl_len) != 0) rc = EIO;
+            else rc = attr_apply(fd, "system.posix_acl_access", value, acl_len);
+        }
+#endif
+        if (rc == 0 && path[0] != '\0') {
+#ifdef _WIN32
+            rc = restore_apply_metadata(r, path, 0, record.has_metadata ? &record.metadata : NULL, NULL);
+#else
+            if (record.has_metadata) rc = metadata_apply_fd(fd, &record.metadata);
+            else if (fchmod(fd, (mode_t)r->directory_mode) != 0) rc = errno;
+#endif
+        }
+#ifndef _WIN32
+        if (path[0] != '\0' && fd >= 0) close(fd);
+#endif
+        if (rc != 0) restore_fail(r, path[0] ? path : "root", rc,
+                                  path[0] ? "cannot restore directory metadata or attributes" : "cannot restore root extended attribute");
+        end = record.start;
     }
-    attrs_free(&r->root_attrs);
+    if (r->journal != NULL && fclose(r->journal) != 0 && rc == 0 && apply) rc = errno != 0 ? errno : EIO;
+    r->journal = NULL;
+    free(r->pending_path);
+    r->pending_path = NULL;
+    if (rc != 0 && r->error == 0) restore_fail(r, "metadata journal", rc, "cannot read deferred metadata");
     return rc;
 }
 
@@ -2613,18 +2691,19 @@ static void staged_dir_release(staged *s) {
 
 static void staged_dir_discard(staged *s) {
     if (s->root_fd >= 0) {
-        remove_tree_fd(s->root_fd);
-        (void)unlinkat(s->guard_fd, "contents", AT_REMOVEDIR);
+        if (s->directory) remove_tree_fd(s->root_fd);
+        (void)unlinkat(s->guard_fd, "contents", s->directory ? AT_REMOVEDIR : 0);
     }
     staged_dir_release(s);
 }
 
-static int staged_dir_open(staged *s, const char *target, int force) {
+static int staged_guard_open(staged *s, const char *target, int force, int directory) {
     const char *slash = strrchr(target, '/');
     size_t dir_len = slash == NULL ? 0 : (size_t)(slash - target) + 1;
     char *parent_path = malloc(dir_len + 2);
     int attempt, rc = 0;
     struct stat st;
+    s->directory = directory;
     s->path = NULL;
     s->file = NULL;
     s->parent_fd = s->guard_fd = s->root_fd = -1;
@@ -2677,17 +2756,30 @@ static int staged_dir_open(staged *s, const char *target, int force) {
             s->guard_fd = -1;
             break;
         }
-        mask = umask(0);
-        made = mkdirat(s->guard_fd, "contents", 0700);
-        rc = made == 0 ? 0 : errno;
-        umask(mask);
-        if (rc != 0) break;
-        s->root_fd = openat(s->guard_fd, "contents", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (directory) {
+            mask = umask(0);
+            made = mkdirat(s->guard_fd, "contents", 0700);
+            rc = made == 0 ? 0 : errno;
+            umask(mask);
+            if (rc != 0) break;
+            s->root_fd = openat(s->guard_fd, "contents", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        } else {
+            s->root_fd = openat(s->guard_fd, "contents", O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        }
         if (s->root_fd < 0) {
             rc = errno;
-            (void)unlinkat(s->guard_fd, "contents", AT_REMOVEDIR);
+            (void)unlinkat(s->guard_fd, "contents", directory ? AT_REMOVEDIR : 0);
         } else {
             rc = clear_inherited_acl(s->root_fd);
+            if (rc == 0 && fchmod(s->root_fd, directory ? 0700 : 0600) != 0) rc = errno;
+            if (rc == 0 && !directory) {
+                int fd = dup(s->root_fd);
+                s->file = fd < 0 ? NULL : fdopen(fd, "wb");
+                if (s->file == NULL) {
+                    rc = errno;
+                    if (fd >= 0) close(fd);
+                }
+            }
         }
         if (rc == 0) return 0;
     }
@@ -2696,17 +2788,44 @@ static int staged_dir_open(staged *s, const char *target, int force) {
     return other_error(target, rc == EEXIST ? "exists; pass --force to overwrite"
                                            : strerror(rc));
 }
+static int staged_dir_open(staged *s, const char *target, int force) {
+    return staged_guard_open(s, target, force, 1);
+}
+
 #endif
 
 /* POSIX rename() may replace a directory created after the initial check.
  * Refuse safely when the platform cannot make the no-replace operation atomic. */
-static int staged_dir_rename(staged *s, const char *target, int force) {
+static int staged_dir_rename(staged *s, const char *target, int force, int *exchanged) {
+    *exchanged = 0;
 #ifdef _WIN32
     (void)force;
     return rename(s->path, target); /* Windows rename refuses existing names. */
 #else
     (void)target;
-    if (force) return renameat(s->guard_fd, "contents", s->parent_fd, s->target_name);
+    if (force) {
+        struct stat previous;
+        int rc;
+        /* Rename already replaces an empty directory atomically. A file
+         * needs an exchange because rename cannot replace unlike types. */
+        rc = renameat(s->guard_fd, "contents", s->parent_fd, s->target_name);
+        if (rc == 0 || (errno != ENOTDIR && errno != EISDIR)) return rc;
+        if (fstatat(s->parent_fd, s->target_name, &previous, AT_SYMLINK_NOFOLLOW) != 0) return -1;
+        if (S_ISDIR(previous.st_mode)) {
+            errno = EEXIST; /* the destination changed; keep the new directory */
+            return -1;
+        }
+#if defined(__linux__) && defined(RENAME_EXCHANGE)
+        rc = renameat2(s->guard_fd, "contents", s->parent_fd, s->target_name, RENAME_EXCHANGE);
+#elif defined(__APPLE__) && defined(RENAME_SWAP)
+        rc = renameatx_np(s->guard_fd, "contents", s->parent_fd, s->target_name, RENAME_SWAP);
+#else
+        errno = ENOTSUP;
+        rc = -1;
+#endif
+        if (rc == 0) *exchanged = 1;
+        return rc;
+    }
 #if defined(__linux__) && defined(RENAME_NOREPLACE)
     return renameat2(s->guard_fd, "contents", s->parent_fd, s->target_name, RENAME_NOREPLACE);
 #elif defined(__APPLE__) && defined(RENAME_EXCL)
@@ -2722,6 +2841,7 @@ static int staged_dir_rename(staged *s, const char *target, int force) {
  * or empty directory is replaced; a directory with contents is not, so no
  * bytes of the user's are ever removed here. */
 static int staged_dir_publish(staged *s, const char *target, int force) {
+    int exchanged;
 #ifndef _WIN32
     struct stat root;
     mode_t root_mode;
@@ -2748,41 +2868,17 @@ static int staged_dir_publish(staged *s, const char *target, int force) {
         return other_error(target, strerror(e));
     }
 #endif
-#ifdef _WIN32
-    if (force && file_exists(target)) {
-        int rc = is_directory(target) ?
-#ifdef _WIN32
-                                      _rmdir(target)
-#else
-                                      rmdir(target)
-#endif
-                                      : remove(target);
-        if (rc != 0) {
-            int e = errno;
-            staged_dir_discard(s);
-            return other_error(target, e == ENOTEMPTY || e == EEXIST ? "exists and is not empty; remove it first"
-                                                                      : strerror(e));
-        }
-    }
-#else
-    if (force) {
-        struct stat st;
-        int rc = fstatat(s->parent_fd, s->target_name, &st, AT_SYMLINK_NOFOLLOW);
-        if (rc == 0) rc = unlinkat(s->parent_fd, s->target_name, S_ISDIR(st.st_mode) ? AT_REMOVEDIR : 0);
-        if (rc != 0 && errno != ENOENT) {
-            int e = errno;
-            staged_dir_discard(s);
-            return other_error(target, e == ENOTEMPTY || e == EEXIST ? "exists and is not empty; remove it first"
-                                                                      : strerror(e));
-        }
-    }
-#endif
-    if (staged_dir_rename(s, target, force) != 0) {
+    if (staged_dir_rename(s, target, force, &exchanged) != 0) {
         int e = errno;
         staged_dir_discard(s);
         if (!force && (e == ENOSYS || e == EINVAL || e == ENOTSUP)) {
             return other_error(target, "atomic directory publication is unavailable; pass --force to allow replacement");
         }
+        if (force && (e == ENOSYS || e == EINVAL || e == ENOTSUP)) {
+            return other_error(target, "atomic folder replacement is unavailable; existing target preserved");
+        }
+        if (force && e == ENOTEMPTY) return other_error(target, "exists and is not empty; remove it first");
+        if (force && e == EEXIST) return other_error(target, "existing directory changed; target preserved");
         return other_error(target, e == EEXIST || e == ENOTEMPTY ? "exists; pass --force to overwrite" : strerror(e));
     }
 #ifdef _WIN32
@@ -2794,13 +2890,23 @@ static int staged_dir_publish(staged *s, const char *target, int force) {
         if (fchmod(s->root_fd, root_mode) != 0 || fstat(s->root_fd, &root) != 0) e = errno;
         else if ((root.st_mode & 07777) != root_mode) e = ENOTSUP;
         if (e != 0) {
-            char message[160];
+            char message[512];
             /* Publication already succeeded. Recursive rollback here
              * could remove files another process added to the output. */
+            snprintf(message, sizeof(message), "folder published but cannot restore root mode: %s%s%s", strerror(e),
+                     exchanged ? "; previous target retained in staging wrapper " : "", exchanged ? s->path : "");
             staged_dir_release(s);
-            snprintf(message, sizeof(message), "folder published but cannot restore root mode: %s", strerror(e));
             return other_error(target, message);
         }
+    }
+    if (exchanged && unlinkat(s->guard_fd, "contents", 0) != 0) {
+        char message[512];
+        /* Never recurse here: a concurrent writer may have changed the
+         * destination to a directory before the exchange. Preserve it. */
+        snprintf(message, sizeof(message), "folder published; previous target retained in staging wrapper %s: %s",
+                 s->path, strerror(errno));
+        staged_dir_release(s);
+        return other_error(target, message);
     }
     staged_dir_release(s);
 #endif
@@ -3736,7 +3842,15 @@ static int encode_command(int argc, char **argv) {
             }
             stage.file = NULL;
             again.file = is_folder ? NULL : fopen(input, "rb");
+#ifdef _WIN32
             coded.file = fopen(stage.path, "rb");
+#else
+            {
+                int fd = openat(stage.guard_fd, "contents", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+                coded.file = fd < 0 ? NULL : fdopen(fd, "rb");
+                if (fd >= 0 && coded.file == NULL) close(fd);
+            }
+#endif
             if ((!is_folder && again.file == NULL) || coded.file == NULL) {
                 rc = other_error(input, strerror(errno));
                 if (again.file != NULL) {

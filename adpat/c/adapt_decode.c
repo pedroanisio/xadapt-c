@@ -866,7 +866,10 @@ static adapt_status read_segment_table(const uint8_t *file, size_t file_len, siz
     for (i = 0; i < count; i++) {
         uint32_t raw = le32(file + table_at + 1 + (size_t)i * ADAPT_SEGMENT_ENTRY_BYTES);
         uint32_t coded = le32(file + table_at + 1 + (size_t)i * ADAPT_SEGMENT_ENTRY_BYTES + 4);
-        if (raw == 0 || coded == 0) {
+        /* An empty segmented container has one entry, both lengths zero,
+         * and no body. It falls back to streaming below, including CRC
+         * validation and the retained-input memory budget. */
+        if ((raw == 0 || coded == 0) && !(count == 1 && raw == 0 && coded == 0 && declared == 0)) {
             return fail(error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
         }
         raw_total += raw;
