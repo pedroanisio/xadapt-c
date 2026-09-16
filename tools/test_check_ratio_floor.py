@@ -299,14 +299,14 @@ class FloorCheckTest(unittest.TestCase):
         # re-locked 2026-09-16 on that command, a quiet host: CPU seconds, the
         # median of three runs on the enwik8 rows
         self.assertEqual({f.measure for f in locked.floors}, {"cpu"})
-        self.assertEqual(by_name["enwik8-8MiB"].seconds, 11.7)
-        self.assertEqual(by_name["enwik8-16MiB"].seconds, 21.7)
-        self.assertEqual(by_name["enwik8"].seconds, 117.1)
-        self.assertEqual(by_name["enwik9"].seconds, 1156.4)
-        self.assertAlmostEqual(by_name["enwik8-8MiB"].min_bytes_per_second, 8 * 1024 * 1024 / 11.7, places=3)
-        self.assertAlmostEqual(by_name["enwik8-16MiB"].min_bytes_per_second, 16 * 1024 * 1024 / 21.7, places=3)
-        self.assertAlmostEqual(by_name["enwik8"].min_bytes_per_second, 100_000_000 / 117.1, places=3)
-        self.assertAlmostEqual(by_name["enwik9"].min_bytes_per_second, 1_000_000_000 / 1156.4, places=3)
+        self.assertEqual(by_name["enwik8-8MiB"].seconds, 10.7)
+        self.assertEqual(by_name["enwik8-16MiB"].seconds, 19.8)
+        self.assertEqual(by_name["enwik8"].seconds, 107.4)
+        self.assertEqual(by_name["enwik9"].seconds, 1056.2)
+        self.assertAlmostEqual(by_name["enwik8-8MiB"].min_bytes_per_second, 8 * 1024 * 1024 / 10.7, places=3)
+        self.assertAlmostEqual(by_name["enwik8-16MiB"].min_bytes_per_second, 16 * 1024 * 1024 / 19.8, places=3)
+        self.assertAlmostEqual(by_name["enwik8"].min_bytes_per_second, 100_000_000 / 107.4, places=3)
+        self.assertAlmostEqual(by_name["enwik9"].min_bytes_per_second, 1_000_000_000 / 1056.2, places=3)
         self.assertEqual(locked.throughput_tolerance, 0.10)
 
 

@@ -66,6 +66,12 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Performance
 
+- The vector lane and learn paths of the max profile run only the slot
+  groups a file's context set fills, and no longer zero the unused
+  lanes bit by bit (a `rep stos` per bit): bytes identical, the lean
+  baseline 8–9 % faster on encode and 5 % on decode (enwik8 117.1 →
+  107.4 CPU s, enwik9 1,156.4 → 1,056.2 s, the 8 MiB proxy 11.7 → 10.7 s);
+  the floors are re-locked on the measured times.
 - The class-history width is proved on the whole first block when the
   32 KiB sample cannot rank it (an input of 4 MiB and up whose sample
   puts a width within 1/256 of none): the block's verdict is the file's
