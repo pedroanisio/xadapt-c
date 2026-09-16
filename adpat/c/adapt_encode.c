@@ -1866,13 +1866,13 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     header[3] = 'T';
     header[4] = sizes.adaptive ? (uint8_t)((sizes.max ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + sizes.adaptive - 1) :
                 (sizes.fast ? ADAPT_FAST_VERSION
-                            : (sizes.max ? (sizes.table_frac || sizes.low_start || sizes.model2 ? ADAPT_MAX_SIZED_VERSION
+                            : (sizes.max ? (sizes.model2 ? ADAPT_MAX_PRESSURE_VERSION : sizes.table_frac || sizes.low_start ? ADAPT_MAX_SIZED_VERSION
                                             : sizes.lean     ? ADAPT_MAX_LEAN_VERSION
                                             : sizes.compact  ? ADAPT_MAX_COMPACT_VERSION
                                                              : ADAPT_MAX_VERSION)
                                          : ADAPT_FORMAT_VERSION));
     if (sizes.bmp) header[4] = (uint8_t)((sizes.max ? ADAPT_MAX_BMP_VERSION : ADAPT_BMP_VERSION) + sizes.adaptive);
-    if (text && header[4] != ADAPT_MAX_SIZED_VERSION) {
+    if (text && header[4] != ADAPT_MAX_SIZED_VERSION && header[4] != ADAPT_MAX_PRESSURE_VERSION) {
         /* the text versions, in the order of the models they front; a
          * sized model carries the transform in its sizing byte instead */
         header[4] = (uint8_t)(sizes.fast ? ADAPT_TEXT_FAST_VERSION
@@ -1891,7 +1891,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         header[9] = (uint8_t)(sizes.period >> 8);
         header_len += ADAPT_PERIOD_BYTES;
     }
-    if (header[4] == ADAPT_MAX_SIZED_VERSION) {
+    if (header[4] == ADAPT_MAX_SIZED_VERSION || header[4] == ADAPT_MAX_PRESSURE_VERSION) {
         header[header_len] = (uint8_t)((sizes.compact ? ADAPT_SIZING_COMPACT : 0) | (sizes.lean ? ADAPT_SIZING_LEAN : 0) |
                                        (text ? ADAPT_SIZING_TEXT : 0) | (unsigned)sizes.table_frac << ADAPT_SIZING_FRAC_SHIFT |
                                        (sizes.low_start ? ADAPT_SIZING_LOW_START : 0) |

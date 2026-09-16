@@ -14,6 +14,7 @@
 #include "adapt_model.h"
 #include "adapt_text.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,7 +44,7 @@ static int header_has_bmp(const uint8_t *header) {
 int adapt_header_has_metadata(const uint8_t *header) {
     return header != NULL && ((header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION) ||
                               header[4] == ADAPT_MAX_COMPACT_METADATA_VERSION || header[4] == ADAPT_MAX_LEAN_METADATA_VERSION ||
-                              header[4] == ADAPT_MAX_SIZED_METADATA_VERSION ||
+                              header[4] == ADAPT_MAX_SIZED_METADATA_VERSION || header[4] == ADAPT_MAX_PRESSURE_METADATA_VERSION ||
                               (header[4] >= ADAPT_TEXT_METADATA_VERSION && header[4] <= ADAPT_TEXT_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
@@ -53,7 +54,8 @@ int adapt_header_has_metadata(const uint8_t *header) {
 
 /* The sized max profile's versions carry the sizing byte. */
 static int header_is_sized(const uint8_t *fixed) {
-    return fixed[4] == ADAPT_MAX_SIZED_VERSION || fixed[4] == ADAPT_MAX_SIZED_METADATA_VERSION;
+    return fixed[4] == ADAPT_MAX_SIZED_VERSION || fixed[4] == ADAPT_MAX_SIZED_METADATA_VERSION ||
+           fixed[4] == ADAPT_MAX_PRESSURE_VERSION || fixed[4] == ADAPT_MAX_PRESSURE_METADATA_VERSION;
 }
 
 size_t adapt_header_len(const uint8_t *fixed) {
@@ -158,7 +160,7 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         s.max = 1;
         s.compact = 1;
         s.lean = (uint8_t)(version == ADAPT_MAX_LEAN_VERSION);
-    } else if (version == ADAPT_MAX_SIZED_VERSION) {
+    } else if (version == ADAPT_MAX_SIZED_VERSION || version == ADAPT_MAX_PRESSURE_VERSION) {
         /* the sized max profile: its tables, context set and fraction are
          * the sizing byte's, read below */
         s.fast = 0;
@@ -183,7 +185,7 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         }
     }
     s.table_frac = 0;
-    if (version == ADAPT_MAX_SIZED_VERSION) {
+    if (version == ADAPT_MAX_SIZED_VERSION || version == ADAPT_MAX_PRESSURE_VERSION) {
         size_t at = ADAPT_HEADER_BYTES + (s.period ? ADAPT_PERIOD_BYTES : 0);
         uint8_t sizing;
         if (len < at + ADAPT_SIZING_BYTES) {
@@ -199,6 +201,9 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         if (sizing & ADAPT_SIZING_TEXT) s.text = ADAPT_TEXT_ON;
         s.low_start = (sizing & ADAPT_SIZING_LOW_START) != 0;
         s.model2 = (sizing & ADAPT_SIZING_MODEL2) != 0;
+        if (version == ADAPT_MAX_PRESSURE_VERSION && !s.model2) {
+            return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
+        }
         /* the lean set is never run with the full side tables */
         if (s.lean && !s.compact) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
@@ -406,8 +411,20 @@ static adapt_status text_sink_fail(const text_sink *s, uint64_t max_output, adap
  * container.rs — the streaming decoder
  * --------------------------------------------------------------------- */
 
-adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
-                                 adapt_limits limits, adapt_stats *stats, adapt_error *error) {
+/* Both historical model2 variants used 58/61. At small table sizes their
+ * bytes cannot be distinguished by a header. Keep only one model alive,
+ * spool its tentative output, and release bytes only after verification. */
+static int legacy_ambiguous(const uint8_t *header, adapt_sizes sizes) {
+    return (header[4] == ADAPT_MAX_SIZED_VERSION || header[4] == ADAPT_MAX_SIZED_METADATA_VERSION) &&
+           sizes.model2 && sizes.table_log < MODEL2_PRESSURE_LOG;
+}
+
+static adapt_status decode_legacy(const uint8_t *header, size_t header_len,
+                                  adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
+                                  adapt_limits limits, adapt_stats *stats, adapt_error *error);
+
+static adapt_status decode_stream_mode(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
+                                       adapt_limits limits, adapt_stats *stats, adapt_error *error, int legacy) {
     uint8_t header[ADAPT_HEADER_MAX_BYTES];
     uint8_t block_header[ADAPT_BLOCK_HEADER_BYTES];
     adapt_sizes sizes;
@@ -455,6 +472,9 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
     status = check_memory(adapt_decode_memory_bound(sizes), limits.max_memory, error);
     if (status != ADAPT_OK) {
         return status;
+    }
+    if (legacy < 0 && legacy_ambiguous(header, sizes)) {
+        return decode_legacy(header, header_len, read, read_context, write, write_context, limits, stats, error);
     }
     segments.segmented = sizes.segmented;
     payload = malloc(ADAPT_BLOCK_BYTES);
@@ -622,7 +642,7 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
             goto done;
         }
         if (decoder.m == NULL) {
-            decoder.m = model_new(sizes);
+            decoder.m = model_new_policy(sizes, legacy == 1);
             if (decoder.m == NULL) {
                 status = fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
                 goto done;
@@ -655,6 +675,98 @@ done:
     free(payload);
     free(scratch);
     return status;
+}
+
+typedef struct legacy_reader {
+    FILE *cache;
+    const uint8_t *header;
+    size_t header_len, header_at;
+    adapt_read_fn read;
+    void *context;
+    int replay;
+} legacy_reader;
+
+/* Cache only bytes the first trial consumes. On retry, replay that prefix
+ * and then continue the original reader; a pipe need not be seekable. */
+static int legacy_read(void *context, uint8_t *buf, size_t len, size_t *got) {
+    legacy_reader *r = context;
+    int rc;
+    if (r->replay) {
+        *got = fread(buf, 1, len, r->cache);
+        if (ferror(r->cache)) return EIO;
+        if (*got != 0) return 0;
+        return r->read(r->context, buf, len, got);
+    }
+    if (r->header_at < r->header_len) {
+        *got = r->header_len - r->header_at;
+        if (*got > len) *got = len;
+        memcpy(buf, r->header + r->header_at, *got);
+        r->header_at += *got;
+        return 0;
+    }
+    rc = r->read(r->context, buf, len, got);
+    if (rc != 0) return rc;
+    if (*got > len) return EIO;
+    return fwrite(buf, 1, *got, r->cache) == *got ? 0 : EIO;
+}
+
+static int legacy_write(void *context, const uint8_t *buf, size_t len) {
+    return fwrite(buf, 1, len, context) == len ? 0 : EIO;
+}
+
+static adapt_status decode_legacy(const uint8_t *header, size_t header_len,
+                                  adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
+                                  adapt_limits limits, adapt_stats *stats, adapt_error *error) {
+    legacy_reader reader;
+    FILE *output = NULL;
+    adapt_status status;
+    adapt_error trial_error;
+    adapt_stats trial_stats;
+    uint8_t buffer[4096];
+    size_t got;
+    int attempt;
+    memset(&reader, 0, sizeof(reader));
+    reader.read = read;
+    reader.context = read_context;
+    reader.header = header;
+    reader.header_len = header_len;
+    reader.cache = tmpfile();
+    if (reader.cache == NULL) return fail(error, ADAPT_ERROR_IO, EIO, 0);
+    status = fail(&trial_error, ADAPT_ERROR_IO, EIO, 0);
+    if (fwrite(header, 1, header_len, reader.cache) != header_len) goto done;
+    for (attempt = 0; attempt < 2; attempt++) {
+        output = tmpfile();
+        if (output == NULL) { status = fail(&trial_error, ADAPT_ERROR_IO, EIO, 0); break; }
+        status = decode_stream_mode(legacy_read, &reader, legacy_write, output, limits, &trial_stats, &trial_error, attempt);
+        if (status == ADAPT_OK || attempt != 0 ||
+            (status != ADAPT_ERROR_BAD_BLOCK && status != ADAPT_ERROR_CHECKSUM &&
+             status != ADAPT_ERROR_BAD_TEXT && status != ADAPT_ERROR_TOO_LARGE)) break;
+        if (fclose(output) != 0) { output = NULL; status = fail(&trial_error, ADAPT_ERROR_IO, EIO, 0); break; }
+        output = NULL;
+        if (fflush(reader.cache) != 0 || fseek(reader.cache, 0, SEEK_SET) != 0) {
+            status = fail(&trial_error, ADAPT_ERROR_IO, EIO, 0); break;
+        }
+        reader.replay = 1;
+    }
+    if (status == ADAPT_OK && (fflush(output) != 0 || fseek(output, 0, SEEK_SET) != 0)) {
+        status = fail(&trial_error, ADAPT_ERROR_IO, EIO, 0);
+    }
+    while (status == ADAPT_OK && (got = fread(buffer, 1, sizeof(buffer), output)) != 0) {
+        int rc = write(write_context, buffer, got);
+        if (rc != 0) status = fail(&trial_error, ADAPT_ERROR_IO, (uint64_t)(rc < 0 ? -(int64_t)rc : rc), 0);
+    }
+    if (status == ADAPT_OK && ferror(output)) status = fail(&trial_error, ADAPT_ERROR_IO, EIO, 0);
+done:
+    if (output != NULL && fclose(output) != 0 && status == ADAPT_OK) status = fail(&trial_error, ADAPT_ERROR_IO, EIO, 0);
+    if (fclose(reader.cache) != 0 && status == ADAPT_OK) status = fail(&trial_error, ADAPT_ERROR_IO, EIO, 0);
+    if (status == ADAPT_OK && stats != NULL) *stats = trial_stats;
+    if (error != NULL) *error = trial_error;
+    return status;
+}
+
+adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_write_fn write, void *write_context,
+                                 adapt_limits limits, adapt_stats *stats, adapt_error *error) {
+    return decode_stream_mode(read, read_context, write, write_context, limits, stats, error, -1);
 }
 
 /* ------------------------------------------------------------------------
@@ -1074,7 +1186,7 @@ adapt_status adapt_decode_threads(const uint8_t *file, size_t file_len, adapt_li
         return status;
     }
     header_len = adapt_header_len(file);
-    if (sizes.segmented && threads >= 2) {
+    if (sizes.segmented && threads >= 2 && !legacy_ambiguous(file, sizes)) {
         if (file_len < header_len + ADAPT_TRAILER_BYTES) {
             return fail(error, ADAPT_ERROR_TRUNCATED, 0, 0);
         }

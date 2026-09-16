@@ -34,7 +34,7 @@ class BuildTest(unittest.TestCase):
         self.assertIn("<title>LTCB Frontier Explorer</title>", html)
         self.assertNotIn(build.PLACEHOLDER, html)
         data = embedded(html)
-        self.assertEqual(len(data["rows"]), 224)
+        self.assertEqual(len(data["rows"]), 226)
         self.assertEqual(data["rows"][0]["rank"], 1)
         self.assertEqual(set(data["phases"]), {"compression", "decompression"})
         self.assertEqual(data["meta"]["source"], "unit source")

@@ -2668,7 +2668,7 @@ static inline int32_t initial_weight(size_t j, int fast, int max, int low) {
     return j < base + (size_t)RUNS_OF(max) ? 0 : trusted;
 }
 
-static inline model *model_new(adapt_sizes sizes) {
+static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
     model *m = calloc(1, sizeof(model));
     size_t blocks, i, j, x, pi;
     uint16_t apm_row[APM_BUCKETS];
@@ -2741,7 +2741,7 @@ static inline model *model_new(adapt_sizes sizes) {
     m->compact = sizes.compact != 0;
     m->low_start = sizes.low_start != 0;
     m->model2 = sizes.model2 != 0;
-    m->slots_on = m->model2 && sizes.table_log >= MODEL2_PRESSURE_LOG;
+    m->slots_on = m->model2 && (legacy_model2 || sizes.table_log >= MODEL2_PRESSURE_LOG);
     m->extra_on = m->slots_on;
     m->mix34_row_mask = MIX34_ROW_MASK(m->compact);
     m->apm2_mask = APM2_CONTEXTS(m->max, m->compact) - 1;
@@ -2840,6 +2840,10 @@ static inline model *model_new(adapt_sizes sizes) {
     return m;
 }
 
+
+static inline model *model_new(adapt_sizes sizes) {
+    return model_new_policy(sizes, 0);
+}
 
 /* ------------------------------------------------------------------------
  * container.rs — the block methods

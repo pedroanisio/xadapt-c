@@ -595,7 +595,7 @@ static void test_compact_side_tables(void) {
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error), ADAPT_OK);
     /* every max encode is the sized version now, its sizing byte naming
      * the second model with the compact tables and the lean set */
-    CHECK(w.len > ADAPT_HEADER_BYTES && coded[4] == ADAPT_MAX_SIZED_VERSION &&
+    CHECK(w.len > ADAPT_HEADER_BYTES && coded[4] == ADAPT_MAX_PRESSURE_VERSION &&
           coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
     CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
@@ -609,7 +609,7 @@ static void test_compact_side_tables(void) {
         reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
-        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT) &&
+        CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT) &&
               w.len != lean_len);
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
@@ -619,7 +619,7 @@ static void test_compact_side_tables(void) {
         reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
-        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT));
+        CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT));
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
         adapt_free(back);
@@ -633,7 +633,7 @@ static void test_compact_side_tables(void) {
         reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
-        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == ADAPT_SIZING_MODEL2 && w.len != compact_len);
+        CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION && coded[ADAPT_HEADER_BYTES] == ADAPT_SIZING_MODEL2 && w.len != compact_len);
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == data_len && memcmp(back, data, data_len) == 0);
         adapt_free(back);
@@ -649,7 +649,7 @@ static void test_compact_side_tables(void) {
         reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
-        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | (3u << ADAPT_SIZING_FRAC_SHIFT)));
+        CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | (3u << ADAPT_SIZING_FRAC_SHIFT)));
         CHECK(w.len != full_len);
         CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
         CHECK(read.compact == 0 && read.lean == 0 && read.table_frac == 3 && read.table_log == s.table_log);
@@ -662,7 +662,7 @@ static void test_compact_side_tables(void) {
         reset(&r, data, data_len, 4096, &w, coded, data_len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                      ADAPT_OK);
-        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION);
+        CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION);
         CHECK(coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN | (1u << ADAPT_SIZING_FRAC_SHIFT)));
         CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
         CHECK(read.compact == 1 && read.lean == 1 && read.table_frac == 1);
@@ -1194,7 +1194,7 @@ static void test_max_profile(void) {
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                  ADAPT_OK);
     CHECK(w.len == want_len && memcmp(coded, want, want_len) == 0);
-    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == ADAPT_SIZING_MODEL2);
+    CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION && coded[ADAPT_HEADER_BYTES] == ADAPT_SIZING_MODEL2);
     reset(&r, src, src_len, 1000, &w, coded, n + 64);
     CHECK_STATUS(adapt_encode_stream_verified(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL,
                                               &error),
@@ -1212,7 +1212,7 @@ static void test_max_profile(void) {
     reset(&r, data, n, 4096, &w, coded, n + 64);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                  ADAPT_OK);
-    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && w.len < n / 4);
+    CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION && w.len < n / 4);
     CHECK(memcmp(coded + ADAPT_HEADER_BYTES, normal + ADAPT_HEADER_BYTES, 32) != 0);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
     CHECK(out_len == n && memcmp(out, data, n) == 0);
@@ -1519,7 +1519,7 @@ static void test_text_transform(void) {
     s.text = ADAPT_TEXT_ON;
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
-    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START));
+    CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION && coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START));
     CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
     CHECK(read.text == ADAPT_TEXT_ON && read.max && read.low_start && !read.compact && read.table_frac == 0);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
@@ -1541,7 +1541,7 @@ static void test_text_transform(void) {
         reset(&r, data, len, 4096, &w, again, len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error),
                      ADAPT_OK);
-        CHECK(again[4] == ADAPT_MAX_SIZED_VERSION && again[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_LOW_START));
+        CHECK(again[4] == ADAPT_MAX_PRESSURE_VERSION && again[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_LOW_START));
         CHECK_STATUS(adapt_read_header(again, w.len, &read_plain, &error), ADAPT_OK);
         CHECK(read_plain.low_start == 1 && read_plain.text == 0);
         CHECK_STATUS(adapt_decode(again, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
@@ -1554,7 +1554,7 @@ static void test_text_transform(void) {
     s.table_log = 18;
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
-    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION &&
+    CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION &&
           coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT));
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
     CHECK(back_len == len && memcmp(back, data, len) == 0);
@@ -1562,7 +1562,7 @@ static void test_text_transform(void) {
     s.lean = 1;
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
-    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION &&
+    CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION &&
           coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
     CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
     CHECK(read.text == ADAPT_TEXT_ON && read.max && read.compact && read.lean && read.low_start);
@@ -1604,7 +1604,7 @@ static void test_text_transform(void) {
         reset(&r, data, len, 4096, &w, coded, len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
         sized_len = w.len;
-        CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION);
+        CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION);
         CHECK(coded[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN |
                                             (3u << ADAPT_SIZING_FRAC_SHIFT)));
         CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
@@ -1617,7 +1617,7 @@ static void test_text_transform(void) {
         s.table_frac = 0;
         reset(&r, data, len, 4096, &w, again, len + 4096);
         CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
-        CHECK(again[4] == ADAPT_MAX_SIZED_VERSION && w.len != sized_len);
+        CHECK(again[4] == ADAPT_MAX_PRESSURE_VERSION && w.len != sized_len);
         CHECK(again[ADAPT_HEADER_BYTES] == (ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START | ADAPT_SIZING_COMPACT | ADAPT_SIZING_LEAN));
         CHECK_STATUS(adapt_decode(again, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
         CHECK(back_len == len && memcmp(back, data, len) == 0);
@@ -1745,7 +1745,7 @@ static void test_x86_transform(void) {
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, adapt_sizes_max(sizes), ADAPT_DEFAULT_MAX_MEMORY,
                                      &stats, &error),
                  ADAPT_OK);
-    CHECK(coded[4] == ADAPT_MAX_SIZED_VERSION && (coded[7] & ADAPT_X86_FLAG) != 0);
+    CHECK(coded[4] == ADAPT_MAX_PRESSURE_VERSION && (coded[7] & ADAPT_X86_FLAG) != 0);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
     CHECK(out_len == n && memcmp(out, data, n) == 0);
     adapt_free(out);

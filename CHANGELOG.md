@@ -13,6 +13,33 @@ and announced as [SECURITY.md](SECURITY.md) describes.
 
 The binary reports `0.12.0`; the tag is pending.
 
+### Added
+
+- `cadapt 0.12.0 --max --allocation context` is listed on the Large Text
+  Compression Benchmark (mattmahoney.net/dc/text.html, 2026-09-15): enwik9
+  150,063,628 B plus a 209,893 B decompressor, total 150,273,521 B, rank
+  30 of 226, 661 MB, note 114. The README states the two goals against
+  that table — the smallest memory of every entry ranked above (already
+  so: the next is 1,542 MB) and a top-20 place (below 125,099,359 B total
+  on that day's table). `tools/ltcb/transcribe_ltcb_table.py` transcribes
+  the page's main table into `research/ltcb-main-table.csv` under the
+  rules `research/ltcb-tables.md` records, checked by reproducing the 224
+  hand-transcribed rows of the previous snapshot; the snapshot is the page
+  of 2026-09-15 (226 rows).
+
+### Fixed
+
+- Restore Linux access ACLs after other attributes, preserving read-only ACLs
+  together with user attributes on regular files, sparse files, directories
+  and folder roots.
+- Decode valid empty segmented containers with either thread count while
+  preserving malformed-table, checksum and memory-budget rejection.
+- Give pressure-gated model2 its own container versions 72/75. Preserve both
+  historical variants written as 58/61: ambiguous small-table files are
+  checked with one predictor at a time using temporary disk, and only
+  verified bytes reach the output callback. Immutable historical fixtures
+  cover memory, streaming and threaded APIs, text, metadata and segments.
+
 ### Performance
 
 - The second max model, bit 7 of the sized max profile's sizing byte
@@ -53,6 +80,8 @@ The binary reports `0.12.0`; the tag is pending.
   of retaining every attribute in RAM. Replay after checksum validation
   keeps memory bounded, preserves ACL/umask ordering and fails closed on
   temporary-storage errors.
+
+
 - Anchor POSIX folder restoration, metadata, cleanup and publication to
   retained directory handles inside a private wrapper. Replacing the staging
   pathname cannot redirect writes or delete unrelated files during rollback.
@@ -97,12 +126,6 @@ The binary reports `0.12.0`; the tag is pending.
   worker as well as when it decodes in parallel.
 
 ### Fixed
-
-- Restore Linux access ACLs after other attributes, preserving read-only ACLs
-  together with user attributes on regular files, sparse files, directories
-  and folder roots.
-- Decode valid empty segmented containers with either thread count while
-  preserving malformed-table, checksum and memory-budget rejection.
 - Restore nested folders under restrictive umasks, including `0777`. Keep
   temporary entries accessible to the owner, then apply recorded permissions
   or the saved umask for legacy archives. Publish read-only roots with their

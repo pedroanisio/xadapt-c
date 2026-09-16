@@ -557,9 +557,9 @@ static void test_framing(void) {
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
     /* past the last text version nothing is named */
-    file[4] = ADAPT_TEXT_METADATA_LAST_VERSION + 1;
+    file[4] = ADAPT_MAX_PRESSURE_METADATA_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_TEXT_METADATA_LAST_VERSION + 1);
+    CHECK(error.detail == ADAPT_MAX_PRESSURE_METADATA_VERSION + 1);
     /* the text versions front the five models in order, and their
      * metadata variants five higher carry a record; nothing else does */
     {

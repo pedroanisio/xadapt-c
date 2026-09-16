@@ -172,8 +172,8 @@ seconds; below 8 MiB it costs, which the rule is for. Not with
 or
 .BR "\-\-transform bmp" .
 Versions 62 and 63 ahead of the normal and fast profiles, 67 and 68 with
-metadata; the max profile under the transform is its sized version 58
-(61), the sizing byte naming the transform and the arbiters' 1/32
+metadata; the max profile under the transform is its sized version 72
+(75), the sizing byte naming the transform and the arbiters' 1/32
 starting weight, which the transform earns (3,336,047 to 3,330,628 bytes
 on the first 16 MiB of enwik8 at 128 MiB); 64 to 66 and 69 to 71 are
 read, no longer written.
@@ -453,10 +453,20 @@ budget, one byte after the header naming the side tables, the context
 set, the table's fraction, the text transform, the arbiters' 1/32
 starting weight and, in bit 7, the second max model (int16 arbiters,
 four re-purposed context slots, four-way recall buckets, a fifth
-arbiter), which every max encode writes now, so 21, 24, 53, 54, 56 and
-57 are read and no longer written; 62 to 66 are the text transform ahead of the normal,
+arbiter). Current max encodes use 72 (75 with metadata), identifying the
+pressure-gated model2 policy; 21, 24, 53, 54, 56 and 57 remain readable; 62 to 66 are the text transform ahead of the normal,
 fast, max, compact and lean models, 67 to 71 with metadata, of which the
 max ones (64 to 66, 69 to 71) are read and no longer written.
+For historical 58/61 model2 files below a table of 2^21 blocks, the decoder
+checks both historical predictors sequentially, using temporary disk for
+a consumed input prefix and tentative output. It emits bytes only after
+checksum verification and keeps one model in memory.
+.PP
+On POSIX, file outputs use a private 0700 staging wrapper and retained file
+and directory handles for metadata, publication and cleanup. Deferred folder
+and root attributes are kept in an automatically removed temporary journal,
+replayed after checksum verification with bounded memory. A temporary-storage
+failure discards staging and preserves the existing destination.
 .SH SEE ALSO
 .BR xz (1).
 .br

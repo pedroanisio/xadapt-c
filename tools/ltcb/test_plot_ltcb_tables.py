@@ -62,8 +62,8 @@ class LoadTest(unittest.TestCase):
 
     def test_published_csv_loads_completely(self):
         rows = ltcb.load_rows(HERE / "ltcb-main-table.csv")
-        self.assertEqual(len(rows), 224)
-        self.assertEqual([r.rank for r in rows], list(range(1, 225)))
+        self.assertEqual(len(rows), 226)
+        self.assertEqual([r.rank for r in rows], list(range(1, 227)))
         self.assertTrue(all(r.enwik9_bytes > 0 and r.enwik9_plus_prog_bytes > 0 for r in rows))
 
     def test_missing_column_is_a_typed_error(self):

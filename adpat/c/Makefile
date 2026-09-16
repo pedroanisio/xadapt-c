@@ -39,7 +39,7 @@ TEST_THREADS = $(if $(findstring -DADAPT_THREADS,$(CFLAGS)),1,0)
 
 LIB   = $(BUILD)/libadapt.a
 BIN   = $(BUILD)/cadapt
-TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode $(BUILD)/test_adapt_text $(BUILD)/test_model_dispatch $(BUILD)/test_profile_conversion
+TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode $(BUILD)/test_adapt_text $(BUILD)/test_model_dispatch $(BUILD)/test_profile_conversion $(BUILD)/test_p1_compatibility
 
 all: $(LIB) $(BIN)
 
@@ -99,6 +99,9 @@ $(BUILD)/test_model_dispatch: tests/test_model_dispatch.c adapt.h adapt_model.h 
 $(BUILD)/test_profile_conversion: tests/test_profile_conversion.c adapt.h $(LIB)
 	$(CC) $(CFLAGS) -o $@ tests/test_profile_conversion.c $(LIB) $(LDFLAGS)
 
+$(BUILD)/test_p1_compatibility: tests/test_p1_compatibility.c adapt.h $(LIB)
+	$(CC) $(CFLAGS) -o $@ tests/test_p1_compatibility.c $(LIB) $(LDFLAGS)
+
 # The two large C suites run as shards, k/n (see their mains).
 ENCODE_SHARDS = 0 1 2 3
 DECODE_SHARDS = 0 1 2
@@ -111,7 +114,7 @@ test: $(TESTS)
 	rm -f $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r) $(BUILD)/runs/$(r).log) && mkdir -p $(BUILD)/runs
 	$(MAKE) -j $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r))
 	@for r in $(TESTRUNS); do tail -1 $(BUILD)/runs/$$r.log; done
-TESTRUNS = adaptive $(foreach k,$(DECODE_SHARDS),decode-$(k)) $(foreach k,$(ENCODE_SHARDS),encode-$(k)) archive budget fuzz text dispatch profile
+TESTRUNS = adaptive $(foreach k,$(DECODE_SHARDS),decode-$(k)) $(foreach k,$(ENCODE_SHARDS),encode-$(k)) archive budget fuzz text dispatch profile compatibility
 $(BUILD)/runs/adaptive: ; @$(BUILD)/test_adapt_adaptive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/decode-%: ; @$(BUILD)/test_adapt_decode tests/vectors $*/$(words $(DECODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/encode-%: ; @$(BUILD)/test_adapt_encode tests/vectors $*/$(words $(ENCODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
@@ -120,6 +123,7 @@ $(BUILD)/runs/budget: ; @$(BUILD)/test_decode_budget tests/vectors > $@.log 2>&1
 $(BUILD)/runs/fuzz: ; @$(BUILD)/test_fuzz_decode tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/text: ; @$(BUILD)/test_adapt_text tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/dispatch: ; @$(BUILD)/test_model_dispatch > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/compatibility: ; @$(BUILD)/test_p1_compatibility tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/profile: ; @$(BUILD)/test_profile_conversion > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
 # The plain suites and the coverage pass run at once: they build into
@@ -163,7 +167,7 @@ coverage:
 	rm -rf $(COV)
 	$(MAKE) BUILD=$(COV) CFLAGS="$(COVFLAGS)" LDFLAGS="--coverage" all $(COV)/test_adapt_decode \
 	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive $(COV)/test_adapt_adaptive $(COV)/test_decode_budget $(COV)/test_fuzz_decode \
-	    $(COV)/test_adapt_text $(COV)/test_profile_conversion
+	    $(COV)/test_adapt_text $(COV)/test_profile_conversion $(COV)/test_p1_compatibility
 	mkdir -p $(COV)/gcda
 	$(MAKE) -j $(COV)/gcda/done
 	cd $(COV) && for u in $(COVUNITS); do gcov -b -c --json-format -o . $$u.o > /dev/null && gunzip -f $$u.gcov.json.gz; done
@@ -171,7 +175,7 @@ coverage:
 
 # One run per line, in parallel under make -j; each leaves its counts in
 # its own directory and its report in its own log, printed when it fails.
-COVRUNS = $(foreach k,$(ENCODE_SHARDS),encode-$(k)) $(foreach k,$(DECODE_SHARDS),decode-$(k)) archive adaptive budget fuzz text profile \
+COVRUNS = $(foreach k,$(ENCODE_SHARDS),encode-$(k)) $(foreach k,$(DECODE_SHARDS),decode-$(k)) archive adaptive budget fuzz text profile compatibility \
           safety $(foreach c,$(CLI_CLASSES),cli-$(c))
 $(COV)/gcda/encode-%: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_encode tests/vectors $*/$(words $(ENCODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(COV)/gcda/decode-%: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_decode tests/vectors $*/$(words $(DECODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
@@ -180,6 +184,7 @@ $(COV)/gcda/adaptive: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_adaptive > $@.log 2>&
 $(COV)/gcda/budget: ; @$(COVRUN)/$(@F) $(COV)/test_decode_budget tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(COV)/gcda/fuzz: ; @$(COVRUN)/$(@F) $(COV)/test_fuzz_decode tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(COV)/gcda/text: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_text tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/compatibility: ; @$(COVRUN)/$(@F) $(COV)/test_p1_compatibility tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(COV)/gcda/profile: ; @$(COVRUN)/$(@F) $(COV)/test_profile_conversion > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(COV)/gcda/safety: ; @ADAPT_TEST_THREADS=$(if $(findstring -DADAPT_THREADS,$(COVFLAGS)),1,0) $(COVRUN)/$(@F) \
 	    $(PYTHON) -B tests/test_cadapt_safety.py "$(COVDIR)/cadapt" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }

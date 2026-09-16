@@ -1,10 +1,25 @@
 # Submitting cadapt to the Large Text Compression Benchmark
 
-<!-- Authored with Claude Opus 5 (Claude Code), 2026-09-15, from the operator's decisions of that day: the binary alone is published, never the sources; both enwik8 and enwik9 are submitted. -->
+<!-- Authored with Claude Opus 5 (Claude Code), 2026-09-15, from the operator's decisions of that day: the binary alone is published, never the sources; both enwik8 and enwik9 are submitted. The listing was recorded the same day. -->
 
 Part of [adapt](../README.md). What the benchmark asks for, what this
-repository produces for it, and the email, ready to send once the zip is
-at a public address.
+repository produces for it, and the email that was sent.
+
+## Listed
+
+The entry is on the page since 2026-09-15 — "Sep 15 2026 - added cadapt
+0.12.0, zmix 1.0, zmix 1.0.1" — as `cadapt 0.12.0 --max --allocation
+context`: enwik8 18,207,203, enwik9 150,063,628, decompressor 209,893 `x`,
+total 150,273,521, 1385 / 1748 ns per byte, 661 MB, CM, note 114 ("Tested
+by Pedro Anisio Silva on a AMD Ryzen 5 5600X (6 cores, 3.7 GHz), 128 GB
+RAM, Linux (kernel 7.0), glibc."), the description under `.1502 cadapt`
+being the algorithm paragraph of the email below. Rank 30 of 226 by
+total, between nanozip 0.09a and xwrt 3.2, exactly where the section
+below predicted on the 224-row table; the page of that day is transcribed
+in [research/ltcb-main-table.csv](../research/ltcb-main-table.csv). The
+figures are the ones submitted: nothing was re-measured by the benchmark.
+The goals the README states against this table are a top-20 place and
+the smallest memory of every entry ranked above.
 
 ## The rules that apply
 
@@ -58,7 +73,8 @@ sharing the machine.
 
 **Total the table would show: 150,063,628 + 209,893 = 150,273,521**, between
 nanozip 0.09a (149,328,821) and xwrt 3.2 (151,223,933) — rank 29 of the 224
-rows transcribed in `research/ltcb-main-table.csv`.
+rows of the 2026-09-14 snapshot (rank 30 of 226 once listed, `zmix 1.0`
+having entered above).
 
 ## Before sending
 

@@ -278,6 +278,19 @@ int renameat2(int a, const char *b, int c, const char *d, unsigned int flags) {
         self.assertFalse(destination.exists())
         self.assertEqual(list(self.root.glob(".cadapt-*.part")), [])
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux file-size limits")
+    def test_legacy_compatibility_storage_failure_emits_nothing(self):
+        import resource
+
+        def constrain():
+            resource.setrlimit(resource.RLIMIT_FSIZE, (1024, 1024))
+
+        fixture = Path(__file__).with_name("vectors") / "legacy-max2-always.adpt"
+        run = subprocess.run([str(CADAPT), "decode", str(fixture), "-o", "-"],
+                             capture_output=True, preexec_fn=constrain, timeout=30)
+        self.assertEqual(run.returncode, 128 + signal.SIGXFSZ, run.stderr)
+        self.assertEqual(run.stdout, b"")
+
     @unittest.skipIf(os.name == "nt", "POSIX staging identities")
     def test_file_staging_replacement_cannot_redirect_publication_or_metadata(self):
         raw = b"verified file contents"

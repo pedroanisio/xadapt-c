@@ -16,17 +16,23 @@ profile with compact side tables uses 53 and 56, with its lean context
 set as well 54 and 57, and sized to its budget — a context table any
 eighth past a power of two, named by a sizing byte — 58 and 61; the text
 transform ahead of the normal and fast models uses 62 and 63, 67 and 68
-with metadata, and ahead of the max profile it is the sized version 58
-or 61 again, its sizing byte naming the transform and the arbiters' 1/32
+with metadata, and ahead of the max profile it is version 72
+or 75, its sizing byte naming the transform and the arbiters' 1/32
 starting weight (64 to 66 and 69 to 71, the transform's own max versions,
 are read and no longer written). Every `--max` encode is now the sized
-version 58 (61), its sizing byte's bit 7 naming the second max model —
+version 72 (75 with metadata), its sizing byte's bit 7 naming the second max model —
 int16 arbiters, four re-purposed context slots, four-way recall buckets
 and a fifth arbiter (the `Second max model` entry in `LOCKS.md`) — so
 21, 24, 53, 54, 56 and 57 are read and no longer written. The decoder
 reads every version ever published; versions 10–18 and the unused
-numbers (55, 59, 60) are refused. The CLI uses native filesystem APIs to
+numbers (55, 59, 60, 73, 74) are refused. The CLI uses native filesystem APIs to
 restore metadata.
+
+Versions 58/61 briefly carried two model2 predictors under the same header.
+For tables smaller than 2^21, the decoder tries them sequentially and checks
+the recovered checksum before emitting bytes. This uses temporary disk for
+the consumed input prefix and tentative output, with only one model in memory.
+Versions 72/75 identify the current predictor without that fallback.
 
 The [experimental implementation report](research/causal-byte-implementation.md)
 specifies the adaptive algorithms, their format versions, limits and
@@ -175,7 +181,7 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
 - `--transform text` asks for the text transform and `--transform none`
   refuses it; a file of 8 MiB or more whose first block looks like text
   takes it by itself (versions 62/63, 67/68 with metadata; under `--max`
-  the sized version 58/61, whose sizing byte names the transform and
+  the sized version 72/75, whose sizing byte names the transform and
   starts every arbiter's trust in a context at 1/32 rather than 1/4,
   measured on the first 16 MiB of enwik8 at 128 MiB as 3,336,047 →
   3,330,628 bytes and at the default tier as 3,320,062 → 3,296,290). A word both
@@ -459,9 +465,10 @@ stays readable (`DLV-1` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)):
 | 45–48 | max + `--transform bmp` | 49–52 | the transform over the max profile |
 | 53 | max, compact side tables | 56 | table 2^22 blocks or fewer |
 | 54 | max, compact and lean | 57 | as 53 without three contexts |
-| 58 | max, sized | 61 | a sizing byte: compact, lean, the table's eighths, the text transform, the arbiters' 1/32 start, the second max model (bit 7; every `--max` encode) |
+| 58 | max, sized (legacy) | 61 | sizing byte; both historical model2 policies remain readable |
+| 72 | max, sized | 75 | sizing byte with model2 bit 7 required; pressure-gated slots and fifth arbiter; every current `--max` encode |
 | 62 / 63 | normal / fast, text transform | 67 / 68 | the book of words built as the file is coded |
-| 64–66 | max, compact, lean, text transform | 69–71 | read only: the max profile writes 58 (61) under the transform |
+| 64–66 | max, compact, lean, text transform | 69–71 | read only: the max profile writes 72 (75) under the transform |
 | 55, 59, 60 | refused | — | no format |
 
 The encoder writes 19–24 by default, 53/54 (56/57) when a small tier under
@@ -489,6 +496,37 @@ versions 22–24. The byte-oriented library encoders still emit versions
 `adapt_read_metadata()` reads it. Use `adapt_header_len()` for the actual
 container header size; `adapt_sizes_header_bytes()` gives the base encoder
 header size without metadata.
+
+## The Large Text Compression Benchmark
+
+`cadapt 0.12.0 --max --allocation context` is listed on Matt Mahoney's
+[Large Text Compression Benchmark](https://mattmahoney.net/dc/text.html)
+since 2026-09-15 (the page's own changelog line: "Sep 15 2026 - added
+cadapt 0.12.0, zmix 1.0, zmix 1.0.1"): enwik8 18,207,203 B, enwik9
+150,063,628 B, decompressor zip 209,893 B, **total 150,273,521 B, rank 30
+of 226**, 1,385 / 1,748 ns per byte, 661 MB, note 114 (tested by the
+operator on the reference host). The entry sits between nanozip 0.09a
+(149,328,821 B, 32,000 MB) and xwrt 3.2 (151,223,933 B, 1,691 MB). The
+whole table as of that day is
+[research/ltcb-main-table.csv](research/ltcb-main-table.csv), transcribed
+by [tools/ltcb/transcribe_ltcb_table.py](tools/ltcb/transcribe_ltcb_table.py)
+under the rules [research/ltcb-tables.md](research/ltcb-tables.md) records;
+the submission itself is [docs/ltcb-submission.md](docs/ltcb-submission.md).
+
+Two goals stand on this table, beside `DLV-3`'s rows (enwik8 17 MB;
+enwik9 below 130 MB), which stay the judge of nothing but themselves:
+
+- **The leader on memory footprint.** At 661 MB the entry already uses
+  the least memory of anything ranked above it — the next is drt|lpaq9m
+  at 1,542 MB, and every entry in the top 20 uses 3,751 MB or more (gmix
+  v1) — and it is to stay the smallest of every entry it overtakes: a
+  gain that needs a larger model than the tier holds is not this goal's
+  gain (`RUN-1`).
+- **A place in the top 20.** On the 2026-09-15 table the twentieth entry
+  (paq8px_v206fix1) totals 125,099,359 B, so the place needs enwik9 below
+  about 124.9 MB with the same decompressor — the table moves as entries
+  are added, so the figure to beat is read from the snapshot, never from
+  memory.
 
 ## Benchmark ownership
 

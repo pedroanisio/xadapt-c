@@ -15,7 +15,7 @@ repository; see [baseline-2026-09-14.md](baseline-2026-09-14.md) for the local r
 
 | File | Source page | Page "Last update" | Rows |
 | --- | --- | --- | ---: |
-| [ltcb-main-table.csv](ltcb-main-table.csv) | <https://mattmahoney.net/dc/text.html> | Sept 12, 2026 | 224 |
+| [ltcb-main-table.csv](ltcb-main-table.csv) | <https://mattmahoney.net/dc/text.html> | Sept 15, 2026 | 226 |
 | [ltcb-textdata-text8-fil9.csv](ltcb-textdata-text8-fil9.csv) | <https://mattmahoney.net/dc/textdata.html> | Sept. 1, 2011 | 27 |
 
 What is tracked and what is not: the two transcribed CSVs, the local
@@ -28,25 +28,43 @@ renderings it writes into this directory — `ltcb-dashboard.{svg,png}`,
 root builds all of them, and each section below gives its own command;
 nothing quotes a number from them that the CSVs do not carry.
 
-Both pages were fetched on 2026-09-14 (text.html at 20:04 UTC, SHA-256
-`a504ea64cfbe1117bc7bbb7c64777eb427c9d9fcf0bb039e3711bf1c42e0b84f`;
-textdata.html at 20:02 UTC, SHA-256
+text.html was fetched on 2026-09-15 at 23:25 UTC (SHA-256
+`7ea13d26b7c8e67427361a333dfe0eae82981f4e24cf1b7fddeb6affaaf76866`), the
+day the page listed cadapt 0.12.0 at rank 30 (its changelog line: "Sep 15
+2026 - added cadapt 0.12.0, zmix 1.0, zmix 1.0.1"); the previous snapshot
+was of 2026-09-14 20:04 UTC (SHA-256 `a504ea64…e0b84f`, page dated Sept
+12, 2026, 224 rows), from which today's differs by the rows `zmix 1.0` and
+`cadapt 0.12.0 --max --allocation context` and by three Pareto marks the
+new rank-1 row took from rata-cmix 1.0.0, fx2-cmix-transformer and nncp
+v3.2 — every other row is identical, which is how the transcriber below
+was checked. textdata.html was fetched on 2026-09-14 at 20:02 UTC (SHA-256
 `b91ee875eb9d9b17ba825dc59ad8789b65f6d12661df0e5dffcb578668ac6822`).
 The main table changes as entries are added; re-fetch before citing it as
-current.
+current:
+
+```sh
+curl -s https://mattmahoney.net/dc/text.html -o _tmp/text.html
+python3 -B tools/ltcb/transcribe_ltcb_table.py --html _tmp/text.html --output research/ltcb-main-table.csv
+```
 
 ## How the tables were transcribed
 
-Each page carries its table in a `<pre>` block. The block was reduced to text
-(tags removed, entities decoded) and every row was matched against a single
-pattern anchored on the right-hand numeric columns. All rows matched; a row
-that did not match would have been reported, not skipped. Two places needed a
-rule beyond the pattern:
+The main table is transcribed by
+[tools/ltcb/transcribe_ltcb_table.py](../tools/ltcb/transcribe_ltcb_table.py)
+(tests in [test_transcribe_ltcb_table.py](../tools/ltcb/test_transcribe_ltcb_table.py)),
+which writes down the rules below; the textdata table was transcribed by
+hand under the same rules on 2026-09-14. Each page carries its table in a
+`<pre>` block. The block is reduced to text (tags removed, entities decoded)
+and every row is matched against a single pattern anchored on the
+right-hand numeric columns. A row that does not match is an error, never a
+skipped row. Two places need a rule beyond the pattern:
 
 - **Single time value.** Twelve main-table rows publish only one of Comp and
   Decomp. Numbers in the table are right-aligned, so the value was assigned by
   its starting column: a value beginning left of the `Decomp` header is Comp,
-  otherwise Decomp. Every such row was checked by hand against the page.
+  otherwise Decomp. Every such row was checked by hand against the page on
+  2026-09-14; two figures the page runs together (`108960~110000`) are
+  split at the `~`, and a row without flag letters (NTFS) keeps them empty.
 - **Program versus options.** The page separates the two by alignment, not by
   a delimiter. `program` is the text before the first run of two or more
   spaces; when a long name ran into the options column with single spaces,

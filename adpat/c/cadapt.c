@@ -598,8 +598,8 @@ static void print_usage(FILE *stream) {
             "--transform bmp explicitly selects that reversible transform. Search\n"
             "uses up to eight encodes, temporary disk of input plus two containers, and\n"
             "verifies only with --verify (one model, also for pipes).\n",
-            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
-            ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_METADATA_MAX_VERSION);
+            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_PRESSURE_VERSION,
+            ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_MAX_PRESSURE_METADATA_VERSION);
     fprintf(stream,
             "The text transform (versions 62--66, 67--71 with metadata) replaces a word both\n"
             "sides have seen three times by a code the model reads as one symbol; the book\n"

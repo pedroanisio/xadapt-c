@@ -1,5 +1,5 @@
 /*
- * adapt.h — the adapt codec, format versions 19 through 71, in C99 with
+ * adapt.h — the adapt codec, format versions 19 through 75, in C99 with
  * nothing beyond the C standard library (and POSIX threads for the
  * encoder's proof, when built with ADAPT_THREADS).
  *
@@ -22,6 +22,9 @@
  * a reader callback and pushes each block to a writer as it is recovered,
  * so that memory is the model and one block whatever the length — bytes it
  * has already written are not to be trusted until it returns ADAPT_OK.
+ * Ambiguous historical model2 files (58/61 below table_log 21) use
+ * temporary disk for a consumed input prefix and tentative output, then
+ * emit only after checksum verification; memory still holds one model.
  *
  * Encoding: adapt_encode() codes bytes held in memory into one file;
  * adapt_encode_stream() reads a stream once, a block at a time, and writes
@@ -185,14 +188,19 @@ extern "C" {
  * slots, the fifth arbiter) only from a table of 2^21 blocks, the size
  * the header names, since they pay under table pressure and cost small
  * inputs without it (MODEL2_PRESSURE_LOG in adapt_model.h); the encoder
- * sets it for every max encode, so the max profile is always this
- * version now, and a decoder sets it from the sizing byte. Measured on the first 8 MiB of enwik8
+ * sets it for every max encode in versions 72/75. Historical 58/61
+ * files used both policies; a decoder resolves those by checksum. Measured on the first 8 MiB of enwik8
  * under the text transform, 1,700,354 -> 1,686,110 bytes with 4.9 %
  * fewer instructions and a decode 5 % faster; on the first 32 MiB,
  * 6,351,878 -> 6,297,375. The int16 tables halve the side tables' 36.5
  * MiB and the fifth arbiter takes 4.8 MiB. */
 #define ADAPT_MAX_SIZED_VERSION 58u
 #define ADAPT_MAX_SIZED_METADATA_VERSION 61u
+/* Pressure-gated model2 has its own wire identity. Versions 58/61 with
+ * bit 7 were emitted with two predictors; the decoder checks both when
+ * their small-table behavior differs, using temporary files and one model. */
+#define ADAPT_MAX_PRESSURE_VERSION 72u
+#define ADAPT_MAX_PRESSURE_METADATA_VERSION 75u
 #define ADAPT_SIZING_BYTES 1u
 #define ADAPT_SIZING_COMPACT 1u
 #define ADAPT_SIZING_LEAN 2u
