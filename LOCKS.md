@@ -2,65 +2,6 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
-## 2026-09-16 — The speed batch: four levers measured on the lean baseline, none landed
-
-**Decision.** After `--contexts lean`, the remaining cheap speed levers
-were built as experiments and measured on the 8 MiB proxy (and, where
-they mattered, on the redundant corpus rows); every one is dropped, for
-the reasons measured. Recorded so they are not tried twice.
-
-- *Frequency-ranked codes in the text transform.* The book's codes
-  re-ranked by use every 2^16 coded words, on both sides alike. The
-  simulation on enwik8's word stream promised 2.4 % fewer bytes into
-  the model; the codec measured **+5.2 % of output** (1,681,725 →
-  1,768,933 B) for −1.4 % instructions: a code that changes meaning
-  invalidates every context the model has learned about it, and each
-  re-rank costs more than the shorter stream saves (every 2^18 words:
-  +2.9 %). Code stability is worth more than code length to an
-  adaptive model; the two-pass ranked dictionary measured earlier
-  (+0.12 % of bytes, LOCKS 2026-09-15) is the only ranked form that
-  works, and it buys no time worth its bytes.
-- *An LZP-style bypass of long recall matches.* A byte inside a
-  verified match of 32 (or 16) bytes coded as one flag, the per-bit
-  model skipped for it, the byte-level state advanced. Every round
-  trip held. On text −1.2 % of cycles for +0.24 % of bytes; on the
-  redundant rows the time fell as the match statistics predicted and
-  the bytes rose far more than expected: nci −59 % of cycles for
-  **+47 %** of bytes, xml −50 % / +16 %, samba −26 % / +4.1 %, mozilla
-  −12 % / +1.1 % (at 16 bytes: −76 % / +63 % on nci). The model's own
-  cost inside a match is already tiny, and a byte it does not learn from
-  leaves its tables stale for the byte after the match; a bypass that
-  keeps learning (state maps updated, arbiters and coder skipped) is a
-  separate per-bit path — a project, not a knob.
-- *Mixer lanes compacted to the kinds in use* (the five kinds `lean`
-  drops leave 15 zero lanes in every 72-lane dot product). The ceiling,
-  measured by running the dots and trains over 64 lanes: −0.95 %
-  instructions, −0.1 to −1.4 % cycles. The SIMD kernels make an extra
-  vector nearly free; not worth its refactor.
-- *The normal profile with its first arbiter alone* (no second, third,
-  fourth or final arbiter; the estimation stages kept): 1,726,147 →
-  1,744,249 B (+1.05 %) at 490 → 399 cycles per bit (−19 %); with
-  field and record dropped as well +1.3 % at 343. A knob with a worse
-  exchange rate than `--contexts lean`; not landed.
-
-**What the batch established.** Measured against mcm `-h9` (281 cycles
-per bit, 1 % smaller than our max on the proxy) and kanzi's TPAQX (229,
-6 % larger): our fast profile already costs 192 cycles per bit with
-three context slots and no estimation stage, and a third of that is
-per-byte work — hashing every kind, the word, class and nest state
-machines, the recall verification, the run memories, the prefetch
-plans — written for the max profile and run by every profile. The
-mixer is not the cost (the ceiling above); the per-slot learning and
-the per-byte machinery are. A profile of mcm's class (eight kinds, one
-lane each, one arbiter, two estimation stages, recall and the text
-transform) therefore needs its own per-byte and per-bit paths, sized
-for eight kinds: a new profile with its own version number, an XL
-change, with 220–280 cycles per bit as the target and mcm `-h9` as the
-byte bar. Nothing smaller than that moves speed by more than the 3–6 %
-`--contexts lean` already took.
-
-**Status.** Measured 2026-09-16; nothing landed.
-
 ## 2026-09-16 — The baseline is the lean context set: the floors locked on `--max --allocation context --contexts lean`
 
 **Decision (operator, 2026-09-16).** The reference configuration the
