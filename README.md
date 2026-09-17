@@ -196,11 +196,17 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   Silesia row at `--max -6` the rule fires, wins ten (webster −1.92 %,
   mozilla −1.66 %, ooffice −1.62 %, samba −1.48 %, dickens −1.41 %, …)
   and loses nci (+2.40 %) and reymont (+0.78 %), −1.13 % over the twelve
-  for 2.6 % more time — on those two a 2^20-block table beats every larger
-  one at the same window and recall (reymont 907,794 → 914,264 at 2^21;
-  nci 1,110,376 → 1,127,757), the small table's evictions acting as the
-  forgetting the counters lack. `--allocation window` keeps the old
-  sizes for such a file. Both use
+  for 2.6 % more time. The two losses are not the table's: a 2^21-block
+  table beats 2^20 on both with everything else fixed (reymont 907,794 →
+  893,039, nci 1,110,376 → 1,103,506). They are the second max model's
+  pressure-gated parts, which a table of 2^21 blocks or more switches on
+  (`MODEL2_PRESSURE_LOG`) and which cost reymont 2.3 % and nci 0.4 % at
+  that shape while paying mozilla 0.38 %, ooffice 0.55 %, sao 0.19 % and
+  samba 0.14 % — and, on nci, the compact side tables with the lean set,
+  2.6 % against the full tables at the same size. Neither is a first-block
+  decision: the parts lose on every file's first block (they are
+  untrained there) and pay only across a long file, so the gate stays a
+  size. `--allocation window` keeps the old sizes for such a file. Both use
   existing header fields and compose with the profiles and candidate search.
   Under `--max`, a tier that would stop the table at 2^22 blocks or fewer,
   short of the input's target, buys a table twice the size with compact side

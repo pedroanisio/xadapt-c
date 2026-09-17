@@ -121,7 +121,22 @@ The binary reports `0.12.0`; the tag is pending.
   the 94 MiB tier at -6) and the time of `--allocation context`; peak
   memory, CPU time, round trips and decoding by either binary are
   unchanged everywhere else, `--threads 2/4`, `--verify`, `--adaptive`,
-  `--transform`, folders and pipes included.
+  `--transform`, folders and pipes included; enwik8 under the default
+  command is 18,249,169 bytes either way (window-first: the 128 MiB window
+  holds it). On every Silesia row at `--max -6` the rule fires and wins
+  ten of twelve, −1.13 % over them for 2.6 % more time, losing nci
+  (+2.40 %) and reymont (+0.78 %). Not the table's doing: with the second
+  max model's pressure-gated parts held off, 2^21 blocks beat 2^20 on
+  both (reymont 907,794 → 893,039, nci 1,110,376 → 1,103,506); it is
+  those parts, switched on by a table of 2^21 blocks or more
+  (`MODEL2_PRESSURE_LOG`), that cost reymont 2.3 % and nci 0.4 % at the
+  `-6` shape (mozilla +0.38 %, ooffice +0.55 %, sao +0.19 %, samba
+  +0.14 % with them; the other rows within 0.02 %), and on nci the
+  compact side tables with the lean set, 2.6 % against the full tables
+  at 2^21. A first-block trial cannot choose the parts — untrained, they
+  lose on every file's first block and 32 KiB sample (reymont, nci and
+  dickens alike) and pay only across a long file — so the gate stays a
+  size. `--allocation window` keeps the old sizes.
 - The width trials of a given context set (`--contexts lean`) run on that
   set instead of the full one; the width verdict is unchanged on every
   locked fixture and the lean encode runs one trial fewer.
