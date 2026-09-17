@@ -252,3 +252,46 @@ python3 -B bench/test_slot_price.py               # stub-driven, plus one real p
 The tables it gave for enwik8 and for three Silesia rows, and the rung they
 price, are in
 [research/speed-3x-experiments-2026-09-16.md](../research/speed-3x-experiments-2026-09-16.md).
+
+## The stream census
+
+`stream_census.c` counts what is left for a second transform to remove. The
+text transform is worth 1.43× of encode time on enwik8 because time falls with
+the bytes the model is handed; the census models that transform's rule — a
+word replaced once its third occurrence has been seen — and puts every
+remaining byte in exactly one bucket, so no two candidate front ends can claim
+the same byte. It then reports, per candidate, the bytes it could remove net
+of the codes it must write.
+
+Every figure is an upper bound before the model has a say: a transform that
+removes bytes the model already predicted almost for free returns time and not
+ratio. The census ranks candidates; only an encode decides the payback.
+
+```sh
+cc -std=c99 -O2 -o /tmp/stream-census bench/stream_census.c
+/tmp/stream-census static/corpus/enwik8
+/tmp/stream-census static/corpus/mixed/silesia/xml --limit 16777216
+python3 -B bench/test_stream_census.py
+```
+
+The numbers it gave, and what they closed and opened, are in
+[research/front-end-census-2026-09-17.md](../research/front-end-census-2026-09-17.md).
+
+## The markup-book prototype
+
+`markup_book_proto.c` is the candidate the census ranked first, implemented
+outside the container so its payback could be measured before a format version
+was spent on it: a complete `<...>` tag coded once it has been seen three
+times, the book built as the file is read, nothing sent ahead, with its
+inverse. It writes no container and nothing in the build loads it.
+
+```sh
+cc -std=c99 -O2 -o /tmp/markup-proto bench/markup_book_proto.c
+/tmp/markup-proto enc static/corpus/mixed/silesia/xml /tmp/xml.mk
+/tmp/markup-proto dec /tmp/xml.mk /tmp/xml.back    # must match the source
+python3 -B bench/test_markup_book_proto.py
+```
+
+What it measured — on the `xml` row a smaller container in half the time, on
+enwik8 a larger one — is in
+[research/front-end-census-2026-09-17.md](../research/front-end-census-2026-09-17.md).

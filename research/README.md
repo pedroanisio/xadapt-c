@@ -20,6 +20,7 @@ numbers that stand are in [tools/ratio_floor.json](../tools/ratio_floor.json).
 | [speed-3x-experiments-2026-09-16.md](speed-3x-experiments-2026-09-16.md) | 2026-09-16 | What `kanzi`, `mcm` and `zmix` are worth for a threefold speedup at the locked ratio: five experiments run — four refuted, one paying — and thirteen more ranked; the context-slot price tables in [slot-price.json](slot-price.json) from [bench/slot_price.py](../bench/slot_price.py), and the front-end bypasses priced out on text by [bench/redundancy_probe.c](../bench/redundancy_probe.c) |
 | [same-host-references-2026-09-16.md](same-host-references-2026-09-16.md) | 2026-09-16 | `kanzi` 2.5.3 and this codec measured on one host, one core: the ladder from `kanzi -l7` to `--max --contexts lean`, and what it says about `--fast` |
 | [three-axis-strategy-2026-09-17.md](three-axis-strategy-2026-09-17.md) | 2026-09-17 | The path to winning ratio, memory and speed together: the profile x tier x reference surface in [three-axis-surface.json](three-axis-surface.json), the domination test, and the phased plan |
+| [front-end-census-2026-09-17.md](front-end-census-2026-09-17.md) | 2026-09-17 | What is left for a second transform, by [bench/stream_census.c](../bench/stream_census.c): the front end is spent on enwik8 and worth up to 2× on the mixed corpus; the markup book prototyped in [bench/markup_book_proto.c](../bench/markup_book_proto.c) and measured |
 
 The CSV and JSON files beside the notes are their data. The renderings
 `make ltcb` writes here are not tracked.
