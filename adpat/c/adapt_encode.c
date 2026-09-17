@@ -812,9 +812,9 @@ typedef struct model_choice {
      * policy, as header codes; the record period */
     uint8_t class_code, set_code, keys;
     uint16_t period;
-    /* the sample's size under class_code and set_code, when a trial coded
-     * exactly that (choose_keys reuses it as the classic keys' size); 0
-     * when none did — a given set, whose width trials run on the full set */
+    /* the sample's size under class_code and set_code with the classic
+     * keys, which choose_keys reuses; 0 only where no trial coded exactly
+     * that */
     size_t sample;
 } model_choice;
 
@@ -922,20 +922,22 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
      * CLASS_EVIDENCE declines the class context whatever the other two
      * widths would say, so they are not tried (a 4 KB input's encode is
      * mostly its trials) */
-    status = trial(sizes, 0, 0, block, head, coded, coded_cap, &coded_len[0], error);
+    /* the width trials run on the set the file will run: the given one,
+     * else the full set the set trials start from */
+    const uint8_t width_set = set_given ? sizes.set_code : 0;
+    status = trial(sizes, 0, width_set, block, head, coded, coded_cap, &coded_len[0], error);
     if (status != ADAPT_OK) {
         return status;
     }
     none = coded_len[0];
     if (none < CLASS_EVIDENCE) {
-        set_code = set_given ? sizes.set_code : 0;
-        /* the full set, width none: the trial just run, unless the set is
-         * given (the trial ran on the full set, not the given one) */
-        if (!set_given) choice->sample = none;
+        set_code = width_set;
+        /* width none on that set: the trial just run */
+        choice->sample = none;
         goto chosen;
     }
     for (code = 1; code < 3; code++) {
-        status = trial(sizes, code, 0, block, head, coded, coded_cap, &coded_len[code], error);
+        status = trial(sizes, code, width_set, block, head, coded, coded_cap, &coded_len[code], error);
         if (status != ADAPT_OK) {
             return status;
         }
@@ -954,11 +956,11 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         size_t favorite = coded_len[candidate], band = none / CLASS_BAND;
         if (favorite <= none + band && favorite + band >= none) {
             size_t without, with;
-            status = trial(sizes, 0, 0, block, n, coded, coded_cap, &without, error);
+            status = trial(sizes, 0, width_set, block, n, coded, coded_cap, &without, error);
             if (status != ADAPT_OK) {
                 return status;
             }
-            status = trial(sizes, candidate, 0, block, n, coded, coded_cap, &with, error);
+            status = trial(sizes, candidate, width_set, block, n, coded, coded_cap, &with, error);
             if (status != ADAPT_OK) {
                 return status;
             }
@@ -976,11 +978,11 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     }
 #endif
     full = coded_len[class_code];
+    choice->sample = full;
     if (set_given) {
         set_code = sizes.set_code;
         goto chosen;
     }
-    choice->sample = full;
     if (sizes.fast) {
         /* The fast profile's sets all cost the decoder the same, so every
          * one is tried and the smallest taken, on the terms below: it must
