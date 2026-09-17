@@ -16,7 +16,7 @@ cadapt \- compress and decompress files and folders with the adapt context-mixin
 .RB [ \-\-fast " | " \-\-mid " | " \-\-max ]
 .RB [ \-0 " .. " \-11 ]
 .RB [ \-\-allocation
-.BR window | context ]
+.BR auto | window | context ]
 .RB [ \-\-contexts
 .BR auto | lean ]
 .RB [ \-\-threads
@@ -312,12 +312,17 @@ enwik9	1,000,000,000	145,784,134	1,054.0 CPU s
 .TE
 .\" floors:end
 .TP
-.BR \-\-allocation " " window | context
+.BR \-\-allocation " " auto | window | context
 How a budget is spent once the smallest model fits:
 .B window
-(the default) grows the history window first, then the context table;
+grows the history window first, then the context table;
 .B context
-grows the table first; under
+grows the table first;
+.B auto
+(the default) grows the table first only where the window-first sizes would
+leave it below its target for the input — an input longer than the window
+the budget allows, whose table then stays at its floor — and is the
+window-first sizes everywhere else. Under
 .B \-\-max
 it also halves the side tables (versions 53/56) when the budget would
 otherwise stop the table at 2^22 blocks or fewer, short of the input's

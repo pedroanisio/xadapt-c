@@ -2,6 +2,53 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-17 — The default allocation grows the table first where the window would starve it
+
+**Decision.** `--allocation auto`, the default (`cadapt.c`,
+`ALLOCATION_AUTO`): after the window-first sizes are fitted, if the
+context table is below `adapt_table_log_for` of the input (a segment's
+length under `--threads`), the sizes are rebalanced by
+`adapt_sizes_prioritize_context` — the table to its target, then the
+window from what is left — exactly as `--allocation context` does for
+every input; otherwise the window-first sizes stand. `window` and
+`context` force one policy. No format change: the header carries the
+sizes chosen, as before.
+
+**Why.** The window-first policy grows the window to the budget or the
+input's length before the table, and only then grows the table: an
+input longer than the window the budget allows spends the tier on a
+window the 2^20-entry recall index cannot even address and leaves the
+table at its floor. Found on enwik9 under the default command at `-9`:
+a 2^20-block table (16 MiB) beneath a 2^29-byte window.
+
+**Measured** (reference host, quiet, encode `--no-verify`, CPU seconds,
+round trips verified on the corpus by the gate; enwik9's decode not
+re-measured):
+
+| | window-first | table-first (auto) | Δ |
+|---|---|---|---|
+| enwik9, default command, `-9` | 165,865,476 B, 705.8 s, 555 MiB | 149,702,998 B, 682.5 s, 667 MiB | −9.74 %, −3 % time, +112 MiB inside the 674 MiB tier |
+| enwik8, default command | 18,249,169 B | identical (the window caps at 2^27 and the table reaches 2^25 under both) | 0 |
+| 8 MiB proxy, five commands | — | identical | 0 |
+| mixed corpus, 46 gated rows (`-9` default, `--max -6`) | — | identical | 0 |
+| mixed corpus, default profile at `-6` (not gated) | 40,769,278 B | 40,476,402 B: mozilla −1.30 %, webster −1.81 %, samba −0.70 %, nci +56 B | −0.72 % |
+| max profile's floor budget (`-0 --max`) | 2^10 table, full side tables, 46 MiB model | 2^18 table, compact side tables, 32 MiB model | smaller and better |
+
+**Consequences.**
+- No floor moves: every gated row is byte for byte the same; enwik9
+  under the default command is not a floor.
+- The help's "smallest model" figures are worded as the budgets `-0` is
+  raised to (28,184,711 and 57,816,199 bytes); the max model written at
+  that budget needs 43,787,399 and decodes in that.
+- The library's `adapt_sizes_for_input` keeps the window-first policy
+  (its floor sizes are what the CLI raises `-0` to); moving the rule into
+  the library is a following entry if a library caller needs it.
+- Pipes (length unknown) are unchanged: their sizes cannot know the
+  input's length; `--allocation context` remains the answer for a long
+  pipe.
+
+**Status.** Landed 2026-09-17.
+
 ## 2026-09-17 — The normal profile's arbiters keyed the same way (version 84)
 
 **Decision (operator, 2026-09-17: "proceed").** The key policies of the

@@ -103,7 +103,7 @@ strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
 ```
 cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --mid | --max] [-0 .. -11]
               [--threads <n>] [--segment-bytes <bytes>]
-              [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation window|context]
+              [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation auto|window|context]
               [--contexts auto|lean]
 cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
 cadapt info   <file>
@@ -172,7 +172,13 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   the proof by default and says so on stderr; `--no-verify` skips it
   explicitly.
 - `--allocation context` spends the budget on the context table before growing
-  the recall window. `--allocation window` is the unchanged default. Both use
+  the recall window; `--allocation window` grows the window first. `auto`,
+  the default, takes the table first only where the window-first sizes would
+  leave it below its target for the input — an input longer than the window
+  the budget allows, whose table then stays at its floor (enwik9 at `-9`
+  under the normal profile: a 2^20-block table beneath a 512 MiB window,
+  165,865,476 bytes against 149,702,998 with the table first) — and is the
+  window-first sizes everywhere else. Both use
   existing header fields and compose with the profiles and candidate search.
   Under `--max`, a tier that would stop the table at 2^22 blocks or fewer,
   short of the input's target, buys a table twice the size with compact side
@@ -180,8 +186,9 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   context set (54/57); what the tier still holds past the window goes to
   the table an eighth of its next doubling at a time (versions 58/61). The
   measurements behind each rule are in the LOCKS.md entries that made it.
-  Either allocation can produce a larger file; choose from measured complete
-  containers. More of the allowed memory can be used by the context policy.
+  Where the two policies differ on the mixed corpus at `-6`, the table wins
+  every row but one, by 56 bytes (LOCKS.md, 2026-09-17); a doubtful input is
+  settled by measuring both complete containers.
 - `--contexts lean` takes the lean context set outright instead of choosing
   the set from the first block: word and field are left out and, under
   `--max`, o8, word3 and wordc too (the lean bit, now written with the full

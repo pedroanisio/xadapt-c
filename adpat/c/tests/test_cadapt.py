@@ -811,7 +811,7 @@ class MemoryContractTest(CodecTest):
         help_run = self.run_codec("--help")
         self.assertEqual(help_run.returncode, 0, help_run.stderr)
         help_text = help_run.stdout + help_run.stderr
-        advertised = re.search(rb"smallest normal model takes (\d+)\s+bytes, the max profile's (\d+)", help_text)
+        advertised = re.search(rb"smallest budget the normal profile\s+runs in is (\d+) bytes, the max profile's (\d+)", help_text)
         self.assertIsNotNone(advertised, help_text)
         floors = {(): int(advertised[1]), ("--fast",): None, ("--max",): int(advertised[2])}
         for profile, advertised_floor in floors.items():
@@ -819,16 +819,25 @@ class MemoryContractTest(CodecTest):
                 output = self.root / "floor.adpt"
                 run = self.run_codec("encode", self.source, "-o", output, "--force", "-0", *profile)
                 self.assertEqual(run.returncode, 0, run.stderr)
-                # the cap at one byte names what the file needs; the normal
-                # and max floors are the advertised ones, the fast profile's
-                # smaller model needs less than the floor its budget shares
+                # the cap at one byte names what the file needs: within the
+                # advertised floor budget -0 is raised to — the normal model
+                # is exactly it, the max model less (at that budget the table
+                # would starve, so the default allocation takes the compact
+                # side tables and a 2^18 table instead of the full ones and
+                # 2^10), the fast profile's smaller model less than the
+                # normal floor its budget shares
                 probe = self.run_codec("decode", output, "-o", "-", "--max-memory", "1")
                 self.assert_failure(probe, b"memory budget exceeded")
                 match = re.search(rb"need (\d+) bytes, limit 1\b", probe.stderr)
                 self.assertIsNotNone(match, probe.stderr)
                 floor = int(match[1])
-                if advertised_floor is not None:
+                if profile == ():
                     self.assertEqual(floor, advertised_floor)
+                elif profile == ("--max",):
+                    self.assertLess(floor, advertised_floor)
+                    info = self.run_codec("info", output)
+                    self.assertIn(b"context table   2^18 blocks", info.stdout)
+                    self.assertIn(b"compact side tables", info.stdout)
                 else:
                     self.assertLess(floor, int(advertised[1]))
                 decoded = self.run_codec("decode", output, "-o", "-", "--max-memory", str(floor))

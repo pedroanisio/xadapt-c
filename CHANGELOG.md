@@ -33,6 +33,10 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Fixed
 
+- `choose_model` returns one `model_choice` — width, set, keys and period
+  from a single exit, the whole-block set proof shared by the fast and
+  normal set choices (`prove_set`); `adapt_sizes` floors use designated
+  initializers. Bytes identical.
 - `make check` builds the codec once before its parallel parts: the
   provenance part ran `make all` in the same build directory as the codec
   part, and two makes relinking `cadapt` at once left the safety suite
@@ -51,6 +55,24 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Changed
 
+- `--allocation auto`, the new default, grows the context table before the
+  recall window only where the window-first sizes would leave the table
+  below its target for the input — an input longer than the window the
+  budget allows, whose table then stayed at its floor. Under the normal
+  profile at `-9`, enwik9 was written with a 2^20-block table beneath a
+  512 MiB window: 165,865,476 bytes; with the table first 149,702,998
+  (-9.74 %) in less time (682 against 706 CPU s) at 667 MiB. Every input
+  the two policies size alike is byte for byte unchanged: the 8 MiB proxy
+  under all five commands, enwik8, and all 46 mixed-corpus rows under both
+  gate commands; on the corpus at `-6`, where they differ, the table wins
+  mozilla -1.30 %, webster -1.81 % and samba -0.70 % and loses 56 bytes on
+  nci. `--allocation window` keeps the old sizes. At the max profile's
+  floor budget the rule takes the compact side tables and a 2^18 table
+  (32 MiB) instead of the full ones and a 2^10 table (46 MiB); the help
+  now names the floors as the budgets `-0` is raised to. (LOCKS.md.)
+- The width trials of a given context set (`--contexts lean`) run on that
+  set instead of the full one; the width verdict is unchanged on every
+  locked fixture and the lean encode runs one trial fewer.
 - The floors re-locked on the keyed-arbiters binary (LOCKS.md,
   2026-09-16): enwik8-8MiB 1,669,716 B, enwik8-16MiB 3,236,535 B, enwik8
   17,800,141 B, enwik9 145,784,134 B in 1,054.0 CPU s (the enwik8 rows'

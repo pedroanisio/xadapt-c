@@ -42,6 +42,11 @@
 #include "cadapt_platform.h"
 #include "cadapt_fs.h"
 
+/* --allocation: the context table before the recall window where the
+ * window-first sizes would starve the table (auto, the default), for every
+ * input (context), or never (window). */
+enum { ALLOCATION_AUTO = 0, ALLOCATION_CONTEXT = 1, ALLOCATION_WINDOW = 2 };
+
 /* The command line's own version, not a portability detail: it stays here,
  * where tools/provenance.py reads it. */
 #define CADAPT_VERSION "0.12.0"
@@ -248,7 +253,7 @@ static void print_usage(FILE *stream) {
             "usage:\n"
             "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --mid | --max] [-0 .. -11]\n"
             "                [--threads <n>] [--segment-bytes <bytes>]\n"
-            "                [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation window|context]\n"
+            "                [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation auto|window|context]\n"
             "                [--contexts auto|lean]\n"
             "  cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]\n"
             "  cadapt info   <file>\n"
@@ -288,8 +293,9 @@ static void print_usage(FILE *stream) {
             "a file of 8 MiB or more whose first block looks like text (measured on\n"
             "enwik8 at 128 MiB: 3.5 %% fewer bytes in fewer seconds); --transform text asks\n"
             "for it whatever the input, --transform none refuses it.\n"
-            "--allocation context grows the context table before the recall window;\n"
-            "window is the default. Either policy can win depending on the input.\n"
+            "--allocation auto, the default, grows the context table before the recall\n"
+            "window where the window-first sizes would leave the table below its target (an\n"
+            "input longer than the window the budget allows); context or window force one.\n"
             "--contexts lean takes the lean context set outright (word and field left out;\n"
             "under --max o8, word3 and wordc too) instead of choosing the set from the first\n"
             "block: on text about 12 %% less encode time and 8 %% less decode time for about\n"
@@ -301,8 +307,9 @@ static void print_usage(FILE *stream) {
             "setting of encode: it bounds the model, window and workspace, and decode\n"
             "takes the model's memory as the header names it, so the preset a file was\n"
             "written with is the memory every decoder of it needs. Folder path and\n"
-            "metadata bookkeeping is additional. The smallest normal model takes %llu\n"
-            "bytes, the max profile's %llu; verification and segments may need more.\n"
+            "metadata bookkeeping is additional. The smallest budget the normal profile\n"
+            "runs in is %llu bytes, the max profile's %llu (a preset below it is raised to\n"
+            "it; the model written there may need less); verification and segments may need more.\n"
             "Named files and folders preserve modes and access/modification timestamps.\n"
             "encode skips round-trip verification by default. --verify proves its output\n"
             "as it writes it when the budget holds two models, or, for a file written\n"
@@ -3127,7 +3134,7 @@ static adapt_status encode_search(adapt_read_fn read, void *context, stream *out
             status = threads >= 2 && known_length ?
                 (sizes->max ? adapt_sizes_for_threads_max_adaptive : adapt_sizes_for_threads_adaptive)(length, budget, threads, segment_bytes, mode, &trial, error) :
                 (sizes->max ? adapt_sizes_for_input_max_adaptive : adapt_sizes_for_input_adaptive)(known_length, length, budget, mode, &trial, error);
-            if (status == ADAPT_OK && context_first)
+            if (status == ADAPT_OK && context_first == ALLOCATION_CONTEXT)
                 status = adapt_sizes_prioritize_context(known_length, length, budget, threads, segment_bytes, &trial, error);
             if (status == ADAPT_ERROR_MEMORY_LIMIT) {
                 fprintf(stderr, "adaptive trial %s%s%s skipped: memory\n", sizes->max ? "max-" : "", adaptive_name(mode), transform ? "-bmp" : "");
@@ -3217,11 +3224,17 @@ typedef struct encode_job {
 } encode_job;
 
 static int encode_parse_profile(encode_options *options, const args *a) {
+    /* --allocation: auto, the default, grows the context table before the
+     * recall window only where the window-first sizes would leave the table
+     * below its target for the input (ALLOCATION_AUTO); context and window
+     * force one policy for every input */
     const char *text = value_of(a, "--allocation");
+    options->context_first = ALLOCATION_AUTO;
     if (text != NULL) {
-        if (strcmp(text, "context") == 0) options->context_first = 1;
-        else if (strcmp(text, "window") != 0)
-            return usage_error("--allocation: expected window or context: %s", text);
+        if (strcmp(text, "context") == 0) options->context_first = ALLOCATION_CONTEXT;
+        else if (strcmp(text, "window") == 0) options->context_first = ALLOCATION_WINDOW;
+        else if (strcmp(text, "auto") != 0)
+            return usage_error("--allocation: expected auto, window or context: %s", text);
     }
     text = value_of(a, "--contexts");
     if (text != NULL) {
@@ -3386,10 +3399,21 @@ static int encode_choose_sizes(encode_job *job) {
         status = (options->max ? adapt_sizes_for_input_max : adapt_sizes_for_input)
             (job->known_length, job->length, profile_memory, sizes, &error);
     }
-    if (status == ADAPT_OK && options->context_first) {
-        if (options->fast) *sizes = adapt_sizes_fast(*sizes);
-        status = adapt_sizes_prioritize_context(job->known_length, job->length, profile_memory,
-                                                options->threads, options->segment_bytes, sizes, &error);
+    if (status == ADAPT_OK && options->context_first != ALLOCATION_WINDOW) {
+        /* ALLOCATION_AUTO takes the table first only where the window-first
+         * sizes starve it: an input longer than the window the budget
+         * allows, whose table then stays at its floor (enwik9 at -9: a
+         * 2^20-block table under a 512 MiB window, 165,865,476 bytes
+         * against 149,702,998 with the table first; on the mixed corpus at
+         * -6 the table wins every row it changes but one, by 56 bytes —
+         * LOCKS.md, 2026-09-17). A segmented input's target is a segment's. */
+        uint64_t unit = options->threads >= 2 && job->length > options->segment_bytes ? options->segment_bytes : job->length;
+        int starved = job->known_length && sizes->table_log < adapt_table_log_for(unit);
+        if (options->context_first == ALLOCATION_CONTEXT || starved) {
+            if (options->fast) *sizes = adapt_sizes_fast(*sizes);
+            status = adapt_sizes_prioritize_context(job->known_length, job->length, profile_memory,
+                                                    options->threads, options->segment_bytes, sizes, &error);
+        }
     }
     if (status != ADAPT_OK) {
         char message[160];
