@@ -722,6 +722,18 @@ typedef struct adapt_stats {
      * without it. */
     uint64_t text_bytes;
     uint32_t text_words;
+    /* What the encoder chose from the first block (choose_model in
+     * adapt_encode.c): the class-history width and context set as header
+     * codes, the arbiters' key policy (ADAPT_KEYS_*), the record period;
+     * and the trials that decided them — how many sample codings, and
+     * the bytes they coded. All 0 for a decode, and for an input the
+     * model does not run on (empty, or incompressible at a glance). */
+    uint8_t class_code, set_code, keys;
+    /* the lean context set taken (adapt_sizes.lean), 1 or 0 */
+    uint8_t lean;
+    uint16_t period;
+    uint32_t trials;
+    uint64_t trial_bytes;
 } adapt_stats;
 
 /* Read up to `len` bytes into `buf` and store how many in `*got`: 0 only

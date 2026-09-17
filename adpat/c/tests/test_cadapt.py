@@ -240,6 +240,32 @@ class AllocationTest(CodecTest):
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual(back.stdout, block)
 
+    def test_explain_names_the_first_block_choices_and_changes_no_byte(self):
+        # --explain adds three lines after the report — the tables and
+        # allocation, the model chosen, the trials — in info's terms, and
+        # the container is the one written without it. An input the
+        # model does not run on (empty) reports no trials.
+        plain = self.run_codec("encode", VECTORS / "text.bin", "-o", "-", "--no-verify")
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        explained = self.run_codec("encode", VECTORS / "text.bin", "-o", "-", "--no-verify", "--explain")
+        self.assertEqual(explained.returncode, 0, explained.stderr)
+        self.assertEqual(explained.stdout, plain.stdout)
+        lines = [l for l in explained.stderr.decode().splitlines() if l.startswith("explain: ")]
+        self.assertEqual(len(lines), 3, explained.stderr)
+        self.assertRegex(lines[0], r"^explain: tables {3}2\^\d+ blocks, recall 2\^\d+ entries, window 2\^\d+ bytes, (window-first \(auto\)|table-first|window-first) allocation$")
+        self.assertIn("class history 8 bytes, contexts all but field, record, record period 0, arbiter keys classes and nesting", lines[1])
+        self.assertRegex(lines[2], r"^explain: trials {3}\d+ codings of \d+ bytes on the first block; text transform off$")
+        self.assertGreaterEqual(int(re.search(r"(\d+) codings", lines[2])[1]), 3)
+        big = self.root / "big.bin"
+        big.write_bytes((SOURCE * ((1 << 18) // len(SOURCE) + 1))[: 1 << 18])
+        starved = self.run_codec("encode", big, "-o", self.root / "big.adpt", "--force", "--no-verify", "--explain", "-0")
+        self.assertEqual(starved.returncode, 0, starved.stderr)
+        self.assertIn(b"table-first allocation", starved.stderr)
+        empty = self.run_codec("encode", VECTORS / "empty.bin", "-o", "-", "--no-verify", "--explain")
+        self.assertEqual(empty.returncode, 0, empty.stderr)
+        self.assertIn(b"explain: trials   0 codings of 0 bytes", empty.stderr)
+        self.assertNotIn(b"explain", plain.stderr)
+
     def test_max_arbiter_keys_are_chosen_per_file_and_named(self):
         # The max profile's arbiter keys are the first block's choice
         # (adapt.h, ADAPT_MAX_KEYS_VERSION): the text vector takes the

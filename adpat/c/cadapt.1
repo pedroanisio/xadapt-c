@@ -13,6 +13,7 @@ cadapt \- compress and decompress files and folders with the adapt context-mixin
 .IR output ]
 .RB [ \-\-force ]
 .RB [ \-\-verify " | " \-\-no\-verify ]
+.RB [ \-\-explain ]
 .RB [ \-\-fast " | " \-\-mid " | " \-\-max ]
 .RB [ \-0 " .. " \-11 ]
 .RB [ \-\-allocation
@@ -397,6 +398,13 @@ second thread; otherwise, for a file written to a file, in a second pass
 with one model.
 .B \-\-no\-verify
 states the default.
+.TP
+.B \-\-explain
+Adds to the report, on standard error, what the first block decided: the
+tables and the allocation taken, the class-history width, context set,
+record period and arbiter keys, the sample codings that chose them and
+their bytes, and whether the text transform is on. The container is the
+same with or without it.
 .TP
 .BI \-\-threads " n"
 With

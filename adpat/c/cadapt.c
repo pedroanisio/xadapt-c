@@ -3,7 +3,7 @@
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
- *   cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --mid | --max] [-0 .. -11]
+ *   cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--explain] [--fast | --mid | --max] [-0 .. -11]
  *                 [--threads <n>] [--segment-bytes <bytes>]
  *   cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
  *   cadapt info   <file>
@@ -251,7 +251,7 @@ static void print_usage(FILE *stream) {
             "cadapt — the adapt self-adaptive lossless codec, in C\n"
             "\n"
             "usage:\n"
-            "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --mid | --max] [-0 .. -11]\n"
+            "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--explain] [--fast | --mid | --max] [-0 .. -11]\n"
             "                [--threads <n>] [--segment-bytes <bytes>]\n"
             "                [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation auto|window|context]\n"
             "                [--contexts auto|lean]\n"
@@ -311,6 +311,9 @@ static void print_usage(FILE *stream) {
             "runs in is %llu bytes, the max profile's %llu (a preset below it is raised to\n"
             "it; the model written there may need less); verification and segments may need more.\n"
             "Named files and folders preserve modes and access/modification timestamps.\n"
+            "--explain adds to encode's report what the first block decided: the tables\n"
+            "and allocation, the class width, context set, record period and arbiter keys,\n"
+            "the trials that chose them and whether the text transform is on.\n"
             "encode skips round-trip verification by default. --verify proves its output\n"
             "as it writes it when the budget holds two models, or, for a file written\n"
             "to a file, in a second pass with one. --no-verify explicitly skips this proof.\n"
@@ -3204,7 +3207,7 @@ done:
 typedef struct encode_options {
     int force, verify, no_verify, fast, mid, max;
     unsigned adaptive;
-    int bmp, context_first, lean_contexts, text_transform;
+    int bmp, context_first, lean_contexts, text_transform, explain;
     uint64_t max_memory, threads, segment_bytes;
     int is_folder;
     char folder_name[4096];
@@ -3217,6 +3220,8 @@ typedef struct encode_job {
     packer pack;
     adapt_metadata metadata;
     int has_metadata, known_length, alongside;
+    /* --allocation auto took the table first (the window-first sizes starved it) */
+    int table_first;
     uint64_t length, workers, running;
     adapt_sizes sizes;
     adapt_stats stats;
@@ -3304,7 +3309,7 @@ static int encode_parse_budget(encode_options *options, const args *a) {
 
 static int encode_parse_options(encode_job *job, int argc, char **argv) {
     static const char *const with_value[] = {"-o", "--max-memory", "--threads", "--segment-bytes", "--adaptive", "--transform", "--allocation", "--contexts", NULL};
-    static const char *const known[] = {"--force", "--verify", "--no-verify", "--fast", "--mid", "--max", "-0", "-1", "-2", "-3",
+    static const char *const known[] = {"--force", "--verify", "--no-verify", "--explain", "--fast", "--mid", "--max", "-0", "-1", "-2", "-3",
                                         "-4", "-5", "-6", "-7", "-8", "-9", "-10", "-11", NULL};
     encode_options *options = &job->options;
     const char *input;
@@ -3333,6 +3338,7 @@ static int encode_parse_options(encode_job *job, int argc, char **argv) {
     options->force = has_flag(&a, "--force");
     options->verify = has_flag(&a, "--verify");
     options->no_verify = has_flag(&a, "--no-verify");
+    options->explain = has_flag(&a, "--explain");
     options->fast = has_flag(&a, "--fast");
     options->mid = has_flag(&a, "--mid");
     options->max = has_flag(&a, "--max");
@@ -3409,7 +3415,8 @@ static int encode_choose_sizes(encode_job *job) {
          * LOCKS.md, 2026-09-17). A segmented input's target is a segment's. */
         uint64_t unit = options->threads >= 2 && job->length > options->segment_bytes ? options->segment_bytes : job->length;
         int starved = job->known_length && sizes->table_log < adapt_table_log_for(unit);
-        if (options->context_first == ALLOCATION_CONTEXT || starved) {
+        job->table_first = options->context_first == ALLOCATION_CONTEXT || starved;
+        if (job->table_first) {
             if (options->fast) *sizes = adapt_sizes_fast(*sizes);
             status = adapt_sizes_prioritize_context(job->known_length, job->length, profile_memory,
                                                     options->threads, options->segment_bytes, sizes, &error);
@@ -3598,6 +3605,35 @@ static void encode_report(const encode_job *job) {
     }
 }
 
+/* --explain: what the encoder decided from the first block and the sizes
+ * it took — the choices an experiment otherwise needs a development build
+ * to see — after the report, on stderr, in the shape `info` prints. */
+static void encode_explain(const encode_job *job) {
+    const adapt_stats *stats = &job->stats;
+    adapt_sizes sizes = job->sizes;
+    char contexts[80];
+    sizes.class_code = stats->class_code;
+    sizes.set_code = stats->set_code;
+    sizes.keys = stats->keys;
+    sizes.lean = stats->lean;
+    sizes.period = stats->period;
+    fprintf(stderr, "explain: tables   2^%u blocks, recall 2^%u entries, window 2^%u bytes, %s allocation\n", sizes.table_log,
+            sizes.match_log, sizes.window_log,
+            job->options.context_first == ALLOCATION_WINDOW ? "window-first" : job->table_first ? "table-first" : "window-first (auto)");
+    if (sizes.fast) {
+        adapt_fast_contexts(sizes, contexts, sizeof(contexts));
+    } else {
+        char dropped[64];
+        adapt_dropped_contexts(sizes, dropped, sizeof(dropped));
+        snprintf(contexts, sizeof(contexts), "%s%s", dropped[0] ? "all but " : "all", dropped);
+    }
+    fprintf(stderr, "explain: model    class history %u bytes, contexts %s, record period %u, arbiter keys %s\n",
+            adapt_class_width(sizes), contexts, (unsigned)sizes.period,
+            sizes.keys == ADAPT_KEYS_TEXT ? "classes and nesting" : sizes.keys == ADAPT_KEYS_BINARY ? "classes and recall" : "classic");
+    fprintf(stderr, "explain: trials   %lu codings of %llu bytes on the first block; text transform %s\n", (unsigned long)stats->trials,
+            (unsigned long long)stats->trial_bytes, stats->text_bytes != 0 ? "on" : "off");
+}
+
 static int encode_command(int argc, char **argv) {
     encode_job job = {0};
     int rc = encode_parse_options(&job, argc, argv);
@@ -3621,6 +3657,7 @@ static int encode_command(int argc, char **argv) {
         if (rc != 0) goto done;
     }
     encode_report(&job);
+    if (job.options.explain) encode_explain(&job);
 done:
     packer_close(&job.pack);
     folder_free(&job.dir);

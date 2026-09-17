@@ -87,6 +87,13 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Added
 
+- `cadapt encode --explain`: three lines after the report naming what the
+  first block decided — the tables and allocation (window-first,
+  table-first, or auto's choice), the class width, context set, record
+  period and arbiter keys, the sample codings that chose them and their
+  bytes, and whether the text transform is on. `adapt_stats` carries the
+  same (`class_code`, `set_code`, `keys`, `lean`, `period`, `trials`,
+  `trial_bytes`) for library callers. The container is unchanged.
 - The normal profile's arbiters keyed the same way (version 84, 85 with
   metadata; `ADAPT_NORMAL_KEYS_VERSION`): the model of version 19 with
   the key policies of 80 and 81 on its second, third and fourth

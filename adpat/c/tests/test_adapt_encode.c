@@ -851,6 +851,12 @@ static void test_vector_profile(const char *name, const char *source, int profil
     CHECK_STATUS(adapt_read_header(coded, w.len, &parsed, &error), ADAPT_OK);
     CHECK(adapt_sizes_header_bytes(parsed) == adapt_header_len(coded));
     CHECK(stats.input_bytes == src_len && stats.output_bytes == want_len && stats.crc32 == adapt_crc32(src, src_len));
+    /* the stats carry the first block's choices as the header does, and
+     * the trials that made them: these sources are long enough to be
+     * chosen rather than defaulted, so at least the width's were run */
+    CHECK(stats.class_code == parsed.class_code && stats.set_code == parsed.set_code && stats.keys == parsed.keys &&
+          stats.lean == parsed.lean && stats.period == parsed.period);
+    CHECK(stats.trials >= 1 && stats.trial_bytes >= stats.trials * (src_len < 32768 ? src_len : 32768));
     reset(&r, src, src_len, 4096, &w, coded, src_len + 4096);
     CHECK_STATUS(adapt_encode_stream_verified(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL,
                                               &error),

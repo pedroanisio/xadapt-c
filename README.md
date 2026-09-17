@@ -101,7 +101,7 @@ strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
 ## Command line
 
 ```
-cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--fast | --mid | --max] [-0 .. -11]
+cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--explain] [--fast | --mid | --max] [-0 .. -11]
               [--threads <n>] [--segment-bytes <bytes>]
               [--adaptive rates|sparse|retained|auto] [--transform bmp|text|none] [--allocation auto|window|context]
               [--contexts auto|lean]
@@ -166,6 +166,11 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   the same time and memory; its
   smallest model is larger (`--help` prints both minimums), so the low tiers
   clamp higher under `--max`.
+- `--explain` adds to encode's report what the first block decided — the
+  tables and allocation, the class width, context set, record period and
+  arbiter keys, the trials that chose them, and whether the text transform
+  is on — the choices an experiment otherwise needs a development build to
+  see. The container is the same with or without it.
 - `--verify` proves the output as it is written, with a second model
   decoding every block, when the budget holds two models; for a file
   written to a file it falls back to a second pass with one. Encoding skips

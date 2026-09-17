@@ -764,12 +764,28 @@ static unsigned popcount16(uint32_t x) {
     return n;
 }
 
+typedef struct model_choice {
+    /* the class-history width, the context set and the arbiters' key
+     * policy, as header codes; the record period */
+    uint8_t class_code, set_code, keys;
+    uint16_t period;
+    /* the sample's size under class_code and set_code with the classic
+     * keys, which choose_keys reuses; 0 only where no trial coded exactly
+     * that */
+    size_t sample;
+    /* the trials that decided it: sample codings, and the bytes they coded */
+    uint32_t trials;
+    uint64_t trial_bytes;
+} model_choice;
+
 /* One trial: code `sample` under a fresh model with these codes and return
  * the coded length, or the sample's length when the raw bytes win. */
 static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_code, const uint8_t *sample, size_t n,
-                          uint8_t *coded, size_t coded_cap, size_t *size_out, adapt_error *error) {
+                          uint8_t *coded, size_t coded_cap, size_t *size_out, model_choice *choice, adapt_error *error) {
     model *m;
     size_t payload;
+    choice->trials += 1;
+    choice->trial_bytes += n;
     sizes.class_code = class_code;
     sizes.set_code = set_code;
     m = model_new(sizes);
@@ -807,34 +823,25 @@ static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_cod
  * are what a sample can be trusted for: measured on 16 MiB of enwik8, a
  * lean set that won its 32 KiB sample by a hair and its 256 KiB block by
  * less than a thousandth lost the whole file by seven. */
-typedef struct model_choice {
-    /* the class-history width, the context set and the arbiters' key
-     * policy, as header codes; the record period */
-    uint8_t class_code, set_code, keys;
-    uint16_t period;
-    /* the sample's size under class_code and set_code with the classic
-     * keys, which choose_keys reuses; 0 only where no trial coded exactly
-     * that */
-    size_t sample;
-} model_choice;
 
 /* The whole-block proof of a chosen set against the full one, shared by
  * the fast and normal set choices: the set stays only where it codes the
  * block within PROOF_MARGIN of the full set's coding, which the width's
  * proof may already have made (`whole`, `have_whole`). */
 static adapt_status prove_set(adapt_sizes sizes, uint8_t class_code, uint8_t *set_code, const uint8_t *block, size_t n,
-                              uint8_t *coded, size_t coded_cap, size_t *whole, int *have_whole, adapt_error *error) {
+                              uint8_t *coded, size_t coded_cap, size_t *whole, int *have_whole, model_choice *choice,
+                              adapt_error *error) {
     size_t lean;
     adapt_status status;
     if (*set_code == 0) {
         return ADAPT_OK;
     }
-    status = trial(sizes, class_code, *set_code, block, n, coded, coded_cap, &lean, error);
+    status = trial(sizes, class_code, *set_code, block, n, coded, coded_cap, &lean, choice, error);
     if (status != ADAPT_OK) {
         return status;
     }
     if (!*have_whole) {
-        status = trial(sizes, class_code, 0, block, n, coded, coded_cap, whole, error);
+        status = trial(sizes, class_code, 0, block, n, coded, coded_cap, whole, choice, error);
         if (status != ADAPT_OK) {
             return status;
         }
@@ -874,7 +881,7 @@ static adapt_status choose_keys(adapt_sizes sizes, const uint8_t *block, size_t 
     sizes.period = choice->period;
     if (classic == 0) {
         sizes.keys = ADAPT_KEYS_CLASSIC;
-        status = trial(sizes, choice->class_code, choice->set_code, block, head, coded, coded_cap, &classic, error);
+        status = trial(sizes, choice->class_code, choice->set_code, block, head, coded, coded_cap, &classic, choice, error);
         if (status != ADAPT_OK) {
             return status;
         }
@@ -882,7 +889,7 @@ static adapt_status choose_keys(adapt_sizes sizes, const uint8_t *block, size_t 
     best_size = deep ? SET_MARGIN(classic) : classic;
     for (k = ADAPT_KEYS_TEXT; k <= ADAPT_KEYS_BINARY; k++) {
         sizes.keys = k;
-        status = trial(sizes, choice->class_code, choice->set_code, block, head, coded, coded_cap, &size, error);
+        status = trial(sizes, choice->class_code, choice->set_code, block, head, coded, coded_cap, &size, choice, error);
         if (status != ADAPT_OK) {
             return status;
         }
@@ -915,6 +922,8 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     adapt_status status;
     choice->keys = ADAPT_KEYS_CLASSIC;
     choice->sample = 0;
+    choice->trials = 0;
+    choice->trial_bytes = 0;
     /* The period first: the contexts every trial runs depend on it. */
     sizes.period = sizes.fast ? 0 : adapt_detect_period(block, head);
     choice->period = sizes.period;
@@ -925,7 +934,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     /* the width trials run on the set the file will run: the given one,
      * else the full set the set trials start from */
     const uint8_t width_set = set_given ? sizes.set_code : 0;
-    status = trial(sizes, 0, width_set, block, head, coded, coded_cap, &coded_len[0], error);
+    status = trial(sizes, 0, width_set, block, head, coded, coded_cap, &coded_len[0], choice, error);
     if (status != ADAPT_OK) {
         return status;
     }
@@ -937,7 +946,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         goto chosen;
     }
     for (code = 1; code < 3; code++) {
-        status = trial(sizes, code, width_set, block, head, coded, coded_cap, &coded_len[code], error);
+        status = trial(sizes, code, width_set, block, head, coded, coded_cap, &coded_len[code], choice, error);
         if (status != ADAPT_OK) {
             return status;
         }
@@ -956,11 +965,11 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         size_t favorite = coded_len[candidate], band = none / CLASS_BAND;
         if (favorite <= none + band && favorite + band >= none) {
             size_t without, with;
-            status = trial(sizes, 0, width_set, block, n, coded, coded_cap, &without, error);
+            status = trial(sizes, 0, width_set, block, n, coded, coded_cap, &without, choice, error);
             if (status != ADAPT_OK) {
                 return status;
             }
-            status = trial(sizes, candidate, width_set, block, n, coded, coded_cap, &with, error);
+            status = trial(sizes, candidate, width_set, block, n, coded, coded_cap, &with, choice, error);
             if (status != ADAPT_OK) {
                 return status;
             }
@@ -991,7 +1000,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         size_t choice_size = SET_MARGIN(full);
         for (code = 1; code < ADAPT_FAST_SETS; code++) {
             size_t size;
-            status = trial(sizes, class_code, code, block, head, coded, coded_cap, &size, error);
+            status = trial(sizes, class_code, code, block, head, coded, coded_cap, &size, choice, error);
             if (status != ADAPT_OK) {
                 return status;
             }
@@ -1001,7 +1010,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
             }
         }
         if (deep) {
-            status = prove_set(sizes, class_code, &set_code, block, n, coded, coded_cap, &whole, &have_whole, error);
+            status = prove_set(sizes, class_code, &set_code, block, n, coded, coded_cap, &whole, &have_whole, choice, error);
             if (status != ADAPT_OK) {
                 return status;
             }
@@ -1027,7 +1036,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
                 if (k > 0 && !deep) {
                     break;
                 }
-                status = trial(sizes, class_code, code, block, head, coded, coded_cap, &size, error);
+                status = trial(sizes, class_code, code, block, head, coded, coded_cap, &size, choice, error);
                 if (status != ADAPT_OK) {
                     return status;
                 }
@@ -1046,7 +1055,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
             }
         }
         if (deep) {
-            status = prove_set(sizes, class_code, &set_code, block, n, coded, coded_cap, &whole, &have_whole, error);
+            status = prove_set(sizes, class_code, &set_code, block, n, coded, coded_cap, &whole, &have_whole, choice, error);
             if (status != ADAPT_OK) {
                 return status;
             }
@@ -1930,6 +1939,9 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
     uint32_t crc = CRC32_INIT;
     uint64_t input_bytes = 0;
     uint64_t output_bytes = ADAPT_HEADER_BYTES;
+    /* the first block's trials, for the stats */
+    uint32_t trials = 0;
+    uint64_t trial_bytes = 0;
     size_t n, framed_cap = ADAPT_BLOCK_HEADER_BYTES + ADAPT_BLOCK_BYTES + CODED_SLACK;
     uint8_t header[ADAPT_HEADER_MAX_BYTES];
     size_t header_len;
@@ -1997,6 +2009,8 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         sizes.lean = (uint8_t)(sizes.max && !sizes.adaptive && !sizes.bmp);
     }
     sizes.keys = ADAPT_KEYS_CLASSIC;
+    trials = 0;
+    trial_bytes = 0;
     if (n == 0 || (entropy_256(block, n) >= SKIP_ENTROPY_256 && !repeats_within(block, n, scan))) {
         sizes.class_code = 0;
         sizes.set_code = sizes.contexts == ADAPT_CONTEXTS_LEAN ? 3 : 0;
@@ -2011,6 +2025,8 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         sizes.set_code = choice.set_code;
         sizes.period = choice.period;
         sizes.keys = choice.keys;
+        trials = choice.trials;
+        trial_bytes = choice.trial_bytes;
     }
     /* Machine code goes through the branch transform, when the budget
      * holds the extra block the proof needs; otherwise it is declined. */
@@ -2226,6 +2242,13 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         stats->segments = sizes.segmented ? (uint32_t)segments.count : 1;
         /* the workers that coded: never more than there were segments */
         stats->workers = workers >= 2 && sizes.segmented ? (uint32_t)(workers < segments.count ? workers : segments.count) : 1;
+        stats->class_code = sizes.class_code;
+        stats->set_code = sizes.set_code;
+        stats->keys = sizes.keys;
+        stats->lean = sizes.lean;
+        stats->period = sizes.period;
+        stats->trials = trials;
+        stats->trial_bytes = trial_bytes;
     }
     status = fail(error, ADAPT_OK, 0, 0);
 done:
