@@ -2,6 +2,90 @@
 
 Decisions that are settled. A change to any of them is a new entry, not an edit.
 
+## 2026-09-16 — The max profile's arbiters keyed by the byte classes: bytes at the same time and memory
+
+**Decision (operator, 2026-09-16: "capture speed benefit and if possible
+improve on ratio without compromising on memory").** The second, third
+and fourth arbiters of the max profile take one of three key policies
+(`adapt_sizes.keys`): the classic keys — the previous byte, eight bits
+of the order-2 hash, eight bits of the word so far — or the text policy
+(`ADAPT_KEYS_TEXT`: the second by the last two and two thirds byte
+classes, the third by the last five classes hashed, the fourth by the
+nesting state with the last tag and two classes) or the binary policy
+(`ADAPT_KEYS_BINARY`: the second as before, the third by the five
+classes, the fourth by recall's expected byte and state). The encoder
+tries the two keyed policies on the first block's 32 KiB sample once
+the width and the set are chosen (`choose_keys` in adapt_encode.c;
+the classic keys' size there comes from the width and set trials when
+one coded exactly that width and set, else from one more trial) and
+takes the smallest when it beats the classic keys — by 1/512 on a
+block longer than two samples, outright when the sample is the whole
+block. A whole-block proof, as the width and the set have, changed no
+decision on any of the 23 corpus rows and cost the small ones a third
+of their time, so the sample decides. Versions 80 (text) and 81
+(binary), 82 and 83 with
+metadata, carry version 72's model and sizing byte; the classic keys
+keep writing 72, so no file is written larger than before and every
+earlier file decodes as written. `cadapt info` prints "arbiter keys".
+The normal profile is untouched (its arbiters would gain as much — the
+default command's corpus rows measured up to 3 % — but need four more
+versions; a following entry).
+
+**Origin (DLV-4).** Selecting a mixer's weight set by a small context
+is the PAQ family's (Mahoney, *Data Compression Explained*, "Mixing");
+which state keys which arbiter here was measured on this codec.
+
+**How it was found.** A component map of the locked baseline on the
+8 MiB proxy (each part left out, the class width pinned): the fifteen
+kinds of the lean set each cost 0.06–0.55 % and no cycles (dropping any
+one left cycles per bit at 727–746 against 736); the second and third
+arbiters 0.22 % each, the fifth with its slots 0.46 % at 34 cycles, the
+two estimation stages 0.46 % at 21, the run memories 0.95 % at 101,
+recall 1.29 % at 63 — and the fourth arbiter, keyed by the word so far,
+*nothing*: without it 121 bytes fewer at 15 cycles less. Its dot and
+train being paid for, it was re-keyed: fourteen keys tried, the class
+history's hash −0.20 %, the nesting state −0.16 %; the exact classes
+of the last five bytes −0.50 %, then the same on the third arbiter and
+the classes on the second, the nesting state on the fourth.
+
+**Measured** on the reference host, quiet, encode alone with
+`--no-verify`, every round trip verified byte for byte (the proxy by
+`perf stat`, cycles per bit):
+
+| | classic keys | keyed | Δ |
+|---|---|---|---|
+| 8 MiB proxy, lean baseline | 1,681,725 B at 736 cyc/bit | 1,669,716 B (text keys) at 733–750 | −0.71 %, time equal |
+| 16 MiB proxy, lean baseline | 3,258,121 B | 3,236,535 B | −0.66 % |
+| enwik8, lean baseline | 17,902,645 B in 107.4 CPU s | 17,800,141 B in 110.8 (median of 3; interleaved A/B on 16 MiB: 676–682 against 682–686 cycles per bit) | −0.57 %, time equal |
+| enwik9, lean baseline | 146,797,785 B in 1,056.2 CPU s | 145,784,134 B in 1,054.0 | −0.69 %, time equal |
+
+The mixed corpus under `--max --allocation context -6` (`make
+corpus-floor`, every row's round trip verified): 19 of the 23 rows
+smaller, 4 at their floor to the byte (fields.c, grammar.lsp, ptt5 and
+mr, where the classic keys won the sample), none larger; together
+39,694,991 -> 39,458,213 B (-0.60 %): nci -2.84 %, webster -1.37 %,
+kennedy.xls -2.42 %, mozilla -0.58 %, reymont -0.65 %, the Canterbury
+texts -0.5 to -0.8 %, sao -0.20 %, x-ray -0.25 %. Ten rows took the
+binary keys, nine the text keys (`cadapt info`). The default
+command's rows are byte for byte unchanged, and so are the normal, fast
+and mid streams on the proxy.
+
+**Consequences.**
+- The floors of `tools/ratio_floor.json` and `tools/corpus_floor_max6.json`
+  are re-locked on the smaller containers; the throughput floors stay
+  where measured equal (two or three sample trials on the first block
+  are the whole cost: on the smallest corpus rows, whose time is the
+  model's allocation, up to a tenth more; on a file of a megabyte,
+  nothing).
+- A key change is a version, never a policy: the four versions are
+  pinned by `text-max3.adpt` and `abc-max3.adpt`; `text-max2.adpt` and
+  `abc-max2.adpt` stay as version 72's fixtures.
+- The same keys on the normal profile, and other states as keys (the
+  first and fifth arbiters and the estimation stages measured nothing
+  worth a version: at most 0.06 %), are open.
+
+**Status.** Landed 2026-09-16.
+
 ## 2026-09-16 — `--mid`: a third profile, the normal tables under seven fixed contexts and one arbiter
 
 **Decision (operator, 2026-09-16: "do not abandon, merge into main").**

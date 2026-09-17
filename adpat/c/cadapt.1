@@ -157,10 +157,16 @@ Not with
 .BR \-\-adaptive ", " "\-\-transform bmp" " or " "\-\-contexts lean" .
 .TP
 .B \-\-max
-Twenty hashed contexts with three inputs each, six run models, four
+Twenty hashed contexts with three inputs each, six run models, five
 arbiters, a second estimation stage four times the normal one.
 Writes fewer bytes for about 1.8 times the time in the same memory.
-Version 21 (24 with metadata).
+The second, third and fourth arbiters take one of three key policies,
+chosen per file on the first block: the classic keys (the previous byte,
+the order-2 hash, the word so far; version 72, 75 with metadata), the
+byte classes with the nesting state (80, 82) or the classes with recall
+(81, 83); info names the choice as
+.IR "arbiter keys" .
+Versions 21 and 24 are read.
 .TP
 .BR \-\-adaptive " " rates | sparse | retained | auto
 Experimental causal predictors layered over the normal or max profile;
@@ -296,10 +302,10 @@ a change may only improve on these:
 l r r r.
 fixture	input	container floor	time floor
 _
-enwik8-8MiB	8,388,608	1,681,725	10.7 CPU s
-enwik8-16MiB	16,777,216	3,258,121	19.8 CPU s
-enwik8	100,000,000	17,902,645	107.4 CPU s
-enwik9	1,000,000,000	146,797,785	1,056.2 CPU s
+enwik8-8MiB	8,388,608	1,669,716	10.7 CPU s
+enwik8-16MiB	16,777,216	3,236,535	19.8 CPU s
+enwik8	100,000,000	17,800,141	107.4 CPU s
+enwik9	1,000,000,000	145,784,134	1,054.0 CPU s
 .TE
 .\" floors:end
 .TP
@@ -490,7 +496,11 @@ pressure-gated model2 policy; 21, 24, 53, 54, 56 and 57 remain readable; 62 to 6
 fast, max, compact and lean models, 67 to 71 with metadata, of which the
 max ones (64 to 66, 69 to 71) are read and no longer written; 76 and 77
 are the mid profile, plain and under the text transform, 78 and 79 the
-same with metadata.
+same with metadata; 80 and 81 are the sized max profile of 72 with its
+second, third and fourth arbiters keyed by the byte classes and the
+nesting state (80) or by the classes and recall (81), a choice the
+encoder makes per file on the first block, 82 and 83 the same with
+metadata.
 For historical 58/61 model2 files below a table of 2^21 blocks, the decoder
 checks both historical predictors sequentially, using temporary disk for
 a consumed input prefix and tentative output. It emits bytes only after

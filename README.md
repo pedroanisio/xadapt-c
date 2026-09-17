@@ -23,7 +23,9 @@ are read and no longer written). Every `--max` encode is now the sized
 version 72 (75 with metadata), its sizing byte's bit 7 naming the second max model —
 int16 arbiters, four re-purposed context slots, four-way recall buckets
 and a fifth arbiter (the `Second max model` entry in `LOCKS.md`) — so
-21, 24, 53, 54, 56 and 57 are read and no longer written. The mid
+21, 24, 53, 54, 56 and 57 are read and no longer written; a max encode
+whose first block prefers the class-keyed arbiters writes 80 or 81 (82,
+83 with metadata) instead. The mid
 profile writes 76 (78 with metadata), 77 (79) under the text transform. The decoder
 reads every version ever published; versions 10–18 and the unused
 numbers (55, 59, 60, 73, 74) are refused. The CLI uses native filesystem APIs to
@@ -151,8 +153,14 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   in 29 % less encode time and 24 % less decode time, 2.4 % more on
   enwik9 in 28 % and 26 % less; 2.1 to 2.4 times faster than `--max`
   for 4.8 % (enwik8) to 17.5 % (enwik9) more bytes. `--max`
-  writes the max profile (version 21 or 24): ten more contexts, run memories and a wider
+  writes the max profile (versions 72, 80 or 81; 75, 82 or 83 with
+  metadata): ten more contexts, run memories and a wider
   second estimation stage, fewer bytes for about 1.8 times the time; its
+  second, third and fourth arbiters take one of three key policies —
+  classic, the byte classes with the nesting state, or the classes with
+  recall — whichever the first block prefers (`cadapt info` names it as
+  `arbiter keys`), the class keys writing 0.7 % fewer bytes on text at
+  the same time and memory; its
   smallest model is larger (`--help` prints both minimums), so the low tiers
   clamp higher under `--max`.
 - `--verify` proves the output as it is written, with a second model
@@ -487,6 +495,7 @@ stays readable (`DLV-1` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)):
 | 62 / 63 | normal / fast, text transform | 67 / 68 | the book of words built as the file is coded |
 | 64–66 | max, compact, lean, text transform | 69–71 | read only: the max profile writes 72 (75) under the transform |
 | 76 / 77 | mid, plain / under the text transform | 78 / 79 | the normal profile's tables, seven fixed contexts, one arbiter |
+| 80 / 81 | max, sized, the arbiters keyed by the byte classes and nesting / by the classes and recall | 82 / 83 | version 72's model and sizing byte; the encoder picks the key policy per file on the first block, 72 when the classic keys win |
 | 55, 59, 60 | refused | — | no format |
 
 The encoder writes 19–24 by default, 53/54 (56/57) when a small tier under
@@ -585,10 +594,10 @@ improve on these (`make gate` checks the first, `make ratio-floor` the rest):
 
 | Fixture | Input | Container floor | Time floor |
 |---|---:|---:|---:|
-| enwik8-8MiB | 8,388,608 B | 1,681,725 B | 10.7 CPU s |
-| enwik8-16MiB | 16,777,216 B | 3,258,121 B | 19.8 CPU s |
-| enwik8 | 100,000,000 B | 17,902,645 B | 107.4 CPU s |
-| enwik9 | 1,000,000,000 B | 146,797,785 B | 1,056.2 CPU s |
+| enwik8-8MiB | 8,388,608 B | 1,669,716 B | 10.7 CPU s |
+| enwik8-16MiB | 16,777,216 B | 3,236,535 B | 19.8 CPU s |
+| enwik8 | 100,000,000 B | 17,800,141 B | 107.4 CPU s |
+| enwik9 | 1,000,000,000 B | 145,784,134 B | 1,054.0 CPU s |
 <!-- floors:end -->
 
 Their thresholds and verification behavior

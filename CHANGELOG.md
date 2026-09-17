@@ -51,6 +51,12 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Changed
 
+- The floors re-locked on the keyed-arbiters binary (LOCKS.md,
+  2026-09-16): enwik8-8MiB 1,669,716 B, enwik8-16MiB 3,236,535 B, enwik8
+  17,800,141 B, enwik9 145,784,134 B in 1,054.0 CPU s (the enwik8 rows'
+  throughput floors stand: equal in the interleaved comparison); the
+  `--max -6` mixed-corpus floors lowered on 19 of 23 rows (39,694,991 ->
+  39,458,213 B in total), the default command's unchanged.
 - The locked baseline: `tools/ratio_floor.json` names `encode --max
   --allocation context --contexts lean` and its floors are re-locked on
   that command (enwik8 17,902,645 B in 117.1 CPU s, enwik9 146,797,785 B;
@@ -59,6 +65,22 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Added
 
+- The max profile's arbiters keyed by the byte classes (`adapt_sizes.keys`,
+  versions 80/81, 82/83 with metadata; `ADAPT_MAX_KEYS_VERSION`): the
+  second, third and fourth arbiters' weight sets are chosen by other state
+  than before — the third by the classes of the last five bytes under both
+  new policies; under the text policy the second by the last two and two
+  thirds classes and the fourth by the nesting state with the last tag
+  and two classes, under the binary policy the fourth by recall's expected
+  byte and state. The encoder tries both against the classic keys on the
+  first block's sample (`choose_keys`) and keeps version 72 where the
+  classic keys win, so no file is written larger than before; every
+  earlier version decodes as written. `cadapt info` prints the choice as
+  `arbiter keys`. Same tables, memory and cycles: on the 8 MiB proxy of
+  the locked baseline 1,681,725 -> 1,669,716 B (-0.71 %); the enwik8,
+  enwik9 and mixed-corpus figures are in LOCKS.md. The idea is the
+  mixer-selection context of the PAQ family (Mahoney, *Data Compression
+  Explained*), the keys this codec's own (DLV-4).
 - `--mid` on encode (`adapt_sizes.mid`, `adapt_sizes_mid()`): a third
   profile between `--fast` and the default, versions 76/77 (plain, under
   the text transform) and 78/79 with metadata. It runs the normal

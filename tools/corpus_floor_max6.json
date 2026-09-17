@@ -1,6 +1,6 @@
 {
   "schema": "cadapt.ratio-floor.v1",
-  "locked_on": "2026-09-15",
+  "locked_on": "2026-09-16",
   "host": "AMD Ryzen 5 5600X 6-Core Processor",
   "arguments": [
     "encode",
@@ -15,19 +15,19 @@
       "fixture": "silesia/dickens",
       "input_bytes": 10192446,
       "input_md5": "88334708559f6db57d79096bc0aca07e",
-      "max_container_bytes": 2116336,
+      "max_container_bytes": 2111732,
       "wall_seconds": 13.34,
       "min_bytes_per_second": 764308.9190428917,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs; lowered 2026-09-15 to 2,124,454 B with the max profile's 1/32 arbiter start under the text transform (sizing bit 6 of versions 58/61), make corpus-floor on an Intel Xeon container, round trip verified | 2026-09-15: lowered to 2,118,816 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-15: lowered to 2,116,336 B with the class-history width proved on the whole first block (an encoder policy, no format change), make corpus-floor on AMD Ryzen 5 5600X, quiet host, --verify, round trip verified; the throughput floor is unchanged"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs; lowered 2026-09-15 to 2,124,454 B with the max profile's 1/32 arbiter start under the text transform (sizing bit 6 of versions 58/61), make corpus-floor on an Intel Xeon container, round trip verified | 2026-09-15: lowered to 2,118,816 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-15: lowered to 2,116,336 B with the class-history width proved on the whole first block (an encoder policy, no format change), make corpus-floor on AMD Ryzen 5 5600X, quiet host, --verify, round trip verified; the throughput floor is unchanged | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 2,111,732 B"
     },
     {
       "fixture": "silesia/mozilla",
       "input_bytes": 51220480,
       "input_md5": "c7789a2097f1ff944b0c737430a339b3",
-      "max_container_bytes": 12229194,
+      "max_container_bytes": 12158021,
       "wall_seconds": 92.29,
       "min_bytes_per_second": 555013.2862641896,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 12,229,194 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 12,229,194 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 12,158,021 B"
     },
     {
       "fixture": "silesia/mr",
@@ -42,109 +42,109 @@
       "fixture": "silesia/nci",
       "input_bytes": 33553445,
       "input_md5": "31f85bc8706f3c921104e7c169e2e2e1",
-      "max_container_bytes": 1170222,
+      "max_container_bytes": 1137002,
       "wall_seconds": 45.63,
       "min_bytes_per_second": 735278.9047647441,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 1,170,222 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 1,170,222 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 1,137,002 B"
     },
     {
       "fixture": "silesia/ooffice",
       "input_bytes": 6152192,
       "input_md5": "573c4ae915e36631d8f2dcffb9b9b66d",
-      "max_container_bytes": 1705298,
+      "max_container_bytes": 1698799,
       "wall_seconds": 12.9,
       "min_bytes_per_second": 476972.80524378567,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 1,705,298 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 1,705,298 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 1,698,799 B"
     },
     {
       "fixture": "silesia/osdb",
       "input_bytes": 10085684,
       "input_md5": "e734b0c48e6a982adfb5802da3032ecd",
-      "max_container_bytes": 2160381,
+      "max_container_bytes": 2152562,
       "wall_seconds": 26.28,
       "min_bytes_per_second": 383810.1282944245,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 2,160,381 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 2,160,381 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 2,152,562 B"
     },
     {
       "fixture": "silesia/reymont",
       "input_bytes": 6627202,
       "input_md5": "d8f54d78105079775f32d76dc55fc671",
-      "max_container_bytes": 920670,
+      "max_container_bytes": 914721,
       "wall_seconds": 11.67,
       "min_bytes_per_second": 567898.3012237828,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 920,670 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 920,670 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 914,721 B"
     },
     {
       "fixture": "silesia/samba",
       "input_bytes": 21606400,
       "input_md5": "154eaea7ea70e89f6339ff0abf4112ca",
-      "max_container_bytes": 2948585,
+      "max_container_bytes": 2940041,
       "wall_seconds": 36.31,
       "min_bytes_per_second": 595119.0434494637,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 2,954,116 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-15: lowered to 2,948,585 B with the class-history width proved on the whole first block (an encoder policy, no format change), make corpus-floor on AMD Ryzen 5 5600X, quiet host, --verify, round trip verified; the throughput floor is unchanged"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 2,954,116 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-15: lowered to 2,948,585 B with the class-history width proved on the whole first block (an encoder policy, no format change), make corpus-floor on AMD Ryzen 5 5600X, quiet host, --verify, round trip verified; the throughput floor is unchanged | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 2,940,041 B"
     },
     {
       "fixture": "silesia/sao",
       "input_bytes": 7251944,
       "input_md5": "79e95a22e18cd82b7e42bf91b380d30b",
-      "max_container_bytes": 4340261,
+      "max_container_bytes": 4331736,
       "wall_seconds": 15.49,
       "min_bytes_per_second": 468214.1116421045,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 4,340,261 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 4,340,261 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 4,331,736 B"
     },
     {
       "fixture": "silesia/webster",
       "input_bytes": 41458703,
       "input_md5": "474931ad907ac27bf962c75ded46c069",
-      "max_container_bytes": 5713493,
+      "max_container_bytes": 5635171,
       "wall_seconds": 56.23,
       "min_bytes_per_second": 737246.3722843685,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs; lowered 2026-09-15 to 5,829,070 B with the max profile's 1/32 arbiter start under the text transform (sizing bit 6 of versions 58/61), make corpus-floor on an Intel Xeon container, round trip verified | 2026-09-15: lowered to 5,713,493 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs; lowered 2026-09-15 to 5,829,070 B with the max profile's 1/32 arbiter start under the text transform (sizing bit 6 of versions 58/61), make corpus-floor on an Intel Xeon container, round trip verified | 2026-09-15: lowered to 5,713,493 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 5,635,171 B"
     },
     {
       "fixture": "silesia/x-ray",
       "input_bytes": 8474240,
       "input_md5": "9baec32ad14ec3eff487d254382cb91c",
-      "max_container_bytes": 3584560,
+      "max_container_bytes": 3575690,
       "wall_seconds": 14.5,
       "min_bytes_per_second": 584275.2834835442,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 3,584,560 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 3,584,560 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 3,575,690 B"
     },
     {
       "fixture": "silesia/xml",
       "input_bytes": 5345280,
       "input_md5": "9b09c0c80104adb8aae910b7d7db003e",
-      "max_container_bytes": 298627,
+      "max_container_bytes": 297334,
       "wall_seconds": 8.28,
       "min_bytes_per_second": 645473.7203850882,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 298,627 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 298,627 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 297,334 B"
     },
     {
       "fixture": "canterbury/alice29.txt",
       "input_bytes": 152089,
       "input_md5": "74c3b556c76ea0cfae111cdb64d08255",
-      "max_container_bytes": 36631,
+      "max_container_bytes": 36420,
       "wall_seconds": 1.4,
       "min_bytes_per_second": 108772.42900295187,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 36,631 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 36,631 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 36,420 B"
     },
     {
       "fixture": "canterbury/asyoulik.txt",
       "input_bytes": 125179,
       "input_md5": "2183e4e23c67c1dcc6cb84e13d8863bf",
-      "max_container_bytes": 34207,
+      "max_container_bytes": 33968,
       "wall_seconds": 1.2,
       "min_bytes_per_second": 104425.82392586184,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 34,207 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 34,207 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 33,968 B"
     },
     {
       "fixture": "canterbury/cp.html",
       "input_bytes": 24603,
       "input_md5": "d4b4e81b46ae7a3cbc2b733bbd6d8cc8",
-      "max_container_bytes": 6296,
+      "max_container_bytes": 6246,
       "wall_seconds": 0.34,
       "min_bytes_per_second": 72022.83624263492,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 6,296 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 6,296 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 6,246 B"
     },
     {
       "fixture": "canterbury/fields.c",
@@ -168,28 +168,28 @@
       "fixture": "canterbury/kennedy.xls",
       "input_bytes": 1029744,
       "input_md5": "b408d2207b18aba5a378548698735d64",
-      "max_container_bytes": 13481,
+      "max_container_bytes": 13155,
       "wall_seconds": 2.73,
       "min_bytes_per_second": 376795.33360535756,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 13,481 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 13,481 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 13,155 B"
     },
     {
       "fixture": "canterbury/lcet10.txt",
       "input_bytes": 426754,
       "input_md5": "5d69b132c7929dec190daa69f081d472",
-      "max_container_bytes": 88207,
+      "max_container_bytes": 87738,
       "wall_seconds": 2.25,
       "min_bytes_per_second": 189631.5490607867,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 88,207 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 88,207 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 87,738 B"
     },
     {
       "fixture": "canterbury/plrabn12.txt",
       "input_bytes": 481861,
       "input_md5": "4655507b26054b80b98bac2b44d8200f",
-      "max_container_bytes": 126059,
+      "max_container_bytes": 125448,
       "wall_seconds": 1.17,
       "min_bytes_per_second": 412941.5323203063,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 126,059 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 126,059 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 125,448 B"
     },
     {
       "fixture": "canterbury/ptt5",
@@ -204,19 +204,19 @@
       "fixture": "canterbury/sum",
       "input_bytes": 38240,
       "input_md5": "0d347e6c137c15616ee2becc0123e0a3",
-      "max_container_bytes": 9464,
+      "max_container_bytes": 9415,
       "wall_seconds": 0.44,
       "min_bytes_per_second": 87605.34856050751,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 9,464 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 9,464 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 9,415 B"
     },
     {
       "fixture": "canterbury/xargs.1",
       "input_bytes": 4227,
       "input_md5": "7bcc27abddbcc8dc56d9b1950ce93a69",
-      "max_container_bytes": 1584,
+      "max_container_bytes": 1579,
       "wall_seconds": 0.08,
       "min_bytes_per_second": 51539.06677587281,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 1,584 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified"
+      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 1,584 B on the second max model binary (sha256 6f3d063e7b24cf02\u2026, the pressure-gated model), tools/check_ratio_floor.py --verify, round trip verified | 2026-09-16: lowered on the keyed-arbiters binary (versions 80-83: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 1,579 B"
     }
   ]
 }

@@ -42,6 +42,12 @@ static int header_is_mid(const uint8_t *header) {
     return header[4] >= ADAPT_MID_VERSION && header[4] <= ADAPT_TEXT_MID_METADATA_VERSION;
 }
 
+/* The keyed max profile's four versions: the text and binary key
+ * policies, each with metadata (ADAPT_KEYS_METADATA_OFFSET on). */
+static int header_is_keyed(const uint8_t *header) {
+    return header[4] >= ADAPT_MAX_KEYS_VERSION && header[4] <= ADAPT_MAX_KEYS_BINARY_METADATA_VERSION;
+}
+
 static int header_has_bmp(const uint8_t *header) {
     return (header[4] >= ADAPT_BMP_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
            (header[4] >= ADAPT_MAX_BMP_VERSION && header[4] <= ADAPT_MAX_BMP_METADATA_LAST_VERSION);
@@ -53,6 +59,7 @@ int adapt_header_has_metadata(const uint8_t *header) {
                               header[4] == ADAPT_MAX_SIZED_METADATA_VERSION || header[4] == ADAPT_MAX_PRESSURE_METADATA_VERSION ||
                               (header[4] >= ADAPT_TEXT_METADATA_VERSION && header[4] <= ADAPT_TEXT_METADATA_LAST_VERSION) ||
                               header[4] == ADAPT_MID_METADATA_VERSION || header[4] == ADAPT_TEXT_MID_METADATA_VERSION ||
+                              header[4] == ADAPT_MAX_KEYS_METADATA_VERSION || header[4] == ADAPT_MAX_KEYS_BINARY_METADATA_VERSION ||
                               (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
                               (header[4] >= ADAPT_MAX_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION) ||
@@ -62,7 +69,7 @@ int adapt_header_has_metadata(const uint8_t *header) {
 /* The sized max profile's versions carry the sizing byte. */
 static int header_is_sized(const uint8_t *fixed) {
     return fixed[4] == ADAPT_MAX_SIZED_VERSION || fixed[4] == ADAPT_MAX_SIZED_METADATA_VERSION ||
-           fixed[4] == ADAPT_MAX_PRESSURE_VERSION || fixed[4] == ADAPT_MAX_PRESSURE_METADATA_VERSION;
+           fixed[4] == ADAPT_MAX_PRESSURE_VERSION || fixed[4] == ADAPT_MAX_PRESSURE_METADATA_VERSION || header_is_keyed(fixed);
 }
 
 size_t adapt_header_len(const uint8_t *fixed) {
@@ -86,7 +93,8 @@ size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_
     }
     memcpy(out, header, len);
     out[4] = (uint8_t)(header[4] + (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET
-                                    : header_is_mid(header) ? ADAPT_MID_METADATA_OFFSET : 3));
+                                    : header_is_mid(header) ? ADAPT_MID_METADATA_OFFSET
+                                    : header_is_keyed(header) ? ADAPT_KEYS_METADATA_OFFSET : 3));
     crc = adapt_crc32(out, total - 4);
     for (i = 0; i < 4; i++) {
         out[total - 4 + i] = (uint8_t)(crc >> (8 * i));
@@ -139,11 +147,19 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
         version = (uint8_t)(version - (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET
-                                       : header_is_mid(header) ? ADAPT_MID_METADATA_OFFSET : 3));
+                                       : header_is_mid(header) ? ADAPT_MID_METADATA_OFFSET
+                                       : header_is_keyed(header) ? ADAPT_KEYS_METADATA_OFFSET : 3));
     }
     s.max = 0;
     s.text = 0;
     s.mid = 0;
+    s.keys = ADAPT_KEYS_CLASSIC;
+    if (version == ADAPT_MAX_KEYS_VERSION || version == ADAPT_MAX_KEYS_BINARY_VERSION) {
+        /* the keyed max profile: version 72's model and sizing byte with
+         * the arbiters' key policy the version names */
+        s.keys = (uint8_t)(version == ADAPT_MAX_KEYS_VERSION ? ADAPT_KEYS_TEXT : ADAPT_KEYS_BINARY);
+        version = ADAPT_MAX_PRESSURE_VERSION;
+    }
     if (version == ADAPT_TEXT_MID_VERSION) {
         s.text = ADAPT_TEXT_ON;
         version = ADAPT_MID_VERSION;

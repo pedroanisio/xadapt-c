@@ -253,6 +253,34 @@ extern "C" {
 #define ADAPT_MID_METADATA_OFFSET 2u
 #define ADAPT_MID_METADATA_VERSION 78u
 #define ADAPT_TEXT_MID_METADATA_VERSION 79u
+/* The max profile's arbiters keyed by the byte classes (adapt_sizes.keys,
+ * ADAPT_KEYS_TEXT and ADAPT_KEYS_BINARY): the sized max model of version
+ * 72 with the sets of its second, third and fourth arbiters chosen by
+ * other state. Under every earlier version the second arbiter's set is
+ * the previous byte, the third's eight bits of the order-2 hash, the
+ * fourth's eight bits of the word so far; measured on the first 8 MiB of
+ * enwik8 under the lean set, the fourth earned nothing there (dropped, 121
+ * bytes fewer) and the classes of the last bytes (byte_class in
+ * adapt_model.h: letter, capital, digit, space, ...) key all three
+ * better. ADAPT_KEYS_TEXT: the second by the last two and two thirds
+ * classes, the third by the last five hashed, the fourth by the nesting
+ * state with the last tag and two classes — 1,681,725 -> 1,669,716 bytes
+ * (-0.71 %) at the same cycles, memory and tables. ADAPT_KEYS_BINARY: the
+ * second as before, the third by the five classes, the fourth by recall's
+ * expected byte and state — what the star catalogue sao and the C source
+ * of the mixed corpus prefer. The encoder tries both against the classic
+ * keys on the first block's sample (choose_keys) and writes version 72
+ * for the classic keys, so no file is written larger than before; 80 and
+ * 81 carry the sizing byte of 72, 82 and 83 the same with metadata
+ * (ADAPT_KEYS_METADATA_OFFSET). */
+#define ADAPT_MAX_KEYS_VERSION 80u
+#define ADAPT_MAX_KEYS_BINARY_VERSION 81u
+#define ADAPT_KEYS_METADATA_OFFSET 2u
+#define ADAPT_MAX_KEYS_METADATA_VERSION 82u
+#define ADAPT_MAX_KEYS_BINARY_METADATA_VERSION 83u
+#define ADAPT_KEYS_CLASSIC 0u
+#define ADAPT_KEYS_TEXT 1u
+#define ADAPT_KEYS_BINARY 2u
 #define ADAPT_TEXT_AUTO 0u
 #define ADAPT_TEXT_ON 1u
 /* adapt_sizes.contexts: the encoder's choice of the context set. */
@@ -424,6 +452,11 @@ typedef struct adapt_sizes {
      * names its set), compact, lean and model2 are 0. adapt_sizes_mid
      * turns normal sizes to it, as `adapt encode --mid` does. */
     uint8_t mid;
+    /* The arbiters' key policy under the max profile: ADAPT_KEYS_CLASSIC,
+     * ADAPT_KEYS_TEXT or ADAPT_KEYS_BINARY (ADAPT_MAX_KEYS_VERSION). Chosen
+     * by the encoder on the first block, read from the version; 0 under
+     * every other profile and under `adaptive` and `bmp`. */
+    uint8_t keys;
     /* The record period in bytes, or 0; found by the encoder on the first
      * block's sample (adapt_detect_period), carried after the fixed header
      * when nonzero, always 0 under the fast profile. */
