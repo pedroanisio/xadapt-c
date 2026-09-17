@@ -191,7 +191,16 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   the tier at -6: 87 MiB of 94) and the time of `--allocation context` (the
   same at -0 and -1, 5–11 % more at `--max -6`, where sao goes from
   4,346,612 to 4,331,736, the locked gate row); `--mid` and the normal
-  profile at those tiers size alike either way. Both use
+  profile at those tiers size alike either way. The rule is a bet that a
+  table under its target is starved, and two files refute it: on every
+  Silesia row at `--max -6` the rule fires, wins ten (webster −1.92 %,
+  mozilla −1.66 %, ooffice −1.62 %, samba −1.48 %, dickens −1.41 %, …)
+  and loses nci (+2.40 %) and reymont (+0.78 %), −1.13 % over the twelve
+  for 2.6 % more time — on those two a 2^20-block table beats every larger
+  one at the same window and recall (reymont 907,794 → 914,264 at 2^21;
+  nci 1,110,376 → 1,127,757), the small table's evictions acting as the
+  forgetting the counters lack. `--allocation window` keeps the old
+  sizes for such a file. Both use
   existing header fields and compose with the profiles and candidate search.
   Under `--max`, a tier that would stop the table at 2^22 blocks or fewer,
   short of the input's target, buys a table twice the size with compact side

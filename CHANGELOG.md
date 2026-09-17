@@ -71,6 +71,14 @@ The binary reports `0.12.0`; the tag is pending.
   from a single exit, the whole-block set proof shared by the fast and
   normal set choices (`prove_set`); `adapt_sizes` floors use designated
   initializers. Bytes identical.
+- The folder side's refusals are tested: an entry the walker lists but
+  the packer cannot open (a file or a directory without permission)
+  refuses the folder by name and leaves nothing behind; a file that holds
+  fewer or more bytes than it was listed with refuses it as changed while
+  it was being coded (the encoder held inside its first entry through a
+  pipe nobody reads, so the change is certain to land between the listing
+  and the read); a destination whose parent refuses the staging directory
+  refuses the restore by the target's name.
 - `make check` builds the codec once before its parallel parts: the
   provenance part ran `make all` in the same build directory as the codec
   part, and two makes relinking `cadapt` at once left the safety suite

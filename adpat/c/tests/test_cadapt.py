@@ -6,6 +6,7 @@ and the file a pipe and a file encode to."""
 import os
 import random
 import re
+import select
 import shutil
 import stat
 import struct
@@ -1195,6 +1196,73 @@ class FolderTest(unittest.TestCase):
         self.assertEqual(encoded.returncode, 1, encoded.stderr)
         self.assertIn(b"not a directory, a regular file or a symbolic link", encoded.stderr)
         self.assertFalse((self.root / "x.adpt").exists())
+
+    @unittest.skipIf(os.name == "nt" or os.geteuid() == 0, "permission refusals need a user the kernel refuses")
+    def test_an_entry_that_cannot_be_read_refuses_the_folder_by_name(self) -> None:
+        """A folder is coded whole or not at all: an entry the walker can
+        list but the packer cannot open — a file without read permission,
+        a directory without any — refuses the folder, names the entry and
+        the reason, and leaves no output and no staging file behind."""
+        for path, mode, restore in (
+            (self.folder / "sub" / "deep" / "bin", 0, 0o644),
+            (self.folder / "sub" / "deep", 0, 0o755),
+        ):
+            with self.subTest(entry=path.relative_to(self.folder)):
+                path.chmod(mode)
+                try:
+                    encoded = self.run_codec("encode", self.folder, "-o", self.root / "x.adpt", "--no-verify")
+                finally:
+                    path.chmod(restore)
+                self.assertEqual(encoded.returncode, 1, encoded.stderr)
+                self.assertIn(f"{self.folder}: {path}: Permission denied".encode(), encoded.stderr)
+                self.assertFalse((self.root / "x.adpt").exists())
+                self.assertEqual([], [p for p in self.root.iterdir() if ".part" in p.name])
+
+    @unittest.skipIf(os.name == "nt", "the output is held back through a pipe")
+    def test_an_entry_that_changes_while_the_folder_is_coded_refuses_it(self) -> None:
+        """The listing fixes every entry's length before any byte is coded;
+        a file that then holds fewer or more bytes would make the archive
+        lie, so the packer refuses it by name. The encoder is held inside
+        its first entry — 3 MiB of noise whose output cannot fit a pipe
+        nobody reads — while the last entry is rewritten, so the change is
+        certain to land between the listing and the read."""
+        (self.folder / "a-first.bin").write_bytes(random.Random(1).randbytes(3 << 20))
+        last = self.folder / "z-last.txt"
+        listed = b"the last entry, listed with this length\n" * 4000
+        for change in (b"shorter now\n", listed + b"grown\n" * 100):
+            with self.subTest(change="shrinks" if len(change) < len(listed) else "grows"):
+                last.write_bytes(listed)
+                encoder = subprocess.Popen([str(CADAPT), "encode", str(self.folder), "-o", "-", "--no-verify", "--fast"],
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    readable, _, _ = select.select([encoder.stdout], [], [], TIMEOUT)
+                    self.assertTrue(readable, "the encoder wrote nothing")
+                    last.write_bytes(change)
+                    out, err = encoder.communicate(timeout=TIMEOUT)
+                finally:
+                    encoder.kill()
+                self.assertEqual(encoder.returncode, 1, err)
+                self.assertIn(f"{self.folder}: z-last.txt changed while it was being coded".encode(), err)
+                # bytes went to standard output before the failure was found: the report says they are not to be trusted
+                self.assertGreater(len(out), 0)
+
+    @unittest.skipIf(os.name == "nt" or os.geteuid() == 0, "permission refusals need a user the kernel refuses")
+    def test_a_destination_that_cannot_be_created_refuses_the_restore_by_name(self) -> None:
+        """A folder is restored into a staging directory beside its target;
+        a parent that refuses the staging directory refuses the restore
+        by the target's name, and leaves nothing behind."""
+        container = self.root / "tree.adpt"
+        self.assertEqual(self.run_codec("encode", self.folder, "-o", container, "--no-verify").returncode, 0)
+        parent = self.root / "sealed"
+        parent.mkdir()
+        parent.chmod(0o500)
+        try:
+            decoded = self.run_codec("decode", container, "-o", parent / "back")
+        finally:
+            parent.chmod(0o700)
+        self.assertEqual(decoded.returncode, 1, decoded.stderr)
+        self.assertIn(f"{parent / 'back'}: Permission denied".encode(), decoded.stderr)
+        self.assertEqual([], list(parent.iterdir()))
 
 
 class PresetTest(unittest.TestCase):
