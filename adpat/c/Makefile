@@ -46,17 +46,24 @@ all: $(LIB) $(BIN)
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/adapt_decode.o: adapt_decode.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h adapt_text.h | $(BUILD)
+# The model header and the sections it includes, in order: a change to any
+# of them rebuilds every unit that compiles the model.
+MODEL_H = adapt_model.h adapt_constants.h adapt_states.h adapt_coder.h adapt_tables.h adapt_model_state.h adapt_model_byte.h adapt_model_bit.h adapt_model_new.h adapt_blocks.h adapt_crc32.h
+
+$(BUILD)/adapt_decode.o: adapt_decode.c adapt.h $(MODEL_H) adapt_adaptive.h adapt_bmp.h adapt_text.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ adapt_decode.c
 
-$(BUILD)/adapt_encode.o: adapt_encode.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h adapt_text.h | $(BUILD)
+$(BUILD)/adapt_encode.o: adapt_encode.c adapt.h $(MODEL_H) adapt_adaptive.h adapt_bmp.h adapt_text.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ adapt_encode.c
 
 $(BUILD)/adapt_archive.o: adapt_archive.c adapt.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ adapt_archive.c
 
-$(BUILD)/cadapt.o: cadapt.c adapt.h cadapt_platform.h cadapt_fs.h | $(BUILD)
+$(BUILD)/cadapt.o: cadapt.c adapt.h cadapt_platform.h cadapt_fs.h cadapt_folder.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ cadapt.c
+
+$(BUILD)/cadapt_folder.o: cadapt_folder.c cadapt_folder.h cadapt_fs.h cadapt_platform.h adapt.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ cadapt_folder.c
 
 $(BUILD)/cadapt_fs.o: cadapt_fs.c cadapt_fs.h cadapt_platform.h adapt.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ cadapt_fs.c
@@ -73,8 +80,8 @@ $(BUILD)/test_adapt_archive.o: tests/test_adapt_archive.c adapt.h | $(BUILD)
 $(LIB): $(BUILD)/adapt_decode.o $(BUILD)/adapt_encode.o $(BUILD)/adapt_archive.o
 	$(AR) rcs $@ $(BUILD)/adapt_decode.o $(BUILD)/adapt_encode.o $(BUILD)/adapt_archive.o
 
-$(BIN): $(BUILD)/cadapt.o $(BUILD)/cadapt_fs.o $(LIB)
-	$(CC) $(CFLAGS) -o $@ $(BUILD)/cadapt.o $(BUILD)/cadapt_fs.o $(LIB) $(LDFLAGS)
+$(BIN): $(BUILD)/cadapt.o $(BUILD)/cadapt_folder.o $(BUILD)/cadapt_fs.o $(LIB)
+	$(CC) $(CFLAGS) -o $@ $(BUILD)/cadapt.o $(BUILD)/cadapt_folder.o $(BUILD)/cadapt_fs.o $(LIB) $(LDFLAGS)
 
 $(BUILD)/test_adapt_decode: $(BUILD)/test_adapt_decode.o $(LIB)
 	$(CC) $(CFLAGS) -o $@ $(BUILD)/test_adapt_decode.o $(LIB) $(LDFLAGS)
@@ -96,7 +103,7 @@ $(BUILD)/test_fuzz_decode: tests/test_fuzz_decode.c fuzz/fuzz_decode.c fuzz/fuzz
 $(BUILD)/test_adapt_text: tests/test_adapt_text.c adapt.h adapt_text.h | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ tests/test_adapt_text.c $(LDFLAGS)
 
-$(BUILD)/test_model_dispatch: tests/test_model_dispatch.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h | $(BUILD)
+$(BUILD)/test_model_dispatch: tests/test_model_dispatch.c adapt.h $(MODEL_H) adapt_adaptive.h adapt_bmp.h | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ tests/test_model_dispatch.c $(LDFLAGS)
 
 $(BUILD)/test_profile_conversion: tests/test_profile_conversion.c adapt.h $(LIB)
@@ -155,7 +162,7 @@ COV = $(BUILD)-cov
 # -O1: the instrumented per-bit path runs 1.6 times faster than at -O0 and
 # writes the same bytes; the branches gcov counts are the source's either way.
 COVFLAGS = -std=c99 -O1 --coverage -DADAPT_NO_MULTIVERSION -Wall -Wextra -Wpedantic -Werror $(THREADS)
-COVUNITS = adapt_decode adapt_encode adapt_archive cadapt cadapt_fs
+COVUNITS = adapt_decode adapt_encode adapt_archive cadapt cadapt_folder cadapt_fs
 
 # The suites run at once, each process writing its counts under its own
 # GCOV_PREFIX (GCOV_PREFIX_STRIP drops the object directory's path, so the
@@ -219,7 +226,7 @@ FUZZ_RUNS ?= 1000
 FUZZ_CFLAGS ?= -std=c99 -O1 -g -DADAPT_NO_MULTIVERSION -fsanitize=fuzzer,address,undefined \
                -fno-sanitize-recover=all -Wall -Wextra -Wpedantic -Werror
 
-$(BUILD)/fuzz_decode: fuzz/fuzz_decode.c fuzz/fuzz_decode.h adapt_decode.c adapt_encode.c adapt_archive.c adapt.h adapt_model.h adapt_adaptive.h adapt_bmp.h | $(BUILD)
+$(BUILD)/fuzz_decode: fuzz/fuzz_decode.c fuzz/fuzz_decode.h adapt_decode.c adapt_encode.c adapt_archive.c adapt.h $(MODEL_H) adapt_adaptive.h adapt_bmp.h | $(BUILD)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) adapt_decode.c adapt_encode.c adapt_archive.c fuzz/fuzz_decode.c -o $@
 
 fuzz: $(BUILD)/fuzz_decode

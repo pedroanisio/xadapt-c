@@ -1,6 +1,7 @@
 /*
  * cadapt_fs.h — the extended attributes and sparse map an archive entry
- * carries: what FMT-7 preserves of a file beyond its bytes, modes and times.
+ * carries, what FMT-7 preserves of a file beyond its bytes, and the modes
+ * and times themselves as the operating system reads and applies them.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  * Extracted from cadapt.c, 2026-09-17, unchanged.
@@ -54,5 +55,22 @@ int attr_apply(int fd, const char *name, const uint8_t *value, size_t len);
  * so a caller treats the file as one extent; -1 with errno set on failure.
  * The caller frees `*extents`. */
 int sparse_map(const char *path, uint64_t size, adapt_extent **extents, uint32_t *count);
+
+/* A path's metadata (adapt.h) — modes and times — captured before it is
+ * read or traversed, since reading changes the access time; links are
+ * examined without following them. Applied back after a restore: on
+ * Windows by path, and re-read to refuse a filesystem that clamped a date;
+ * elsewhere through a descriptor, checked by fstat, with the inherited
+ * ACLs cleared first since chmod changes an ACL's mask, not its entries.
+ * 0, or an errno. */
+int metadata_read_path(const char *path, int nofollow, adapt_metadata *m);
+#ifdef _WIN32
+int metadata_apply(const char *path, int symlink_entry, const adapt_metadata *m);
+#else
+int metadata_check_stat(const struct stat *st, const adapt_metadata *m);
+int metadata_times(const adapt_metadata *m, struct timespec times[2]);
+int metadata_apply_fd(int fd, const adapt_metadata *m);
+int clear_inherited_acl(int fd);
+#endif
 
 #endif /* CADAPT_FS_H */

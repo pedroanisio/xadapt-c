@@ -141,7 +141,14 @@ def prepare_fixtures(directory: Path, quick: bool) -> list[Path]:
     data["style.css"] = "\n".join(
         f".item-{i}{{color:#{i % 0xFFFFFF:06x};margin:{i % 31}px}}" for i in range(8192)
     ).encode()
-    data["source.c"] = (telemetry.ROOT / "adpat/c/adapt_model.h").read_bytes()
+    data["source.c"] = b"".join(
+        (telemetry.ROOT / "adpat/c" / name).read_bytes()
+        for name in (
+            "adapt_model.h", "adapt_constants.h", "adapt_states.h", "adapt_coder.h", "adapt_tables.h",
+            "adapt_model_state.h", "adapt_model_byte.h", "adapt_model_bit.h", "adapt_model_new.h",
+            "adapt_blocks.h", "adapt_crc32.h",
+        )
+    )
     data["binary.elf"] = (telemetry.ROOT / "adpat/c/build/cadapt").read_bytes()
     data["raw-bits.bin"] = random.Random(314159).randbytes(1 << 20)
     data["empty.bin"] = b""

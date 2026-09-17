@@ -69,7 +69,7 @@ class SlotPriceTest(unittest.TestCase):
 
     def test_the_kind_order_matches_the_codec(self):
         """A kind added to the codec must be added here before the tool runs."""
-        self.assertEqual(slot_price.read_kind_order(ROOT / "adpat/c/adapt_model.h"), slot_price.KINDS)
+        self.assertEqual(slot_price.read_kind_order(ROOT / "adpat/c/adapt_constants.h"), slot_price.KINDS)
 
     def test_every_kind_is_priced_against_the_baseline(self):
         out = self.scratch / "rows.json"

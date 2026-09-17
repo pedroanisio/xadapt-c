@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "adapt-0.12.0",
-  "documentNamespace": "urn:uuid:af573cc9-7266-54a7-84d7-c830c45b93ed",
+  "documentNamespace": "urn:uuid:679c70e4-5f9e-53c7-950c-362620f32bea",
   "creationInfo": {
-    "created": "2026-09-17T18:30:07Z",
+    "created": "2026-09-17T19:08:45Z",
     "creators": [
       "Tool: tools/provenance.py",
       "Person: Pedro Anisio de Luna e Silva (pedroanisio@faz.ai)"
@@ -22,18 +22,30 @@
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": true,
       "packageVerificationCode": {
-        "packageVerificationCodeValue": "bc3be820898948aec339faada4c534e0b46d754f"
+        "packageVerificationCodeValue": "a4ed19628894e9356dfd5d5988ea7fb334aff1f0"
       },
       "hasFiles": [
         "SPDXRef-File-adapt-h",
         "SPDXRef-File-adapt-adaptive-h",
         "SPDXRef-File-adapt-archive-c",
+        "SPDXRef-File-adapt-blocks-h",
         "SPDXRef-File-adapt-bmp-h",
+        "SPDXRef-File-adapt-coder-h",
+        "SPDXRef-File-adapt-constants-h",
+        "SPDXRef-File-adapt-crc32-h",
         "SPDXRef-File-adapt-decode-c",
         "SPDXRef-File-adapt-encode-c",
         "SPDXRef-File-adapt-model-h",
+        "SPDXRef-File-adapt-model-bit-h",
+        "SPDXRef-File-adapt-model-byte-h",
+        "SPDXRef-File-adapt-model-new-h",
+        "SPDXRef-File-adapt-model-state-h",
+        "SPDXRef-File-adapt-states-h",
+        "SPDXRef-File-adapt-tables-h",
         "SPDXRef-File-adapt-text-h",
         "SPDXRef-File-cadapt-c",
+        "SPDXRef-File-cadapt-folder-c",
+        "SPDXRef-File-cadapt-folder-h",
         "SPDXRef-File-cadapt-fs-c",
         "SPDXRef-File-cadapt-fs-h",
         "SPDXRef-File-cadapt-platform-h"
@@ -173,6 +185,28 @@
       "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
     },
     {
+      "fileName": "./adpat/c/adapt_blocks.h",
+      "SPDXID": "SPDXRef-File-adapt-blocks-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "10ca9adf739b82bc2db0de4aed661af119cd5af1"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "900f25784fb072fe6736f4c8218481e3698ba5a096d8df6d82cfb3e41a556f69"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
       "fileName": "./adpat/c/adapt_bmp.h",
       "SPDXID": "SPDXRef-File-adapt-bmp-h",
       "fileTypes": [
@@ -186,6 +220,72 @@
         {
           "algorithm": "SHA256",
           "checksumValue": "1c2517ba6a05ee609afde4292c1afabb94452f23d97aac90531d31dcca083d96"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/adapt_coder.h",
+      "SPDXID": "SPDXRef-File-adapt-coder-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "c6c9219aa232333c543bcf2af67c44a22c8e0458"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "2dbc4e694ca4b5cb9215d5737f6cd9cc9b405ababbf31516c994eeb9d95a322e"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/adapt_constants.h",
+      "SPDXID": "SPDXRef-File-adapt-constants-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "850fa04812382870048fb589006afcde0b7dada5"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e7fbe3159fdbb3e4727a8ec874a780c05f1e98ee6ad461442132d283f424ed27"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/adapt_crc32.h",
+      "SPDXID": "SPDXRef-File-adapt-crc32-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "8675b5585217fb3b4147c2593716da28e1744461"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "aae64471c1c1b9a9a10acee53adfe64d2b053d9532220047efcf902a90496b19"
         }
       ],
       "licenseConcluded": "MIT",
@@ -247,11 +347,143 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "01f7a5fa349cbef9010a010d892f2cfe29683f0d"
+          "checksumValue": "c8b5c4279a99b541b5a30777ad62facfb3052070"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "b4dd0a7c070d93447751821660338d43e2fcb19f01c69879b6ef64ad642625d4"
+          "checksumValue": "a9a84ced4bb5ac9b5aaf99bb73ce9eb197057576560e430c93a3789418900103"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/adapt_model_bit.h",
+      "SPDXID": "SPDXRef-File-adapt-model-bit-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "b66c2a75d832b671af039670cb9d0734c7199f7b"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "ba5d1cc7e1b976fb8a712d2b284263e0d1818e0260080c908427892b5dddf4eb"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/adapt_model_byte.h",
+      "SPDXID": "SPDXRef-File-adapt-model-byte-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "044d16d88a9a799351e1f8b843403eff986923d3"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "9791e9eeb83c9df41b3e69a42bbcc9f1382c47bd22acb9086540ce4fe9e69503"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/adapt_model_new.h",
+      "SPDXID": "SPDXRef-File-adapt-model-new-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "7a67bf2f223f738db8199d21689cc037dbb0c89f"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "351c3715cfaa06d6c2b29e64054390fe703ee8f9c2a95cee59b0f572d22c979e"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/adapt_model_state.h",
+      "SPDXID": "SPDXRef-File-adapt-model-state-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "dda3c9d2b446f69533bd1498b3d10f3f646cab66"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "d60d472663dfad2a08163f0f3a75562f66dba4e955a61408e349e794b1e7be71"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/adapt_states.h",
+      "SPDXID": "SPDXRef-File-adapt-states-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "041c456de0cc576492535c28fc4967eb34892045"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "7a6fdedf42f4ae59305e091738025d9b861999092ed615128b1f28b42ab25439"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/adapt_tables.h",
+      "SPDXID": "SPDXRef-File-adapt-tables-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "bcd9ce58cac1914cf2a06da9f83ecd2b0b5ad195"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "64b80ebad0ce491e4b47447851700b265b7b5bc2b7eaabc9754e0b777c86f3c5"
         }
       ],
       "licenseConcluded": "MIT",
@@ -291,11 +523,55 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "7e039b0bd50ea084888d94dd8ff3e2bbf01996b8"
+          "checksumValue": "bb69bc335a2f8d560c9d98424d037e436906883b"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "efb38f33c674ecff103bc06bcd52117af28dd502c0502323d060840c26833ad1"
+          "checksumValue": "fecd454579d7484a2be42b221359f53505d49556e482839e498b086dc34d2b68"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/cadapt_folder.c",
+      "SPDXID": "SPDXRef-File-cadapt-folder-c",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "3e7ce213c437ae08db4db7c39388001871b183e1"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "fc763ea9cdc143468e72499ca1e20bd3eb17198bc632313df3f3754839ef6028"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/cadapt_folder.h",
+      "SPDXID": "SPDXRef-File-cadapt-folder-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "1a4685448c0f966e298892fba806b08a805c7c7a"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "5fffeab87f00b8f947c28e76be8f0320bee74194ba990102199d02ecf77dd4c7"
         }
       ],
       "licenseConcluded": "MIT",
@@ -313,11 +589,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "9e4e6ca04b0b24ca5094aff6be335fe522fdf0b4"
+          "checksumValue": "ee46b2093e906e22fde6e11f0717078da1fa20fa"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "0aff0b5b6fcdb3709e4b72b73f735bbf6715602aada461426d54e87c1909db78"
+          "checksumValue": "370f8aac9edfee90c9f6741a2b9d2fe73469be4bbd3242d528e2c60ecbb67287"
         }
       ],
       "licenseConcluded": "MIT",
@@ -335,11 +611,11 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "d570858d95ddb3320d87622309314a9b153d97fe"
+          "checksumValue": "ec377e7f47f22475c72554c3baa58e0a96492820"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "f6ac27248c420aa758aa7263ebd0b4ef14b192ce89860373382d4980e776fb77"
+          "checksumValue": "3975565cfdf6b0b31e26659829fb704341b2206ab26080a56578cf4098854577"
         }
       ],
       "licenseConcluded": "MIT",
@@ -420,7 +696,27 @@
     {
       "spdxElementId": "SPDXRef-Package-adapt",
       "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-blocks-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
       "relatedSpdxElement": "SPDXRef-File-adapt-bmp-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-coder-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-constants-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-crc32-h"
     },
     {
       "spdxElementId": "SPDXRef-Package-adapt",
@@ -440,12 +736,52 @@
     {
       "spdxElementId": "SPDXRef-Package-adapt",
       "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-model-bit-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-model-byte-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-model-new-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-model-state-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-states-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-adapt-tables-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
       "relatedSpdxElement": "SPDXRef-File-adapt-text-h"
     },
     {
       "spdxElementId": "SPDXRef-Package-adapt",
       "relationshipType": "CONTAINS",
       "relatedSpdxElement": "SPDXRef-File-cadapt-c"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-cadapt-folder-c"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-cadapt-folder-h"
     },
     {
       "spdxElementId": "SPDXRef-Package-adapt",

@@ -4,7 +4,9 @@
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  * Extracted from cadapt.c, 2026-09-17: the code is unchanged, and the six
- * functions cadapt.c calls lost their `static`.
+ * functions cadapt.c calls lost their `static`. The metadata calls — a
+ * path's modes and times read, applied and checked, inherited ACLs cleared
+ * — followed the same day, unchanged.
  */
 #include "cadapt_platform.h"
 
@@ -290,3 +292,119 @@ int sparse_map(const char *path, uint64_t size, adapt_extent **extents, uint32_t
     return 0;
 #endif
 }
+
+/* ------------------------------------------------------------------------
+ * Metadata: modes and times read from a path, applied to a path or a
+ * descriptor and checked after, and inherited ACLs cleared before.
+ * --------------------------------------------------------------------- */
+
+/* Capture before reading a file or traversing a directory, which can change
+ * its access time. Archive links are examined without following them. */
+int metadata_read_path(const char *path, int nofollow, adapt_metadata *m) {
+#ifdef _WIN32
+    struct _stat64 st;
+    (void)nofollow;
+    if (_stat64(path, &st) != 0) {
+        return errno != 0 ? errno : EIO;
+    }
+    m->atime_seconds = st.st_atime;
+    m->mtime_seconds = st.st_mtime;
+    m->atime_nanoseconds = m->mtime_nanoseconds = 0;
+#else
+    struct stat st;
+    if ((nofollow ? lstat(path, &st) : stat(path, &st)) != 0) {
+        return errno != 0 ? errno : EIO;
+    }
+#ifdef __APPLE__
+    m->atime_seconds = st.st_atimespec.tv_sec;
+    m->atime_nanoseconds = (uint32_t)st.st_atimespec.tv_nsec;
+    m->mtime_seconds = st.st_mtimespec.tv_sec;
+    m->mtime_nanoseconds = (uint32_t)st.st_mtimespec.tv_nsec;
+#else
+    m->atime_seconds = st.st_atim.tv_sec;
+    m->atime_nanoseconds = (uint32_t)st.st_atim.tv_nsec;
+    m->mtime_seconds = st.st_mtim.tv_sec;
+    m->mtime_nanoseconds = (uint32_t)st.st_mtim.tv_nsec;
+#endif
+#endif
+    m->mode = (uint32_t)st.st_mode & 07777u;
+    return 0;
+}
+
+#ifdef _WIN32
+int metadata_apply(const char *path, int symlink_entry, const adapt_metadata *m) {
+    adapt_metadata restored;
+    int rc;
+    struct __utimbuf64 times;
+    if (symlink_entry || m->atime_nanoseconds != 0 || m->mtime_nanoseconds != 0) {
+        return ENOTSUP;
+    }
+    times.actime = m->atime_seconds;
+    times.modtime = m->mtime_seconds;
+    if (_utime64(path, &times) != 0 || _chmod(path, (int)(m->mode & (_S_IREAD | _S_IWRITE))) != 0) {
+        return errno;
+    }
+    /* Filesystems may silently clamp dates or round away precision even
+     * when their setter succeeds. Refuse publication if fidelity was lost. */
+    rc = metadata_read_path(path, symlink_entry, &restored);
+    if (rc != 0) {
+        return rc;
+    }
+    if (restored.mode != m->mode || restored.atime_seconds != m->atime_seconds ||
+        restored.atime_nanoseconds != m->atime_nanoseconds || restored.mtime_seconds != m->mtime_seconds ||
+        restored.mtime_nanoseconds != m->mtime_nanoseconds) {
+        return ENOTSUP;
+    }
+    return 0;
+}
+
+#endif
+
+#ifndef _WIN32
+/* A directory handle keeps metadata tied to the restored inode even when
+ * someone can rename entries in the output's parent directory. */
+int metadata_check_stat(const struct stat *st, const adapt_metadata *m) {
+#ifdef __APPLE__
+    struct timespec atime = st->st_atimespec, mtime = st->st_mtimespec;
+#else
+    struct timespec atime = st->st_atim, mtime = st->st_mtim;
+#endif
+    return ((uint32_t)st->st_mode & 07777u) == m->mode && atime.tv_sec == m->atime_seconds &&
+                   (uint32_t)atime.tv_nsec == m->atime_nanoseconds && mtime.tv_sec == m->mtime_seconds &&
+                   (uint32_t)mtime.tv_nsec == m->mtime_nanoseconds
+               ? 0 : ENOTSUP;
+}
+
+int metadata_times(const adapt_metadata *m, struct timespec times[2]) {
+    times[0].tv_sec = (time_t)m->atime_seconds;
+    times[0].tv_nsec = (long)m->atime_nanoseconds;
+    times[1].tv_sec = (time_t)m->mtime_seconds;
+    times[1].tv_nsec = (long)m->mtime_nanoseconds;
+    return (int64_t)times[0].tv_sec == m->atime_seconds && (int64_t)times[1].tv_sec == m->mtime_seconds ? 0 : ERANGE;
+}
+
+int metadata_apply_fd(int fd, const adapt_metadata *m) {
+    struct timespec times[2];
+    struct stat st;
+    int rc = metadata_times(m, times);
+    if (rc != 0) return rc;
+    if (futimens(fd, times) != 0 || fchmod(fd, (mode_t)m->mode) != 0 || fstat(fd, &st) != 0) return errno;
+    return metadata_check_stat(&st, m);
+}
+
+/* chmod changes an ACL's mask, not its named entries. Remove inherited
+ * ACLs before any archived permissions are installed or children created. */
+int clear_inherited_acl(int fd) {
+#ifdef __linux__
+    const char *names[] = {"system.posix_acl_default", "system.posix_acl_access"};
+    size_t i;
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (fremovexattr(fd, names[i]) != 0 && errno != ENODATA && errno != ENOTSUP &&
+            errno != EOPNOTSUPP && errno != ENOSYS) return errno;
+    }
+#else
+    (void)fd;
+#endif
+    return 0;
+}
+#endif

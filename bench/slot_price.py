@@ -34,7 +34,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # The hashed contexts, in the bit order ADAPT_DROP_MASK uses (H_* in
-# adpat/c/adapt_model.h). The tool refuses to run if the header disagrees.
+# adpat/c/adapt_constants.h, a section of adapt_model.h). The tool refuses
+# to run if the header disagrees.
 KINDS = [
     "o1", "o2", "o3", "o4", "o6", "word", "field", "sparse", "record", "class",
     "word2", "sparse2", "indirect", "nibbles", "nest", "o5", "o8", "wordlc",
@@ -171,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="an already built development codec; otherwise one is built")
     args = parser.parse_args(argv)
 
-    declared = read_kind_order(ROOT / "adpat/c/adapt_model.h")
+    declared = read_kind_order(ROOT / "adpat/c/adapt_constants.h")
     if declared != KINDS:
         raise ProbeError(f"the codec's kinds are {declared}, this tool holds {KINDS}")
     if not args.fixture.exists():

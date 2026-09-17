@@ -73,7 +73,7 @@ class PlatformHeaderTest(unittest.TestCase):
 
     def test_the_command_line_and_its_filesystem_layer_include_it_first(self):
         """Every unit that takes the platform header takes it before anything."""
-        for name in ("cadapt.c", "cadapt_fs.c", "cadapt_fs.h"):
+        for name in ("cadapt.c", "cadapt_folder.c", "cadapt_folder.h", "cadapt_fs.c", "cadapt_fs.h"):
             with self.subTest(unit=name):
                 includes = [line for line in (CODEC / name).read_text().splitlines()
                             if line.startswith("#include")]

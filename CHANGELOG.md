@@ -43,6 +43,30 @@ The binary reports `0.12.0`; the tag is pending.
   declared version is a row and every row reads as the model it names, and
   the CLI suite derives its version knowledge from the table instead of
   keeping lists that had drifted twice. Bytes and behaviour identical.
+- `adapt_model.h` is split into ten sections it includes in order —
+  `adapt_constants.h`, `adapt_states.h`, `adapt_coder.h`, `adapt_tables.h`,
+  `adapt_model_state.h`, `adapt_model_byte.h`, `adapt_model_bit.h`,
+  `adapt_model_new.h`, `adapt_blocks.h`, `adapt_crc32.h` — each a guarded
+  header of one concern, moved out textually so a reader finds the per-bit
+  path or the coder without the 3,100-line file, and a change to the
+  arbiters no longer sits in the same file as CRC32. The translation unit is
+  the same: every function stays `static inline`, the profile
+  specialization at compile time is unchanged, and the compiled bytes on
+  every command and corpus row are identical. The coverage gate counts the
+  sections; the Makefile's `MODEL_H` lists them as one dependency.
+- `cadapt.c` is split the same way, along the boundaries it already drew:
+  the folder side — a directory walked into an archive stream (`folder`,
+  `packer`), an archive stream restored into a staged directory
+  (`restorer`), and the staged directory — is `cadapt_folder.c` with its
+  types and the functions the commands call in `cadapt_folder.h`; the
+  metadata calls (a path's modes and times read, applied and checked,
+  inherited ACLs cleared) join the filesystem layer `cadapt_fs.c`.
+  `cadapt.c` keeps the commands, their arguments, streams and staged file:
+  1,970 lines from 3,890. The code moved unchanged (every line of the
+  original is in the new files; only prototypes, guards and header comments
+  were written), the functions that cross a unit lost their `static`, and
+  the coverage gate, the platform-header guard and the provenance tests
+  name the new unit. Bytes and behaviour identical.
 - `choose_model` returns one `model_choice` — width, set, keys and period
   from a single exit, the whole-block set proof shared by the fast and
   normal set choices (`prove_set`); `adapt_sizes` floors use designated

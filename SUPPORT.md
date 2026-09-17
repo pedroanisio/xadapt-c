@@ -19,7 +19,8 @@ it might be.
   file made by an older release is not stranded by an upgrade.
 - **Interfaces.** The command line (`cadapt encode | decode | info`) and
   the C library interface in [adpat/c/adapt.h](adpat/c/adapt.h). Both are
-  what the tests hold to; anything in `adapt_model.h` is internal.
+  what the tests hold to; anything in `adapt_model.h` and the section
+  headers it includes is internal.
 
 ## Community support
 

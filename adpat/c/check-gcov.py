@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Enforce branch coverage of the C codec from gcov's JSON.
 
-The library — adapt_decode.c, adapt_encode.c, adapt_archive.c, and
-adapt_model.h, adapt_adaptive.h, adapt_bmp.h and adapt_text.h as each of
-the first two compiles them — must reach 80 % of its
-branches together, the command line (cadapt.c) 60 %: the crate's floors, applied to its second implementation.
-A source missing from the report fails the gate, so a file that stopped
-being instrumented cannot pass by absence. The header is inlined into both
-library units and counted under each, since each compiles its own copy.
+The library — adapt_decode.c, adapt_encode.c, adapt_archive.c, and the
+headers adapt_adaptive.h, adapt_bmp.h, adapt_text.h and the ten sections of
+adapt_model.h as each of the first two compiles them — must reach 80 % of its
+branches together, the command line (cadapt.c, cadapt_folder.c, cadapt_fs.c) 60 %: the crate's
+floors, applied to its second implementation. A source missing from the
+report fails the gate, so a file that stopped being instrumented cannot pass
+by absence. A header is inlined into both library units and counted under
+each, since each compiles its own copy.
 
     python3 check-gcov.py <unit.gcov.json>...
 
@@ -18,9 +19,13 @@ import json
 import sys
 from pathlib import Path
 
-LIBRARY = {"adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "adapt_model.h", "adapt_adaptive.h", "adapt_bmp.h",
-           "adapt_text.h"}
-CLI = {"cadapt.c", "cadapt_fs.c"}
+# adapt_model.h is an umbrella: it holds macros and includes these sections,
+# and gcov reports the sections, where the code is.
+MODEL = {"adapt_constants.h", "adapt_states.h", "adapt_coder.h", "adapt_tables.h", "adapt_model_state.h",
+         "adapt_model_byte.h", "adapt_model_bit.h", "adapt_model_new.h", "adapt_blocks.h", "adapt_crc32.h"}
+LIBRARY = {"adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "adapt_adaptive.h", "adapt_bmp.h",
+           "adapt_text.h"} | MODEL
+CLI = {"cadapt.c", "cadapt_folder.c", "cadapt_fs.c"}
 FLOORS = {"library": 80.0, "cli": 60.0}
 
 

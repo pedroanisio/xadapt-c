@@ -21,6 +21,18 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(check_gcov)
 
 
+MODEL_SECTIONS = (
+    "adapt_constants.h", "adapt_states.h", "adapt_coder.h", "adapt_tables.h", "adapt_model_state.h",
+    "adapt_model_byte.h", "adapt_model_bit.h", "adapt_model_new.h", "adapt_blocks.h", "adapt_crc32.h",
+)
+
+
+def model_files(header: tuple[int, int]) -> dict[str, tuple[int, int]]:
+    """The ten sections of adapt_model.h as a library unit reports them:
+    the per-bit section carries `header`, the others no branches."""
+    return {name: header if name == "adapt_model_bit.h" else (0, 0) for name in MODEL_SECTIONS}
+
+
 def report(files: dict[str, tuple[int, int]], version: str = "1") -> dict:
     """A gcov JSON report for one unit: each file with `count` branches,
     `covered` of them taken."""
@@ -58,19 +70,22 @@ def units(
     header: tuple[int, int] = (9, 10),
     archive: tuple[int, int] = (10, 10),
     fs: tuple[int, int] = (0, 0),
+    folder: tuple[int, int] = (0, 0),
 ):
-    """The five unit reports the gate reads: the header appears in both
-    library units that inline it, as gcov reports an inlined header; the
-    archive unit stands alone. The command line's two units come last:
-    cadapt.c, then the filesystem layer cadapt_fs.c (no branches unless
-    given, so `cli` alone sets the command line's figure)."""
+    """The six unit reports the gate reads: the model's sections appear in
+    both library units that inline them, as gcov reports an inlined header; the
+    archive unit stands alone. The command line's three units come last:
+    cadapt.c, then the folder side cadapt_folder.c and the filesystem layer
+    cadapt_fs.c (no branches unless given, so `cli` alone sets the command
+    line's figure)."""
     return [
-        report({"adapt_decode.c": decode, "adapt_model.h": header, "adapt_adaptive.h": (0, 0), "adapt_bmp.h": (0, 0),
+        report({"adapt_decode.c": decode, **model_files(header), "adapt_adaptive.h": (0, 0), "adapt_bmp.h": (0, 0),
                 "adapt_text.h": (0, 0)}),
-        report({"adapt_encode.c": encode, "adapt_model.h": header, "adapt_adaptive.h": (0, 0), "adapt_bmp.h": (0, 0),
+        report({"adapt_encode.c": encode, **model_files(header), "adapt_adaptive.h": (0, 0), "adapt_bmp.h": (0, 0),
                 "adapt_text.h": (0, 0)}),
         report({"adapt_archive.c": archive}),
         report({"cadapt.c": cli}),
+        report({"cadapt_folder.c": folder}),
         report({"cadapt_fs.c": fs}),
     ]
 
@@ -90,7 +105,7 @@ class GateTest(unittest.TestCase):
                 self.assertIn("tests/test_check_gcov.py", run.stdout)
 
     def test_new_algorithm_headers_are_required_and_counted(self) -> None:
-        for header in ("adapt_adaptive.h", "adapt_bmp.h", "adapt_text.h"):
+        for header in ("adapt_adaptive.h", "adapt_bmp.h", "adapt_text.h", *MODEL_SECTIONS):
             evidence = units((50, 50), (50, 50), (90, 100))
             for unit in evidence:
                 unit["files"] = [entry for entry in unit["files"] if entry["file"] != header]
@@ -129,8 +144,8 @@ class GateTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("ok  library  branches 108/130 = 83.1% (floor 80%)", out)
         self.assertIn("ok  cli      branches 60/100 = 60.0% (floor 60%)", out)
-        self.assertIn("u0.json:adapt_model.h", out)
-        self.assertIn("u1.json:adapt_model.h", out)
+        self.assertIn("u0.json:adapt_model_bit.h", out)
+        self.assertIn("u1.json:adapt_model_bit.h", out)
         self.assertIn("adapt_archive.c", out)
         # exactly the floor passes; one branch fewer fails
         code, out, _ = self.run_gate(
@@ -149,12 +164,15 @@ class GateTest(unittest.TestCase):
 
     def test_a_missing_or_duplicated_source_fails(self) -> None:
         paths = self.write_units(units((50, 50), (50, 50), (90, 100)))
-        code, _, err = self.run_gate(*paths[:3], paths[4])
+        code, _, err = self.run_gate(*paths[:3], *paths[4:])
         self.assertEqual(code, 1)
         self.assertIn("lacks ['cadapt.c']", err)
-        code, _, err = self.run_gate(*paths[:4])
+        code, _, err = self.run_gate(*paths[:5])
         self.assertEqual(code, 1)
         self.assertIn("lacks ['cadapt_fs.c']", err)
+        code, _, err = self.run_gate(*paths[:4], paths[5])
+        self.assertEqual(code, 1)
+        self.assertIn("lacks ['cadapt_folder.c']", err)
         code, _, err = self.run_gate(*paths[:2], *paths[3:])
         self.assertEqual(code, 1)
         self.assertIn("lacks ['adapt_archive.c']", err)
@@ -162,7 +180,7 @@ class GateTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("duplicate source evidence", err)
         twice = self.write("twice.json", report({"adapt_decode.c": (5, 5), "adapt_encode.c": (5, 5)}))
-        code, _, err = self.run_gate(twice, paths[1], paths[2], paths[3], paths[4])
+        code, _, err = self.run_gate(twice, *paths[1:])
         self.assertEqual(code, 1)
         self.assertIn("duplicate source evidence", err)
 
