@@ -183,7 +183,15 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   the budget allows, whose table then stays at its floor (enwik9 at `-9`
   under the normal profile: a 2^20-block table beneath a 512 MiB window,
   165,865,476 bytes against 149,702,998 with the table first) — and is the
-  window-first sizes everywhere else. Both use
+  window-first sizes everywhere else. The same rule fires under the other
+  profiles at the tiers whose window cannot hold the input: measured on
+  the first 16 MiB of enwik8, `--fast -0` writes 4,245,747 bytes against
+  4,406,827 window-first, `--max -1` 3,418,737 against 3,882,929 and
+  `--max -6` 3,313,077 against 3,359,601, at the same peak memory (within
+  the tier at -6: 87 MiB of 94) and the time of `--allocation context` (the
+  same at -0 and -1, 5–11 % more at `--max -6`, where sao goes from
+  4,346,612 to 4,331,736, the locked gate row); `--mid` and the normal
+  profile at those tiers size alike either way. Both use
   existing header fields and compose with the profiles and candidate search.
   Under `--max`, a tier that would stop the table at 2^22 blocks or fewer,
   short of the input's target, buys a table twice the size with compact side

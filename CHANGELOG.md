@@ -104,6 +104,16 @@ The binary reports `0.12.0`; the tag is pending.
   floor budget the rule takes the compact side tables and a 2^18 table
   (32 MiB) instead of the full ones and a 2^10 table (46 MiB); the help
   now names the floors as the budgets `-0` is raised to. (LOCKS.md.)
+  Reviewed together with the batch's other changes (2026-09-17, the first
+  16 MiB of enwik8, sao, a folder, a BMP and a pipe, against the binary
+  before the batch): every command sizes and codes alike except where the
+  rule fires — `--fast -0` 4,406,827 → 4,245,747 bytes, `--max -1`
+  3,882,929 → 3,418,737, `--max -6` 3,359,601 → 3,313,077, sao `--max -6`
+  4,346,612 → 4,331,736 (the gate row) — at the same peak memory (87 MiB of
+  the 94 MiB tier at -6) and the time of `--allocation context`; peak
+  memory, CPU time, round trips and decoding by either binary are
+  unchanged everywhere else, `--threads 2/4`, `--verify`, `--adaptive`,
+  `--transform`, folders and pipes included.
 - The width trials of a given context set (`--contexts lean`) run on that
   set instead of the full one; the width verdict is unchanged on every
   locked fixture and the lean encode runs one trial fewer.

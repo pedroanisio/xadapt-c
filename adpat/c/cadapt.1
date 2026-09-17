@@ -332,7 +332,17 @@ context set (54/57) while the table stays at that size; and what the
 budget still holds once the window has grown goes to the table an eighth
 of its next doubling at a time (58/61), never at the window's expense.
 A table at the input's target takes no fraction, so the default budget's
-containers are unchanged.
+containers are unchanged. The rule fires under every profile at the tiers
+whose window cannot hold the input: on the first 16 MiB of enwik8,
+.B \-\-fast \-0
+writes 3.7 % fewer bytes than window-first,
+.B \-\-max \-1
+12 % fewer and
+.B \-\-max \-6
+1.4 % fewer, at the same peak memory and the time of
+.BR "\-\-allocation context" ;
+.B \-\-mid
+and the normal profile size alike either way there.
 Either can win depending on the input; on enwik8 at
 .B \-9
 (commit 89e2486)
