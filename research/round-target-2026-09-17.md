@@ -11,8 +11,9 @@ target while costing ratio to do it. On enwik8, `--threads 4` puts the codec ins
 600 MiB** at 19,454,846 bytes — 14.4 % above the 17 MB goal. On enwik9,
 `--max --contexts lean --threads 4` meets the 500 s and 530 s budgets at
 434.7 s and 362.7 s and 161,113,398 bytes — 10.4 % above the 146 MB goal, and
-its **decode** peaks at 817.9 MiB, over the envelope where its encode is
-comfortably inside it. Every row restored byte for byte.
+its decode peaks at 817.9 MiB uncapped — which `--max-memory` brings inside
+the envelope without touching the codec, at a cost in decode time. Every row
+restored byte for byte.
 
 The earlier reading that threads cost memory in proportion to worker count was
 wrong: `adapt_sizes_for_threads` divides one budget across the workers, so
@@ -88,20 +89,51 @@ segments would cut the restarts, but each worker buffers a whole segment
 (`adapt_segment_out_bound`), so segment size and worker count compete for the
 same 600 MiB.
 
-## The defect this round found
+## Decode memory: not a defect, an option nobody passed
 
-**Decode under threads needs more memory than the encode that wrote the
-file.** On enwik9, encode peaked at 515.5 MiB and decode at 817.9; on enwik8,
-514.9 against 653.4. The encoder divides one budget across its workers; the
-decoder allocates each worker the model the header names and adds a segment
-buffer apiece, so the same `--threads 4` costs about 1.6× on the way back.
+Decode under threads does cost more than the encode that wrote the file —
+enwik9 817.9 MiB against 515.5, enwik8 652.9 against 514.9 — and the reason is
+plain in the bound: `adapt_parallel_decode_memory_bound` charges each worker a
+model, the longest segment's decoded bytes and a block's workspace, and the
+whole container besides. Measured on the enwik8 container, decode costs about
+150 MiB per worker:
 
-That is the only reason the enwik9 row misses the memory half of the envelope,
-and it reads against `RUN-1`, which makes the tier a decode promise: a file
-written inside 600 MiB should decode inside it. Fixing it is bounded work —
-size the decoder's workers from the same division the encoder used, which the
-container already records — and it would put the enwik9 row inside the
-envelope on every axis but ratio.
+| Decode | Wall | Peak RSS |
+|---|---|---|
+| `--threads 1` | 149.4 s | 153.2 MiB |
+| `--threads 2` | 79.4 s | 349.8 MiB |
+| `--threads 4` | 40.8 s | 652.9 MiB |
+| `--threads 4 --max-memory 629145600` | 68.6 s | **514.4 MiB** |
+| `--threads 4 --max-memory 419430400` | 80.7 s | **349.7 MiB** |
+
+**The last two rows are the answer, and they need no change to the codec.**
+`adapt_decode_workers` already walks the worker count down until the bound
+fits the cap, so a caller who states the envelope gets it: 600 MiB asked for,
+514.4 MiB used, byte-exact restore. An earlier draft of this note called the
+decode figure a defect against `RUN-1`; that was wrong. `RUN-1` promises the
+tier's memory for a single-threaded decode, and `FMT-6` already says only a
+cap the caller sets may refuse a valid container — `--max-memory` is that cap,
+and it works.
+
+What remains true is that the *default* is to use the threads asked for and
+spend what they need. A caller who says `--threads 4` and nothing else gets
+four workers' memory. That is a documentation and defaults question, not a
+correctness one.
+
+On enwik9 the cap turns the memory miss into a time miss rather than removing
+it. Decoding the 161,113,398-byte container with `--threads 4`:
+
+| Decode | Wall | Peak RSS | Restored |
+|---|---|---|---|
+| uncapped | **362.7 s** ✓ | 817.9 MiB ✗ | yes |
+| `--max-memory 629145600` | 724.8 s ✗ | **487.8 MiB** ✓ | yes |
+
+Neither point satisfies both budgets, and the frontier between them has no
+point that does: the cap buys memory by dropping workers, and the workers are
+what buy the time. Per-worker memory is set by the model the *encoder* chose,
+so the only way to fit more decode workers in 600 MiB is to encode with more
+threads and a smaller model each — which spends ratio, the axis already
+short.
 
 ## Where the round stands
 
@@ -112,17 +144,20 @@ envelope on every axis but ratio.
 | enwik9 bytes, inside 500 s / 600 MiB | 146,000,000 | 161,113,398 | +10.4 % |
 | enwik9 bytes, any speed | 146,000,000 | 146,797,785 | **met** |
 | enwik9 encode | 500 s | 434.7 s | **met** |
-| enwik9 decode | 530 s | 362.7 s | **met** |
+| enwik9 decode, uncapped | 530 s | 362.7 s | **met**, at 817.9 MiB |
 | enwik9 encode RSS | 600 MiB | 515.5 MiB | **met** |
-| enwik9 decode RSS | 600 MiB | 817.9 MiB | +36 % |
+| enwik9 decode RSS, capped | 600 MiB | 487.8 MiB | **met**, at 724.8 s |
+| enwik9 decode time *and* RSS together | 530 s, 600 MiB | no such point | — |
 
-Four of the eight are met. The three ratio gaps all have the same shape —
-threads buy the time and spend the bytes — and the memory gap is a decoder
-sizing defect rather than a modelling limit.
+Four of the eight are met, and the decode axis is met on either budget alone
+but not on both at once. The ratio gaps all have one shape: threads buy the
+time and spend the bytes.
 
-Two things would close the most ground, in order. Size the decoder's threaded
-workers as the encoder sized its own, which costs nothing in ratio and fixes
-the one failing memory figure. Then cut the restart count on a gigabyte input
-by letting a worker stream its segment out rather than buffer it whole, which
-is what forces small segments inside a fixed budget and is the larger half of
-the 9.8 % threads cost on enwik9.
+The memory figure is a caller's choice, not a wall: `--max-memory` fits the
+decoder to whatever envelope is stated, and the price is decode time rather
+than bytes. What is left is the ratio, and it has one shape — threads buy the
+time and spend the bytes, because each worker restarts the model and each gets
+a quarter of the budget. The lever that would change that is letting a worker
+stream its segment out rather than buffer it whole: buffering is what forces
+small segments inside a fixed budget, 59 restarts on a gigabyte, and it is the
+larger half of the 9.8 % that threads cost on enwik9.

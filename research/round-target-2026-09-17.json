@@ -156,5 +156,47 @@
   "enwik9_single_thread_locked": {
     "bytes": 146797785,
     "note": "tools/ratio_floor.json, 1056.2 CPU s on the reference host"
+  },
+  "decode_frontier": {
+    "note": "same enwik8 container (18,966,492 B) and enwik9 container (161,113,398 B); --max-memory walks the worker count down until the bound fits",
+    "enwik8": [
+      {
+        "decode": "--threads 1",
+        "seconds": 149.4,
+        "rss_mib": 153.2
+      },
+      {
+        "decode": "--threads 2",
+        "seconds": 79.4,
+        "rss_mib": 349.8
+      },
+      {
+        "decode": "--threads 4",
+        "seconds": 40.8,
+        "rss_mib": 652.9
+      },
+      {
+        "decode": "--threads 4 --max-memory 629145600",
+        "seconds": 68.6,
+        "rss_mib": 514.4
+      },
+      {
+        "decode": "--threads 4 --max-memory 419430400",
+        "seconds": 80.7,
+        "rss_mib": 349.7
+      }
+    ],
+    "enwik9": [
+      {
+        "decode": "--threads 4",
+        "seconds": 362.7,
+        "rss_mib": 817.9
+      },
+      {
+        "decode": "--threads 4 --max-memory 629145600",
+        "seconds": 724.8,
+        "rss_mib": 487.8
+      }
+    ]
   }
 }
