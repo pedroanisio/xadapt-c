@@ -98,9 +98,11 @@ def CODECS() -> list[dict]:
         cadapt("cadapt-mid-t4", "--mid", threads=4),
         cadapt("cadapt-max-lean-8", "--max", "--allocation", "context", "--contexts", "lean", "-8"),
         cadapt("cadapt-max-lean-8-t4", "--max", "--allocation", "context", "--contexts", "lean", "-8", threads=4),
-        cadapt("cadapt-mid-lean", "--mid", "--contexts", "lean"),
-        cadapt("cadapt-mid-lean-ctx", "--mid", "--contexts", "lean", "--allocation", "context"),
+        # --contexts lean is refused with --mid, whose set is fixed at seven,
+        # so the only knob left between --fast and --mid is the memory tier.
+        cadapt("cadapt-fast-10", "--fast", "-10"),
         cadapt("cadapt-fast-11", "--fast", "-11"),
+        cadapt("cadapt-mid-11", "--mid", "-11"),
         cadapt("cadapt-mid-t2", "--mid", threads=2),
         cadapt("cadapt-mid-t3", "--mid", threads=3),
         cadapt("cadapt-default-t4", threads=4),
