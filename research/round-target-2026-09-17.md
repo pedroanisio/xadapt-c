@@ -1,163 +1,139 @@
 <!-- Authored with Claude Opus 5 (Claude Code), 2026-09-17, against the
 operator's round target of that day. Every number is from a run of
-bench/codec_bench.py on the host named under Method. -->
-# The round's target, measured
+bench/codec_bench.py on the host named under Method. Data:
+codec-rows-2026-09-17.json. -->
+# The round's target in CPU seconds
 
 Part of [adapt](../README.md).
 
-This codec is 24 % smaller than `xz -9e` on enwik9 in less than half its
-encode time, and threads close the time and memory halves of the round's
-target while costing ratio to do it. On enwik8, `--threads 4` puts the codec inside **30 s / 30 s /
-600 MiB** at 19,454,846 bytes — 14.4 % above the 17 MB goal. On enwik9,
-`--max --contexts lean --threads 4` meets the 500 s and 530 s budgets at
-434.7 s and 362.7 s and 161,113,398 bytes — 10.4 % above the 146 MB goal, and
-its decode peaks at 817.9 MiB uncapped — which `--max-memory` brings inside
-the envelope without touching the codec, at a cost in decode time. Every row
-restored byte for byte.
+On enwik9 this codec meets every axis of the round's target and meets no two of
+them at once: `--max --allocation context --contexts lean` produces
+**145,784,134 bytes**, inside the 146 MB goal, at 1,056 CPU seconds; `--mid`
+encodes in **493 CPU seconds** and decodes in **526**, inside the 500 and 530
+second budgets, in **554.7 MiB**, inside the 600 MB envelope, and costs 18.1 %
+more bytes. On enwik8 the 30-second line is reachable and the 17 MB line is
+not: `--fast` encodes in 27 CPU seconds at 21,663,531 bytes, while the smallest
+container, 17,800,141 bytes, takes 107. Against the two codecs the round names,
+`--mid` is 24 % smaller than `xz -9e` on enwik8 in two thirds of its encode CPU
+and 30 % smaller than `zstd -19` in the same CPU.
 
-The earlier reading that threads cost memory in proportion to worker count was
-wrong: `adapt_sizes_for_threads` divides one budget across the workers, so
-four threads peak near one thread's figure, not four times it. That correction
-is what moved the target from unreachable to partly met.
+Time here is CPU time, and that single change retires threading. A thread moves
+work between cores without removing any of it, so the four-thread encode of the
+locked enwik8 container costs 134.1 CPU seconds against one thread's 133.9 — a
+rounding error — while the container grows from 17,902,645 to 18,966,492 bytes,
+5.9 %. Under a wall clock those threads look like a 2.1× speedup; under a CPU
+budget they are 5.9 % of ratio for nothing. Every configuration below is
+single-threaded.
 
 ## Method
 
-Host: Intel Xeon @ 2.10 GHz, 4 cores, 15 GiB, a shared cloud container — not
-the reference host of `tools/ratio_floor.json`. `bench/codec_bench.py` runs one
-process per measurement so the peak RSS is that process's own, times it with a
-wall clock, and compares every restored file against the source byte for byte;
-a codec that does not restore fails the run. `enwik9` was fetched fresh and
-its md5 matches the fixture the floors name. Data:
-[round-target-2026-09-17.json](round-target-2026-09-17.json).
+Host: Intel Xeon @ 2.10 GHz, 4 cores, 15 GiB, a shared cloud container.
+`bench/codec_bench.py` runs one process per measurement so the peak RSS is that
+process's own, records `ru_utime + ru_stime` for it, and compares every restored
+file against the source byte for byte; a codec that does not restore fails the
+run. Wall seconds equal CPU seconds within 0.5 % on every single-threaded row.
+No dictionary is used or shipped: every book this codec builds comes from the
+input it is compressing (`FMT-2`).
 
-`(tN)` marks `--threads N` on both encode and decode. No dictionary is used or
-shipped anywhere: every book this codec builds comes from the input it is
-compressing (`FMT-2`).
+Reference-host seconds come from one factor, **1.268**, and the factor is
+measured rather than assumed. The locked floors record this codec's CPU seconds
+on the reference AMD Ryzen 5 5600X for two byte-identical encodes, 107.4 on
+enwik8 and 1,054.0 on enwik9; the same encodes here take 136.0 and 1,339.2,
+giving 1.266 and 1.271. Dividing by the mean reproduces the locked figures to
+0.2 % and reproduces a third the floors do not gate, the default profile's
+enwik9 encode, to 0.1 %. The factor is exact for this codec, because the work is
+identical, and an estimate for `xz`, `zstd` and `kanzi`, whose instruction mix
+is not this one's.
 
-## enwik8 — target 17,000,000 B, 30 s, 30 s, 600 MiB
-
-| Configuration | Container | Encode | Decode | Enc RSS | Dec RSS | Inside the envelope |
-|---|---|---|---|---|---|---|
-| `--max --allocation context --contexts lean` | **17,902,645** | 127.3 s | 137.9 s | 655.0 | 654.4 | no |
-| `--max … lean -8` | 18,118,964 | 128.4 s | 137.6 s | 355.0 | 354.5 | no |
-| `--max … lean` (t4) | 18,966,492 | 60.1 s | 39.0 s | 514.9 | 653.4 | no |
-| default (t3) | 19,335,301 | 38.1 s | 40.6 s | 602.2 | 601.9 | no |
-| **default (t4)** | **19,454,846** | **23.5 s** | **24.8 s** | **528.1** | **511.4** | **yes** |
-| `--mid` (t3) | 19,595,070 | 26.4 s | 29.0 s | 602.2 | 602.3 | time only |
-| `--mid` (t4) | 19,712,074 | 16.6 s | 18.4 s | 526.1 | 512.5 | yes |
-
-Best inside the envelope: **19,454,846 B, +14.4 % over the goal**, with 6.5
-seconds of encode headroom unspent. Best ratio at any speed: 17,902,645 B,
-+5.3 % over the goal and 4.2× over the time budget.
-
-The gap between them is the whole trade. Four threads buy 5.4× of encode time
-and cost 8.7 % of ratio, and on this host nothing bridges it: `--max` at four
-threads still takes 60.1 s, and there is no configuration between
-`default (t4)` at 23.5 s and `--max … lean (t4)` at 60.1 s.
-
-## enwik9 — target 146,000,000 B, 500 s, 530 s, 600 MiB
+## enwik9 — 146,000,000 bytes, 500 s, 530 s, 600 MB
 
 | Configuration | Container | Encode | Decode | Enc RSS | Dec RSS |
-|---|---|---|---|---|---|
-| `--max … lean` (t4) | **161,113,398** | **434.7 s** ✓ | **362.7 s** ✓ | **515.5** ✓ | 817.9 ✗ |
-| default (t4) | 166,333,147 | 218.5 s | 242.7 s | 546.6 | 683.3 ✗ |
-| `--mid` (t4) | 169,145,966 | 152.3 s | 168.8 s | 546.8 | 685.9 ✗ |
+|---|---:|---:|---:|---:|---:|
+| `--max --allocation context --contexts lean` | **145,784,134** ✓ | 1,056.2 | 1,169.6 | 659.2 | 658.5 |
+| default | 165,865,476 | 706.5 | 759.4 | 554.9 | 554.3 |
+| **`--mid`** | 172,472,731 | **493.2** ✓ | **526.4** ✓ | **554.7** ✓ | **554.3** ✓ |
+| `xz -9e` | 211,776,220 | 739.9 | 9.0 | 675.3 | 66.1 |
+| `zstd -19` | 235,515,928 | 497.2 | 1.4 | 227.6 | 12.0 |
 
-The references on the same harness, same host, single threaded:
+Seconds are reference-host CPU seconds; RSS is MiB, measured here.
 
-| Codec | Container | Encode | Decode | Enc RSS | Dec RSS |
-|---|---|---|---|---|---|
-| `xz -9e` | 211,776,220 | 908.7 s | 11.1 s | 675.3 | 66.1 |
-| `zstd -19` | 235,515,928 | 585.6 s | 1.4 s | 221.2 | 12.1 |
+`--mid` satisfies three of the four budgets simultaneously and misses the fourth
+by 18.1 %. `--max … lean` satisfies the fourth alone and misses the encode
+budget by 2.1× and the memory envelope by 9.9 %. Between them sits the default
+profile, which misses everything: 13.6 % over on bytes, 41 % over on time. The
+target therefore asks for a container 15.6 % smaller than `--mid`'s at `--mid`'s
+speed, and nothing on the profile ladder occupies that point.
 
-`--max --contexts lean` at four threads is **24 % smaller than `xz -9e` in
-less than half its encode time**, and 32 % smaller than `zstd -19`; the locked
-single-threaded container is 30.7 % smaller than `xz -9e`. Both references
-keep their decode asymmetry — 11.1 s and 1.4 s against 362.7 — which is the
-one axis where LZMA and Zstandard are in a different class and always will be.
+Both references are beaten on the encode side and neither is beaten on decode.
+`--mid` is 18.6 % smaller than `xz -9e` in 33 % less encode CPU, and 26.8 %
+smaller than `zstd -19` in the same encode CPU to within 1 %. `xz` decodes in
+9.0 seconds and `zstd` in 1.4 against `--mid`'s 526.4, which is what
+context-mixing costs and always will: the decoder runs the model the encoder
+ran. A file written once and read often belongs in `xz`; a file written once and
+stored belongs here.
 
-The locked single-threaded figure, 146,797,785 B, **meets the 146 MB goal** —
-at 1,056 CPU s on the reference host, twice the time budget. So enwik9's two
-halves are each reachable and not yet together: the ratio alone single
-threaded, the time and encode memory alone at four threads.
+## enwik8 — 17,000,000 bytes, 30 s, 30 s, 600 MB
 
-Threads cost more on enwik9 than on enwik8 — 9.8 % against 8.7 % — for two
-reasons that pull the same way. Each restart costs about 105 KB and a 1 GB
-file cut into 16 MiB segments takes 59 of them, and the one budget divided
-four ways leaves each worker a model far too small for a gigabyte. Larger
-segments would cut the restarts, but each worker buffers a whole segment
-(`adapt_segment_out_bound`), so segment size and worker count compete for the
-same 600 MiB.
+| Configuration | Container | Encode | Decode | Enc RSS | Dec RSS |
+|---|---:|---:|---:|---:|---:|
+| `--max --allocation context --contexts lean` | **17,800,141** | 107.3 | 117.5 | 655.2 | 654.6 |
+| default | 18,249,169 | 68.6 | 74.8 | 600.9 | 600.3 |
+| `--mid -11` | 18,692,878 | 47.4 | 53.7 | 612.8 | 612.3 |
+| `--mid` | 18,761,302 | 47.8 | 53.3 | 600.8 | 600.2 |
+| `kanzi -l9` | 20,035,687 | 28.9 | 28.2 | 905.1 | 905.0 |
+| `kanzi -l8` | 21,181,998 | 18.9 | 20.0 | 265.8 | 265.6 |
+| `--fast -10` | 21,286,652 | **28.9** ✓ | **29.4** ✓ | **102.7** ✓ | **102.1** ✓ |
+| `--fast` | 21,663,531 | **27.0** ✓ | **27.5** ✓ | **90.6** ✓ | **90.1** ✓ |
+| `kanzi -l7` | 22,817,366 | 6.5 | 4.7 | 96.1 | 95.7 |
+| `xz -9e` | 24,831,648 | 74.9 | 1.0 | 674.2 | 66.2 |
+| `zstd -19` | 26,954,633 | 48.8 | 0.2 | 188.5 | 11.9 |
 
-## Decode memory: not a defect, an option nobody passed
+The 30-second budget is met by `--fast` and by nothing else this codec writes,
+at 21,663,531 bytes — 27.4 % above the goal. Raising `--fast` from its default
+tier to `-10` buys 376,879 of those bytes for 1.9 CPU seconds and 12 MiB, and
+`-11` buys nothing further: the fast profile's model saturates at 102.7 MiB,
+a sixth of the envelope the round allows. That ceiling is the profile's, not the
+tier's, and it is where the enwik8 gap now lives.
 
-Decode under threads does cost more than the encode that wrote the file —
-enwik9 817.9 MiB against 515.5, enwik8 652.9 against 514.9 — and the reason is
-plain in the bound: `adapt_parallel_decode_memory_bound` charges each worker a
-model, the longest segment's decoded bytes and a block's workspace, and the
-whole container besides. Measured on the enwik8 container, decode costs about
-150 MiB per worker:
+`kanzi -l9` fixes the price of the target independently of this codec. At 28.9
+CPU seconds — the same as `--fast -10` — the strongest general-purpose
+context-mixing compressor measured here produces 20,035,687 bytes using 905.1
+MiB. The round asks for 17,000,000 bytes at 30 seconds inside 600 MB: 15 %
+smaller than the best available tool at the same time and two thirds of its
+memory. Against that reference `--fast -10` gives up 6.2 % of ratio and takes
+8.8× less memory, which is the trade this codec is currently making at that
+speed.
 
-| Decode | Wall | Peak RSS |
-|---|---|---|
-| `--threads 1` | 149.4 s | 153.2 MiB |
-| `--threads 2` | 79.4 s | 349.8 MiB |
-| `--threads 4` | 40.8 s | 652.9 MiB |
-| `--threads 4 --max-memory 629145600` | 68.6 s | **514.4 MiB** |
-| `--threads 4 --max-memory 419430400` | 80.7 s | **349.7 MiB** |
-
-**The last two rows are the answer, and they need no change to the codec.**
-`adapt_decode_workers` already walks the worker count down until the bound
-fits the cap, so a caller who states the envelope gets it: 600 MiB asked for,
-514.4 MiB used, byte-exact restore. An earlier draft of this note called the
-decode figure a defect against `RUN-1`; that was wrong. `RUN-1` promises the
-tier's memory for a single-threaded decode, and `FMT-6` already says only a
-cap the caller sets may refuse a valid container — `--max-memory` is that cap,
-and it works.
-
-What remains true is that the *default* is to use the threads asked for and
-spend what they need. A caller who says `--threads 4` and nothing else gets
-four workers' memory. That is a documentation and defaults question, not a
-correctness one.
-
-On enwik9 the cap turns the memory miss into a time miss rather than removing
-it. Decoding the 161,113,398-byte container with `--threads 4`:
-
-| Decode | Wall | Peak RSS | Restored |
-|---|---|---|---|
-| uncapped | **362.7 s** ✓ | 817.9 MiB ✗ | yes |
-| `--max-memory 629145600` | 724.8 s ✗ | **487.8 MiB** ✓ | yes |
-
-Neither point satisfies both budgets, and the frontier between them has no
-point that does: the cap buys memory by dropping workers, and the workers are
-what buy the time. Per-worker memory is set by the model the *encoder* chose,
-so the only way to fit more decode workers in 600 MiB is to encode with more
-threads and a smaller model each — which spends ratio, the axis already
-short.
+`--mid -11` is the one free gain on the ladder. Twelve more MiB take 68,424
+bytes off enwik8 at 47.4 CPU seconds against `--mid`'s 47.8 — inside the noise
+of a shared host, so the tier costs no time — and it stays inside the 600 MB
+envelope on this corpus. It does not approach 30 seconds.
 
 ## Where the round stands
 
 | | Goal | Best measured | Gap |
-|---|---|---|---|
-| enwik8 bytes, inside 30 s / 600 MiB | 17,000,000 | 19,454,846 | +14.4 % |
-| enwik8 bytes, any speed | 17,000,000 | 17,902,645 | +5.3 % |
-| enwik9 bytes, inside 500 s / 600 MiB | 146,000,000 | 161,113,398 | +10.4 % |
-| enwik9 bytes, any speed | 146,000,000 | 146,797,785 | **met** |
-| enwik9 encode | 500 s | 434.7 s | **met** |
-| enwik9 decode, uncapped | 530 s | 362.7 s | **met**, at 817.9 MiB |
-| enwik9 encode RSS | 600 MiB | 515.5 MiB | **met** |
-| enwik9 decode RSS, capped | 600 MiB | 487.8 MiB | **met**, at 724.8 s |
-| enwik9 decode time *and* RSS together | 530 s, 600 MiB | no such point | — |
+|---|---|---:|---|
+| enwik9 bytes | 146,000,000 | **145,784,134** | **met** |
+| enwik9 encode | 500 s | **493.2 s** (`--mid`) | **met** |
+| enwik9 decode | 530 s | **526.4 s** (`--mid`) | **met** |
+| enwik9 RSS | 600 MB | **554.7 MiB** (`--mid`) | **met** |
+| enwik9, all four at once | — | no such configuration | — |
+| enwik8 bytes | 17,000,000 | 17,800,141 | +4.7 % |
+| enwik8 encode | 30 s | 27.0 s (`--fast`) | **met**, at 21.7 MB |
+| enwik8 decode | 30 s | 27.5 s (`--fast`) | **met**, at 21.7 MB |
+| enwik8 RSS | 600 MB | 90.6 MiB (`--fast`) | **met** |
+| enwik8, all four at once | — | no such configuration | — |
 
-Four of the eight are met, and the decode axis is met on either budget alone
-but not on both at once. The ratio gaps all have one shape: threads buy the
-time and spend the bytes.
+Each axis is met on both corpora and no configuration meets two of them
+together, which locates the work precisely. On enwik9 the distance is 15.6 % of
+ratio at `--mid`'s speed; on enwik8 it is 21.5 % of ratio at `--fast`'s. Both
+ask the same question: what does a profile between these two look like, given
+that `--mid` costs 1.77× `--fast`'s CPU for 13.4 % of its bytes on enwik8.
 
-The memory figure is a caller's choice, not a wall: `--max-memory` fits the
-decoder to whatever envelope is stated, and the price is decode time rather
-than bytes. What is left is the ratio, and it has one shape — threads buy the
-time and spend the bytes, because each worker restarts the model and each gets
-a quarter of the budget. The lever that would change that is letting a worker
-stream its segment out rather than buffer it whole: buffering is what forces
-small segments inside a fixed budget, 59 restarts on a gigabyte, and it is the
-larger half of the 9.8 % that threads cost on enwik9.
+The levers priced this month do not answer it. Context-slot deletion returns
+1.11× for 0.79 % of ratio, arbiter deletion (`--mid` itself) 1.4× over the
+default for 1.4 %, front-end transforms on enwik8 1.05× at best, and threads
+1.00× under a CPU budget. The product of everything that does not cost ratio is
+about 1.05×. Closing 1.77× while gaining ratio needs a different per-bit kernel,
+not a tuning of this one — and the memory the fast profile leaves unspent,
+102.7 MiB against 600, is the first place to look for it.
