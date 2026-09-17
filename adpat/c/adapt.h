@@ -315,6 +315,134 @@ extern "C" {
  * -0.75 %, the whole -2.9 %. A pipe's length is unknown: a caller who
  * knows it holds text asks with ADAPT_TEXT_ON. */
 #define ADAPT_TEXT_MIN_BYTES ((uint64_t)8 << 20)
+
+/* ---- the version table -------------------------------------------------
+ * Every container version the decoder reads, in one place: what its byte
+ * means. A row names the profile and the model bits the version fixes,
+ * whether it carries the metadata record (and which stream version it is
+ * the metadata form of — the offset between the two is the difference),
+ * whether a sizing byte (ADAPT_SIZING_*) or a policy byte
+ * (ADAPT_POLICY_*) follows the fixed header, and the adaptive mode or
+ * BMP mode it names. The decoder's dispatch, the header-length and
+ * metadata helpers, the command line's version prose, the tests and the
+ * measurement tooling read this table; a new family is a new row (and a
+ * pinned vector), never a new copy of the map. The encoder's choice of
+ * which version to write for a shape stays in encode_header_version
+ * (adapt_model.h): a policy, checked against this table by the tests. */
+typedef struct adapt_version_info {
+    uint8_t version;
+    /* the stream version this is the metadata form of; itself for a stream */
+    uint8_t stream;
+    uint8_t metadata;
+    uint8_t profile; /* ADAPT_PROFILE_* */
+    uint8_t adaptive; /* adapt_sizes.adaptive: 1..3 an experimental predictor, the BMP mode 0..3 with `bmp` */
+    uint8_t bmp, text, compact, lean, mid;
+    /* the byte after the fixed header and the period: none, sizing, policy */
+    uint8_t trailing; /* ADAPT_TRAILING_* */
+    uint8_t keys;     /* ADAPT_KEYS_* fixed by the version (the policy byte's under ADAPT_TRAILING_POLICY) */
+} adapt_version_info;
+#define ADAPT_PROFILE_NORMAL 0u
+#define ADAPT_PROFILE_FAST 1u
+#define ADAPT_PROFILE_MAX 2u
+#define ADAPT_PROFILE_MID 3u
+#define ADAPT_TRAILING_NONE 0u
+#define ADAPT_TRAILING_SIZING 1u
+#define ADAPT_TRAILING_POLICY 2u
+#define ADAPT_VERSION_ROW(v, st, md, prof, ad, bm, tx, cp, ln, mi, tr, ky) {v, st, md, prof, ad, bm, tx, cp, ln, mi, tr, ky}
+static const adapt_version_info ADAPT_VERSIONS[] = {
+    /* the three profiles as streams and as named files or folders */
+    ADAPT_VERSION_ROW(19, 19, 0, ADAPT_PROFILE_NORMAL, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(20, 20, 0, ADAPT_PROFILE_FAST, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(21, 21, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(22, 19, 1, ADAPT_PROFILE_NORMAL, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(23, 20, 1, ADAPT_PROFILE_FAST, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(24, 21, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    /* the experimental predictors over the normal profile, rates / sparse / retained */
+    ADAPT_VERSION_ROW(25, 25, 0, ADAPT_PROFILE_NORMAL, 1, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(26, 26, 0, ADAPT_PROFILE_NORMAL, 2, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(27, 27, 0, ADAPT_PROFILE_NORMAL, 3, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(28, 25, 1, ADAPT_PROFILE_NORMAL, 1, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(29, 26, 1, ADAPT_PROFILE_NORMAL, 2, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(30, 27, 1, ADAPT_PROFILE_NORMAL, 3, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    /* the BMP24 transform over the normal profile, alone or with each predictor */
+    ADAPT_VERSION_ROW(31, 31, 0, ADAPT_PROFILE_NORMAL, 0, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(32, 32, 0, ADAPT_PROFILE_NORMAL, 1, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(33, 33, 0, ADAPT_PROFILE_NORMAL, 2, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(34, 34, 0, ADAPT_PROFILE_NORMAL, 3, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(35, 31, 1, ADAPT_PROFILE_NORMAL, 0, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(36, 32, 1, ADAPT_PROFILE_NORMAL, 1, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(37, 33, 1, ADAPT_PROFILE_NORMAL, 2, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(38, 34, 1, ADAPT_PROFILE_NORMAL, 3, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    /* the same over the max profile */
+    ADAPT_VERSION_ROW(39, 39, 0, ADAPT_PROFILE_MAX, 1, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(40, 40, 0, ADAPT_PROFILE_MAX, 2, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(41, 41, 0, ADAPT_PROFILE_MAX, 3, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(42, 39, 1, ADAPT_PROFILE_MAX, 1, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(43, 40, 1, ADAPT_PROFILE_MAX, 2, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(44, 41, 1, ADAPT_PROFILE_MAX, 3, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(45, 45, 0, ADAPT_PROFILE_MAX, 0, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(46, 46, 0, ADAPT_PROFILE_MAX, 1, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(47, 47, 0, ADAPT_PROFILE_MAX, 2, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(48, 48, 0, ADAPT_PROFILE_MAX, 3, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(49, 45, 1, ADAPT_PROFILE_MAX, 0, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(50, 46, 1, ADAPT_PROFILE_MAX, 1, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(51, 47, 1, ADAPT_PROFILE_MAX, 2, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(52, 48, 1, ADAPT_PROFILE_MAX, 3, 1, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    /* the max profile with compact side tables, and with the lean set as well */
+    ADAPT_VERSION_ROW(53, 53, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 1, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(54, 54, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 1, 1, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(56, 53, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 1, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(57, 54, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 1, 1, 0, ADAPT_TRAILING_NONE, 0),
+    /* the max profile sized to its budget: the sizing byte (58/61 historical, both model2 policies) */
+    ADAPT_VERSION_ROW(58, 58, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, 0),
+    ADAPT_VERSION_ROW(61, 58, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, 0),
+    /* the text transform ahead of the normal, fast, max, compact and lean models */
+    ADAPT_VERSION_ROW(62, 62, 0, ADAPT_PROFILE_NORMAL, 0, 0, 1, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(63, 63, 0, ADAPT_PROFILE_FAST, 0, 0, 1, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(64, 64, 0, ADAPT_PROFILE_MAX, 0, 0, 1, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(65, 65, 0, ADAPT_PROFILE_MAX, 0, 0, 1, 1, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(66, 66, 0, ADAPT_PROFILE_MAX, 0, 0, 1, 1, 1, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(67, 62, 1, ADAPT_PROFILE_NORMAL, 0, 0, 1, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(68, 63, 1, ADAPT_PROFILE_FAST, 0, 0, 1, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(69, 64, 1, ADAPT_PROFILE_MAX, 0, 0, 1, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(70, 65, 1, ADAPT_PROFILE_MAX, 0, 0, 1, 1, 0, 0, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(71, 66, 1, ADAPT_PROFILE_MAX, 0, 0, 1, 1, 1, 0, ADAPT_TRAILING_NONE, 0),
+    /* the second max model, pressure gated: the sizing byte with its bit 7 required */
+    ADAPT_VERSION_ROW(72, 72, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, 0),
+    ADAPT_VERSION_ROW(75, 72, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, 0),
+    /* the mid profile, plain and under the text transform */
+    ADAPT_VERSION_ROW(76, 76, 0, ADAPT_PROFILE_MID, 0, 0, 0, 0, 0, 1, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(77, 77, 0, ADAPT_PROFILE_MID, 0, 0, 1, 0, 0, 1, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(78, 76, 1, ADAPT_PROFILE_MID, 0, 0, 0, 0, 0, 1, ADAPT_TRAILING_NONE, 0),
+    ADAPT_VERSION_ROW(79, 77, 1, ADAPT_PROFILE_MID, 0, 0, 1, 0, 0, 1, ADAPT_TRAILING_NONE, 0),
+    /* the second max model with the arbiters keyed by the classes and nesting, or the classes and recall */
+    ADAPT_VERSION_ROW(80, 80, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, ADAPT_KEYS_TEXT),
+    ADAPT_VERSION_ROW(81, 81, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, ADAPT_KEYS_BINARY),
+    ADAPT_VERSION_ROW(82, 80, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, ADAPT_KEYS_TEXT),
+    ADAPT_VERSION_ROW(83, 81, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, ADAPT_KEYS_BINARY),
+    /* the normal profile keyed the same way: the policy byte names the keys and the transform */
+    ADAPT_VERSION_ROW(84, 84, 0, ADAPT_PROFILE_NORMAL, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_POLICY, 0),
+    ADAPT_VERSION_ROW(85, 84, 1, ADAPT_PROFILE_NORMAL, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_POLICY, 0),
+};
+#define ADAPT_VERSION_COUNT (sizeof(ADAPT_VERSIONS) / sizeof(ADAPT_VERSIONS[0]))
+
+/* The row of a version, or NULL for a version the decoder does not know. */
+static inline const adapt_version_info *adapt_version_lookup(uint8_t version) {
+    size_t i;
+    for (i = 0; i < ADAPT_VERSION_COUNT; i++) {
+        if (ADAPT_VERSIONS[i].version == version) return &ADAPT_VERSIONS[i];
+    }
+    return NULL;
+}
+
+/* The metadata form of a stream version, or 0 when it has none. */
+static inline uint8_t adapt_version_with_metadata(uint8_t stream) {
+    size_t i;
+    for (i = 0; i < ADAPT_VERSION_COUNT; i++) {
+        if (ADAPT_VERSIONS[i].metadata && ADAPT_VERSIONS[i].stream == stream) return ADAPT_VERSIONS[i].version;
+    }
+    return 0;
+}
 #define ADAPT_BMP_BYTES 12u
 #define ADAPT_METADATA_BYTES 28u
 #define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)

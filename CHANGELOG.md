@@ -33,6 +33,16 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Fixed
 
+- One version table, `ADAPT_VERSIONS` in `adapt.h`: every container version
+  the decoder reads is a row naming its stream form, whether it carries the
+  metadata record, the profile, the transform, the side tables and set, the
+  experimental predictor or BMP mode, the trailing sizing or policy byte and
+  the arbiters' keys. The decoder's dispatch, `adapt_header_has_metadata`,
+  `adapt_header_len` and `adapt_header_add_metadata` read it (the two
+  hand-written metadata-offset chains are gone), the C suite checks every
+  declared version is a row and every row reads as the model it names, and
+  the CLI suite derives its version knowledge from the table instead of
+  keeping lists that had drifted twice. Bytes and behaviour identical.
 - `choose_model` returns one `model_choice` — width, set, keys and period
   from a single exit, the whole-block set proof shared by the fast and
   normal set choices (`prove_set`); `adapt_sizes` floors use designated

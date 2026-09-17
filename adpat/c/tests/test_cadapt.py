@@ -32,37 +32,41 @@ LONG = unittest.skipUnless(os.environ.get("ADAPT_LONG_TESTS") == "1", "a long ca
 SOURCE = b"optional verification\n" * 128
 
 
-# The versions a current max encode writes: 72 with the classic arbiter
-# keys, 80 (text keys) or 81 (binary keys) as the first block chose; 75,
-# 82 and 83 the same with metadata.
-MAX_STREAM = (72, 80, 81)
-MAX_NAMED = (75, 82, 83)
-# ... and a normal encode: 19 (62 under the text transform) with the classic
-# keys, 84 with a key policy, whose policy byte carries the transform; 22,
-# 67 and 85 the same with metadata.
-NORMAL_STREAM = (19, 62, 84)
-NORMAL_NAMED = (22, 67, 85)
+# The version table of adapt.h (ADAPT_VERSIONS), read from the source so
+# this suite never keeps its own copy of the map: per version, the stream
+# it is the metadata form of, whether it carries metadata, the profile,
+# the BMP descriptor and the trailing sizing or policy byte.
+ADAPT_H = Path(__file__).resolve().parent.parent / "adapt.h"
+_ROW = re.compile(r"ADAPT_VERSION_ROW\((\d+), (\d+), (\d+), ADAPT_PROFILE_(\w+), (\d+), (\d+), (\d+), (\d+), (\d+), (\d+), ADAPT_TRAILING_(\w+), (\w+)\)")
+VERSIONS = {int(m[1]): dict(stream=int(m[2]), metadata=bool(int(m[3])), profile=m[4], adaptive=int(m[5]), bmp=bool(int(m[6])),
+                            text=bool(int(m[7])), trailing=m[11])
+            for m in _ROW.finditer(ADAPT_H.read_text(encoding="utf-8"))}
+assert len(VERSIONS) >= 55, "the version table of adapt.h did not parse"
+# the versions a current max / normal encode writes, as streams and named
+MAX_STREAM = tuple(v for v, r in VERSIONS.items() if not r["metadata"] and r["profile"] == "MAX" and r["trailing"] == "SIZING" and v != 58)
+MAX_NAMED = tuple(v for v, r in VERSIONS.items() if r["metadata"] and r["stream"] in MAX_STREAM)
+NORMAL_STREAM = tuple(v for v, r in VERSIONS.items() if not r["metadata"] and r["profile"] == "NORMAL" and r["adaptive"] == 0 and not r["bmp"])
+NORMAL_NAMED = tuple(v for v, r in VERSIONS.items() if r["metadata"] and r["stream"] in NORMAL_STREAM)
+assert MAX_STREAM == (72, 80, 81) and MAX_NAMED == (75, 82, 83) and NORMAL_STREAM == (19, 62, 84) and NORMAL_NAMED == (22, 67, 85)
 
 
 def metadata_base(container: bytes) -> int:
     """Where a named container's metadata starts: after the fixed header, the
     period bytes, the BMP descriptor, and the sizing or policy byte of the
-    versions that carry one."""
-    return (8 + (2 if container[7] & 0x80 else 0) + (12 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 0)
-            + (1 if container[4] in (61, 75, 82, 83, 85) else 0))
+    versions that carry one (the version table's rows)."""
+    row = VERSIONS[container[4]]
+    return (8 + (2 if container[7] & 0x80 else 0) + (12 if row["bmp"] else 0) + (1 if row["trailing"] != "NONE" else 0))
 
 
 def payload_stream(container: bytes) -> bytes:
     """Remove only validated filesystem metadata for legacy stream comparisons."""
-    if container[4] not in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52, 56, 57, 61, 67, 68, 69, 70, 71, 75,
-                            78, 79, 82, 83, 85):
+    row = VERSIONS.get(container[4])
+    if row is None or not row["metadata"]:
         return container
     # the period bytes, the BMP descriptor and the sizing or policy byte precede the metadata
     base = metadata_base(container)
     assert zlib.crc32(container[:base + 28]) == int.from_bytes(container[base + 28:base + 32], "little")
-    offset = (4 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 5 if 67 <= container[4] <= 71
-              else 2 if container[4] in (78, 79, 82, 83) else 1 if container[4] == 85 else 3)
-    return container[:4] + bytes([container[4] - offset]) + container[5:base] + container[base + 32:]
+    return container[:4] + bytes([row["stream"]]) + container[5:base] + container[base + 32:]
 
 
 class CodecTest(unittest.TestCase):

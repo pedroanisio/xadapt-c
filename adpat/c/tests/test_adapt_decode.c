@@ -145,6 +145,89 @@ static void test_mid_versions(void) {
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
 }
 
+/* The version table (adapt.h, ADAPT_VERSIONS) is the decoder's whole map:
+ * every declared version constant is a row; every row's stream row
+ * exists and is a stream; a metadata row is the stream's metadata form
+ * and nothing else is; every stream row reads as the model it names
+ * (profile, transform, side tables, set, predictor, keys) with a minimal
+ * header, and its header length counts its trailing byte; the byte past
+ * the table is no version. */
+static void test_version_table(void) {
+    static const uint8_t declared[] = {
+        ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION, ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION,
+        ADAPT_METADATA_MAX_VERSION, ADAPT_ADAPTIVE_VERSION, ADAPT_ADAPTIVE_LAST_VERSION, ADAPT_ADAPTIVE_METADATA_VERSION,
+        ADAPT_ADAPTIVE_METADATA_LAST_VERSION, ADAPT_BMP_VERSION, ADAPT_BMP_LAST_VERSION, ADAPT_BMP_METADATA_VERSION,
+        ADAPT_BMP_METADATA_LAST_VERSION, ADAPT_MAX_ADAPTIVE_VERSION, ADAPT_MAX_ADAPTIVE_LAST_VERSION,
+        ADAPT_MAX_ADAPTIVE_METADATA_VERSION, ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION, ADAPT_MAX_BMP_VERSION,
+        ADAPT_MAX_BMP_LAST_VERSION, ADAPT_MAX_BMP_METADATA_VERSION, ADAPT_MAX_BMP_METADATA_LAST_VERSION,
+        ADAPT_MAX_COMPACT_VERSION, ADAPT_MAX_LEAN_VERSION, ADAPT_MAX_COMPACT_METADATA_VERSION, ADAPT_MAX_LEAN_METADATA_VERSION,
+        ADAPT_MAX_SIZED_VERSION, ADAPT_MAX_SIZED_METADATA_VERSION, ADAPT_TEXT_VERSION, ADAPT_TEXT_FAST_VERSION,
+        ADAPT_TEXT_MAX_VERSION, ADAPT_TEXT_MAX_COMPACT_VERSION, ADAPT_TEXT_MAX_LEAN_VERSION, ADAPT_TEXT_METADATA_VERSION,
+        ADAPT_TEXT_METADATA_LAST_VERSION, ADAPT_MAX_PRESSURE_VERSION, ADAPT_MAX_PRESSURE_METADATA_VERSION, ADAPT_MID_VERSION,
+        ADAPT_TEXT_MID_VERSION, ADAPT_MID_METADATA_VERSION, ADAPT_TEXT_MID_METADATA_VERSION, ADAPT_MAX_KEYS_VERSION,
+        ADAPT_MAX_KEYS_BINARY_VERSION, ADAPT_MAX_KEYS_METADATA_VERSION, ADAPT_MAX_KEYS_BINARY_METADATA_VERSION,
+        ADAPT_NORMAL_KEYS_VERSION, ADAPT_NORMAL_KEYS_METADATA_VERSION};
+    size_t i, j;
+    uint8_t last = 0;
+    for (i = 0; i < sizeof(declared); i++) {
+        CHECK(adapt_version_lookup(declared[i]) != NULL);
+    }
+    for (i = 0; i < ADAPT_VERSION_COUNT; i++) {
+        const adapt_version_info *row = &ADAPT_VERSIONS[i], *stream = adapt_version_lookup(row->stream);
+        uint8_t file[ADAPT_HEADER_BYTES + ADAPT_BMP_BYTES] = {0};
+        adapt_sizes sizes;
+        adapt_error error;
+        CHECK(row->version > last); /* ascending, so unique */
+        last = row->version;
+        CHECK(stream != NULL && !stream->metadata && (row->metadata ? row->stream != row->version : row->stream == row->version));
+        CHECK(adapt_version_with_metadata(row->stream) == (row->metadata ? row->version : adapt_version_with_metadata(row->stream)));
+        for (j = 0; j < ADAPT_VERSION_COUNT; j++) {
+            /* one metadata form per stream */
+            CHECK(!(ADAPT_VERSIONS[j].metadata && ADAPT_VERSIONS[j].stream == row->stream && row->metadata && j != i));
+        }
+        memcpy(file, "ADPT", 4);
+        file[4] = row->version;
+        file[5] = 20;
+        file[6] = 16;
+        file[7] = 20;
+        CHECK(adapt_header_has_metadata(file) == row->metadata);
+        CHECK(adapt_header_len(file) == ADAPT_HEADER_BYTES + (row->metadata ? ADAPT_METADATA_HEADER_BYTES : 0) +
+                                            (row->trailing == ADAPT_TRAILING_SIZING ? ADAPT_SIZING_BYTES : 0) +
+                                            (row->trailing == ADAPT_TRAILING_POLICY ? ADAPT_POLICY_BYTES : 0) +
+                                            (row->bmp ? ADAPT_BMP_BYTES : 0));
+        if (row->metadata) {
+            continue; /* the record and its checksum: the vectors' business */
+        }
+        if (row->trailing == ADAPT_TRAILING_SIZING) {
+            file[8] = (uint8_t)(ADAPT_SIZING_MODEL2 | (row->compact ? ADAPT_SIZING_COMPACT : 0) | (row->lean ? ADAPT_SIZING_LEAN : 0));
+        } else if (row->trailing == ADAPT_TRAILING_POLICY) {
+            file[8] = ADAPT_KEYS_TEXT;
+        } else if (row->bmp) {
+            /* a descriptor the sizes accept: offset 54, width 4, one row */
+            file[8] = 54;
+            file[12] = 4;
+            file[16] = 1;
+        }
+        CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.fast == (row->profile == ADAPT_PROFILE_FAST) && sizes.max == (row->profile == ADAPT_PROFILE_MAX) &&
+              sizes.mid == row->mid && (sizes.text == ADAPT_TEXT_ON) == (row->text != 0) && sizes.bmp == row->bmp &&
+              sizes.adaptive == row->adaptive && sizes.compact == row->compact && sizes.lean == row->lean);
+        CHECK(sizes.keys == (row->trailing == ADAPT_TRAILING_POLICY ? ADAPT_KEYS_TEXT : row->keys));
+    }
+    {
+        uint8_t file[ADAPT_HEADER_BYTES];
+        adapt_sizes sizes;
+        adapt_error error;
+        memcpy(file, "ADPT", 4);
+        file[4] = (uint8_t)(last + 1);
+        file[5] = 20;
+        file[6] = 16;
+        file[7] = 20;
+        CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
+        CHECK(adapt_version_lookup((uint8_t)(last + 1)) == NULL && !adapt_header_has_metadata(file));
+    }
+}
+
 /* The keyed max profile's versions: 80 the text keys, 81 the binary keys,
  * 82 and 83 the same with metadata, each version 72's model and sizing
  * byte (the second max model's bit required); 84 is no version. */
@@ -1743,6 +1826,7 @@ int main(int argc, char **argv) {
     SHARD(test_mid_versions());
     SHARD(test_keys_versions());
     SHARD(test_normal_keys_versions());
+    SHARD(test_version_table());
     SHARD(test_vector("text-keyed.adpt", "text.bin"));
     SHARD(test_vector("records-keyed.adpt", "records.bin"));
     SHARD(test_vector("cyrillic-keyed.adpt", "cyrillic.bin"));

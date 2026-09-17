@@ -32,57 +32,25 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len) {
 int adapt_bmp_probe(const uint8_t *prefix, size_t length, adapt_sizes *sizes) {
     return bmp_probe(prefix, length, sizes);
 }
-static int header_has_text(const uint8_t *header) {
-    return header[4] >= ADAPT_TEXT_VERSION && header[4] <= ADAPT_TEXT_METADATA_LAST_VERSION;
-}
-
-/* The mid profile's four versions: plain, under the text transform, and
- * each with metadata (ADAPT_MID_METADATA_OFFSET on). */
-static int header_is_mid(const uint8_t *header) {
-    return header[4] >= ADAPT_MID_VERSION && header[4] <= ADAPT_TEXT_MID_METADATA_VERSION;
-}
-
-/* The keyed max profile's four versions: the text and binary key
- * policies, each with metadata (ADAPT_KEYS_METADATA_OFFSET on). */
-static int header_is_keyed(const uint8_t *header) {
-    return header[4] >= ADAPT_MAX_KEYS_VERSION && header[4] <= ADAPT_MAX_KEYS_BINARY_METADATA_VERSION;
-}
-
-/* The keyed normal profile's two versions, which carry the policy byte
- * (ADAPT_NORMAL_KEYS_METADATA_OFFSET on for metadata). */
-static int header_has_policy(const uint8_t *header) {
-    return header[4] == ADAPT_NORMAL_KEYS_VERSION || header[4] == ADAPT_NORMAL_KEYS_METADATA_VERSION;
-}
-
-static int header_has_bmp(const uint8_t *header) {
-    return (header[4] >= ADAPT_BMP_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
-           (header[4] >= ADAPT_MAX_BMP_VERSION && header[4] <= ADAPT_MAX_BMP_METADATA_LAST_VERSION);
+/* The header's row of the version table (adapt.h): NULL for a version the
+ * decoder does not know. Every question about a version byte — the
+ * metadata record, the sizing or policy byte, the BMP descriptor, the
+ * model it names — is answered from the row. */
+static const adapt_version_info *header_row(const uint8_t *header) {
+    return adapt_version_lookup(header[4]);
 }
 
 int adapt_header_has_metadata(const uint8_t *header) {
-    return header != NULL && ((header[4] >= ADAPT_METADATA_VERSION && header[4] <= ADAPT_METADATA_MAX_VERSION) ||
-                              header[4] == ADAPT_MAX_COMPACT_METADATA_VERSION || header[4] == ADAPT_MAX_LEAN_METADATA_VERSION ||
-                              header[4] == ADAPT_MAX_SIZED_METADATA_VERSION || header[4] == ADAPT_MAX_PRESSURE_METADATA_VERSION ||
-                              (header[4] >= ADAPT_TEXT_METADATA_VERSION && header[4] <= ADAPT_TEXT_METADATA_LAST_VERSION) ||
-                              header[4] == ADAPT_MID_METADATA_VERSION || header[4] == ADAPT_TEXT_MID_METADATA_VERSION ||
-                              header[4] == ADAPT_MAX_KEYS_METADATA_VERSION || header[4] == ADAPT_MAX_KEYS_BINARY_METADATA_VERSION ||
-                              header[4] == ADAPT_NORMAL_KEYS_METADATA_VERSION ||
-                              (header[4] >= ADAPT_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_ADAPTIVE_METADATA_LAST_VERSION) ||
-                              (header[4] >= ADAPT_BMP_METADATA_VERSION && header[4] <= ADAPT_BMP_METADATA_LAST_VERSION) ||
-                              (header[4] >= ADAPT_MAX_ADAPTIVE_METADATA_VERSION && header[4] <= ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION) ||
-                              (header[4] >= ADAPT_MAX_BMP_METADATA_VERSION && header[4] <= ADAPT_MAX_BMP_METADATA_LAST_VERSION));
-}
-
-/* The sized max profile's versions carry the sizing byte. */
-static int header_is_sized(const uint8_t *fixed) {
-    return fixed[4] == ADAPT_MAX_SIZED_VERSION || fixed[4] == ADAPT_MAX_SIZED_METADATA_VERSION ||
-           fixed[4] == ADAPT_MAX_PRESSURE_VERSION || fixed[4] == ADAPT_MAX_PRESSURE_METADATA_VERSION || header_is_keyed(fixed);
+    const adapt_version_info *row = header == NULL ? NULL : header_row(header);
+    return row != NULL && row->metadata;
 }
 
 size_t adapt_header_len(const uint8_t *fixed) {
+    const adapt_version_info *row = header_row(fixed);
     return ADAPT_HEADER_BYTES + ((fixed[7] & ADAPT_PERIOD_FLAG) ? ADAPT_PERIOD_BYTES : 0) +
-           (header_is_sized(fixed) ? ADAPT_SIZING_BYTES : 0) + (header_has_policy(fixed) ? ADAPT_POLICY_BYTES : 0) +
-           (adapt_header_has_metadata(fixed) ? ADAPT_METADATA_HEADER_BYTES : 0) + (header_has_bmp(fixed) ? ADAPT_BMP_BYTES : 0);
+           (row != NULL && row->trailing == ADAPT_TRAILING_SIZING ? ADAPT_SIZING_BYTES : 0) +
+           (row != NULL && row->trailing == ADAPT_TRAILING_POLICY ? ADAPT_POLICY_BYTES : 0) +
+           (row != NULL && row->metadata ? ADAPT_METADATA_HEADER_BYTES : 0) + (row != NULL && row->bmp ? ADAPT_BMP_BYTES : 0);
 }
 
 size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_metadata *metadata,
@@ -99,10 +67,10 @@ size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_
         return 0;
     }
     memcpy(out, header, len);
-    out[4] = (uint8_t)(header[4] + (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET
-                                    : header_is_mid(header) ? ADAPT_MID_METADATA_OFFSET
-                                    : header_is_keyed(header) ? ADAPT_KEYS_METADATA_OFFSET
-                                    : header_has_policy(header) ? ADAPT_NORMAL_KEYS_METADATA_OFFSET : 3));
+    out[4] = adapt_version_with_metadata(header[4]);
+    if (out[4] == 0) {
+        return 0;
+    }
     crc = adapt_crc32(out, total - 4);
     for (i = 0; i < 4; i++) {
         out[total - 4 + i] = (uint8_t)(crc >> (8 * i));
@@ -128,6 +96,7 @@ int adapt_segment_bytes_valid(uint64_t segment_bytes) {
 adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *sizes, adapt_error *error) {
     adapt_sizes s = {0};
     uint8_t version;
+    const adapt_version_info *row, *stream;
     if (header == NULL || sizes == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
     }
@@ -138,7 +107,11 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         return fail(error, ADAPT_ERROR_BAD_MAGIC, 0, 0);
     }
     version = header[4];
-    if (adapt_header_has_metadata(header)) {
+    row = adapt_version_lookup(version);
+    if (row == NULL) {
+        return fail(error, ADAPT_ERROR_UNSUPPORTED_VERSION, header[4], 0);
+    }
+    if (row->metadata) {
         size_t n = adapt_header_len(header), i;
         uint32_t crc = 0;
         adapt_metadata metadata;
@@ -154,75 +127,21 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         if (!adapt_metadata_read(header + n - ADAPT_METADATA_HEADER_BYTES, &metadata)) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
-        version = (uint8_t)(version - (header_has_bmp(header) ? 4 : header_has_text(header) ? ADAPT_TEXT_METADATA_OFFSET
-                                       : header_is_mid(header) ? ADAPT_MID_METADATA_OFFSET
-                                       : header_is_keyed(header) ? ADAPT_KEYS_METADATA_OFFSET
-                                       : header_has_policy(header) ? ADAPT_NORMAL_KEYS_METADATA_OFFSET : 3));
     }
-    s.max = 0;
-    s.text = 0;
-    s.mid = 0;
-    s.keys = ADAPT_KEYS_CLASSIC;
-    if (version == ADAPT_MAX_KEYS_VERSION || version == ADAPT_MAX_KEYS_BINARY_VERSION) {
-        /* the keyed max profile: version 72's model and sizing byte with
-         * the arbiters' key policy the version names */
-        s.keys = (uint8_t)(version == ADAPT_MAX_KEYS_VERSION ? ADAPT_KEYS_TEXT : ADAPT_KEYS_BINARY);
-        version = ADAPT_MAX_PRESSURE_VERSION;
-    }
-    if (version == ADAPT_TEXT_MID_VERSION) {
-        s.text = ADAPT_TEXT_ON;
-        version = ADAPT_MID_VERSION;
-    }
-    if (version >= ADAPT_TEXT_VERSION && version <= ADAPT_TEXT_LAST_VERSION) {
-        /* the text versions front the models in the order of their own */
-        static const uint8_t fronted[] = {ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MAX_VERSION,
-                                          ADAPT_MAX_COMPACT_VERSION, ADAPT_MAX_LEAN_VERSION};
-        s.text = ADAPT_TEXT_ON;
-        version = fronted[version - ADAPT_TEXT_VERSION];
-    }
-    if (version >= ADAPT_MAX_ADAPTIVE_VERSION && version <= ADAPT_MAX_ADAPTIVE_LAST_VERSION) {
-        s.max = 1;
-        version = (uint8_t)(version - ADAPT_MAX_ADAPTIVE_VERSION + ADAPT_ADAPTIVE_VERSION);
-    } else if (version >= ADAPT_MAX_BMP_VERSION && version <= ADAPT_MAX_BMP_LAST_VERSION) {
-        s.max = 1;
-        version = (uint8_t)(version - ADAPT_MAX_BMP_VERSION + ADAPT_BMP_VERSION);
-    }
-    s.adaptive = 0;
-    s.compact = 0;
-    s.lean = 0;
-    if (version == ADAPT_FORMAT_VERSION) {
-        s.fast = 0;
-    } else if (version == ADAPT_MID_VERSION) {
-        s.fast = 0;
-        s.mid = 1;
-    } else if (version == ADAPT_NORMAL_KEYS_VERSION) {
-        /* the keyed normal profile: its key policy and the text
-         * transform are the policy byte's, read below */
-        s.fast = 0;
-    } else if (version == ADAPT_FAST_VERSION) {
-        s.fast = 1;
-    } else if (version == ADAPT_MAX_VERSION) {
-        s.fast = 0;
-        s.max = 1;
-    } else if (version == ADAPT_MAX_COMPACT_VERSION || version == ADAPT_MAX_LEAN_VERSION) {
-        s.fast = 0;
-        s.max = 1;
-        s.compact = 1;
-        s.lean = (uint8_t)(version == ADAPT_MAX_LEAN_VERSION);
-    } else if (version == ADAPT_MAX_SIZED_VERSION || version == ADAPT_MAX_PRESSURE_VERSION) {
-        /* the sized max profile: its tables, context set and fraction are
-         * the sizing byte's, read below */
-        s.fast = 0;
-        s.max = 1;
-    } else if (version >= ADAPT_ADAPTIVE_VERSION && version <= ADAPT_ADAPTIVE_LAST_VERSION) {
-        s.fast = 0;
-        s.adaptive = (uint8_t)(version - ADAPT_ADAPTIVE_VERSION + 1);
-    } else if (version >= ADAPT_BMP_VERSION && version <= ADAPT_BMP_LAST_VERSION) {
-        s.bmp = 1;
-        s.adaptive = (uint8_t)(version - ADAPT_BMP_VERSION);
-    } else {
-        return fail(error, ADAPT_ERROR_UNSUPPORTED_VERSION, header[4], 0);
-    }
+    /* the model the version names, from its row (the stream's row for a
+     * metadata version): the profile, the transform, the side tables and
+     * set, the experimental predictor or BMP mode, the arbiters' keys */
+    stream = adapt_version_lookup(row->stream);
+    version = row->stream;
+    s.fast = stream->profile == ADAPT_PROFILE_FAST;
+    s.max = stream->profile == ADAPT_PROFILE_MAX;
+    s.mid = stream->mid;
+    s.text = stream->text ? ADAPT_TEXT_ON : 0;
+    s.keys = stream->keys;
+    s.adaptive = stream->adaptive;
+    s.bmp = stream->bmp;
+    s.compact = stream->compact;
+    s.lean = stream->lean;
     s.period = 0;
     if (header[7] & ADAPT_PERIOD_FLAG) {
         if (len < ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES) {
@@ -234,7 +153,7 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         }
     }
     s.table_frac = 0;
-    if (version == ADAPT_NORMAL_KEYS_VERSION) {
+    if (stream->trailing == ADAPT_TRAILING_POLICY) {
         size_t at = ADAPT_HEADER_BYTES + (s.period ? ADAPT_PERIOD_BYTES : 0);
         uint8_t policy;
         if (len < at + ADAPT_POLICY_BYTES) {
@@ -248,7 +167,7 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         s.keys = (uint8_t)(policy & ADAPT_POLICY_KEYS_MASK);
         if (policy & ADAPT_POLICY_TEXT) s.text = ADAPT_TEXT_ON;
     }
-    if (version == ADAPT_MAX_SIZED_VERSION || version == ADAPT_MAX_PRESSURE_VERSION) {
+    if (stream->trailing == ADAPT_TRAILING_SIZING) {
         size_t at = ADAPT_HEADER_BYTES + (s.period ? ADAPT_PERIOD_BYTES : 0);
         uint8_t sizing;
         if (len < at + ADAPT_SIZING_BYTES) {
@@ -264,7 +183,9 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
         if (sizing & ADAPT_SIZING_TEXT) s.text = ADAPT_TEXT_ON;
         s.low_start = (sizing & ADAPT_SIZING_LOW_START) != 0;
         s.model2 = (sizing & ADAPT_SIZING_MODEL2) != 0;
-        if (version == ADAPT_MAX_PRESSURE_VERSION && !s.model2) {
+        /* every sized version but the historical 58 requires the second
+         * max model's bit (72 and the keyed 80/81) */
+        if (version != ADAPT_MAX_SIZED_VERSION && !s.model2) {
             return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
         }
         /* the lean set ran only with the compact side tables until
