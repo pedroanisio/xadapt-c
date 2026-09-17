@@ -108,6 +108,12 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Performance
 
+- The first block's width trials stop after the first when the sample
+  codes below `CLASS_EVIDENCE` — that sample declines the class context
+  whatever the other two widths would say, so they were two wasted
+  encodes of the sample (bytes identical; a 4 KB input, whose encode is
+  mostly its trials, 0.03 -> 0.02 s under the default command with the
+  key trials included).
 - A model's arbiter weights are initialized from one row copied per set
   instead of a lane-by-lane call for each of the 170,000 sets (bytes
   identical): 45 % of a small file's encode, whose first-block trials

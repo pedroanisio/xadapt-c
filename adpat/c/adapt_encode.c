@@ -834,17 +834,25 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     unsigned choice_contexts;
     uint8_t choice_code;
     adapt_status status;
-    for (code = 0; code < 3; code++) {
-        status = trial(sizes, code, 0, block, head, coded, coded_cap, &coded_len[code], error);
-        if (status != ADAPT_OK) {
-            return status;
-        }
+    /* the width without a class history first: a sample it codes below
+     * CLASS_EVIDENCE declines the class context whatever the other two
+     * widths would say, so they are not tried (a 4 KB input's encode is
+     * mostly its trials) */
+    status = trial(sizes, 0, 0, block, head, coded, coded_cap, &coded_len[0], error);
+    if (status != ADAPT_OK) {
+        return status;
     }
     none = coded_len[0];
     if (none < CLASS_EVIDENCE) {
         *class_out = 0;
         *set_out = set_given ? sizes.set_code : 0;
         return ADAPT_OK;
+    }
+    for (code = 1; code < 3; code++) {
+        status = trial(sizes, code, 0, block, head, coded, coded_cap, &coded_len[code], error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
     }
     best_size = none - none / 1024;
     class_code = 0;
