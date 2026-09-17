@@ -28,6 +28,30 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "cadapt.telemetry.run.v1"
 MIB = 1 << 20
+
+# encode's budget is a preset, not a byte count: -0 .. -9 are what xz takes at
+# the same preset and -10, -11 are the two tiers above its ladder. --max-memory
+# is decode's cap alone and the encoder refuses it, so a byte budget asked for
+# here is snapped down to the preset that fits inside it.
+MEMORY_TIERS = (
+    ("-0", 3 * MIB), ("-1", 9 * MIB), ("-2", 17 * MIB), ("-3", 32 * MIB),
+    ("-4", 48 * MIB), ("-5", 94 * MIB), ("-6", 94 * MIB), ("-7", 186 * MIB),
+    ("-8", 370 * MIB), ("-9", 674 * MIB), ("-10", 1 << 30), ("-11", 2 << 30),
+)
+
+
+def memory_tier(budget: int) -> tuple[str, int]:
+    """The largest preset that fits in `budget`, as (flag, its bytes).
+
+    A budget under the smallest preset is refused rather than rounded up: a
+    run recorded at a budget the encoder never honoured is a false record.
+    """
+    fitting = [(flag, size) for flag, size in MEMORY_TIERS if size <= budget]
+    if not fitting:
+        raise ValueError(
+            f"{budget} bytes is below the smallest memory preset "
+            f"({MEMORY_TIERS[0][1]} bytes, {MEMORY_TIERS[0][0]})")
+    return max(fitting, key=lambda pair: pair[1])
 TIME_FIELDS = {
     "elapsed_seconds": "%e",
     "user_seconds": "%U",
@@ -427,7 +451,8 @@ def run_one(
     """Checkpoint one planned run before starting, then retain success or failure."""
     directory.mkdir()
     output = directory / "encoded.adpt"
-    command = [str(binary), "encode", str(corpus), "-o", str(output), "--max-memory", str(config["memory_bytes"])]
+    command = [str(binary), "encode", str(corpus), "-o", str(output),
+               memory_tier(config["memory_bytes"])[0]]
     profile = config["profile"]
     if profile.endswith("-bmp"):
         command += ["--transform", "bmp"]
@@ -507,7 +532,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
         dict(
             repeat=repeat,
             profile=profile,
-            memory_bytes=memory,
+            memory_bytes=memory_tier(memory)[1],
             threads=threads,
             segment_bytes=args.segment_bytes,
             verify=args.verify,
