@@ -98,6 +98,7 @@ adapt_sizes adapt_sizes_max(adapt_sizes sizes) {
     sizes.max = 1;
     sizes.fast = 0;
     sizes.mid = 0;
+    sizes.keys = ADAPT_KEYS_CLASSIC;
     sizes.adaptive = 0;
     sizes.bmp = 0;
     sizes.bmp_offset = sizes.bmp_width = sizes.bmp_rows = 0;
@@ -108,6 +109,7 @@ adapt_sizes adapt_sizes_mid(adapt_sizes sizes) {
     sizes.mid = 1;
     sizes.fast = 0;
     sizes.max = 0;
+    sizes.keys = ADAPT_KEYS_CLASSIC;
     sizes.compact = 0;
     sizes.lean = 0;
     sizes.table_frac = 0;
@@ -124,6 +126,7 @@ adapt_sizes adapt_sizes_mid(adapt_sizes sizes) {
 adapt_sizes adapt_sizes_fast(adapt_sizes sizes) {
     sizes.fast = 1;
     sizes.mid = 0;
+    sizes.keys = ADAPT_KEYS_CLASSIC;
     sizes.max = 0;
     sizes.compact = 0;
     sizes.lean = 0;
@@ -805,12 +808,17 @@ static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_cod
  * lean set that won its 32 KiB sample by a hair and its 256 KiB block by
  * less than a thousandth lost the whole file by seven. */
 static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
-                                 uint8_t *class_out, uint8_t *set_out, uint16_t *period_out, adapt_error *error) {
+                                 uint8_t *class_out, uint8_t *set_out, uint16_t *period_out, size_t *sample_out,
+                                 adapt_error *error) {
     /* ADAPT_CONTEXTS_LEAN: the set is given (set 3, and `lean` under the
      * max profile, both already in `sizes`); the width is still chosen.
      * The mid profile's set is the profile's (set 0 with MID_DROPPED). */
     const int set_given = sizes.contexts == ADAPT_CONTEXTS_LEAN || sizes.mid;
     size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
+    /* the sample's size under the chosen width and set, for choose_keys;
+     * 0 where no trial coded exactly that (a given set: the width trials
+     * run on the full set) */
+    *sample_out = 0;
     /* The period first: the contexts every trial runs depend on it. */
     sizes.period = sizes.fast ? 0 : adapt_detect_period(block, head);
     *period_out = sizes.period;
@@ -826,17 +834,28 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     unsigned choice_contexts;
     uint8_t choice_code;
     adapt_status status;
-    for (code = 0; code < 3; code++) {
-        status = trial(sizes, code, 0, block, head, coded, coded_cap, &coded_len[code], error);
-        if (status != ADAPT_OK) {
-            return status;
-        }
+    /* the width without a class history first: a sample it codes below
+     * CLASS_EVIDENCE declines the class context whatever the other two
+     * widths would say, so they are not tried (a 4 KB input's encode is
+     * mostly its trials) */
+    status = trial(sizes, 0, 0, block, head, coded, coded_cap, &coded_len[0], error);
+    if (status != ADAPT_OK) {
+        return status;
     }
     none = coded_len[0];
     if (none < CLASS_EVIDENCE) {
         *class_out = 0;
         *set_out = set_given ? sizes.set_code : 0;
+        /* the full set, width none: the trial just run, unless the set is
+         * given (the trial ran on the full set, not the given one) */
+        if (!set_given) *sample_out = none;
         return ADAPT_OK;
+    }
+    for (code = 1; code < 3; code++) {
+        status = trial(sizes, code, 0, block, head, coded, coded_cap, &coded_len[code], error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
     }
     best_size = none - none / 1024;
     class_code = 0;
@@ -880,6 +899,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         *set_out = sizes.set_code;
         return ADAPT_OK;
     }
+    *sample_out = full;
     /* The fast profile's sets all cost the decoder the same, so every one
      * is tried and the smallest taken, on the terms below: it must beat
      * the first set by SET_MARGIN of the sample, and a choice on a
@@ -975,8 +995,62 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
             set_code = 0;
         }
     }
+    if (set_code != 0) {
+        *sample_out = choice_size;
+    }
     *class_out = class_code;
     *set_out = set_code;
+    return ADAPT_OK;
+}
+
+/* The arbiters' key policy (adapt.h, ADAPT_MAX_KEYS_VERSION) for a max
+ * profile file, from the first block once its width and set are chosen:
+ * the two keyed policies on the sample against the classic keys' size
+ * there (`classic`, from choose_model's trials when one coded exactly
+ * the chosen width and set, else coded here), the smallest taken when it
+ * beats the classic keys — by SET_MARGIN on a block longer than two
+ * samples, outright when the sample is the block. The classic keys stay
+ * the fallback, so no file is written larger than version 72 wrote it,
+ * and a sample that is the whole file decides exactly. A proof on the
+ * whole block, as the width and the set have, changed no decision on
+ * any row of the mixed corpus and cost small files a third of their
+ * time, so the sample decides. The normal profile chooses the same way
+ * (ADAPT_NORMAL_KEYS_VERSION); the fast and mid profiles, whose one
+ * arbiter has no such key, and the adaptive and BMP variants keep the
+ * classic keys. */
+static adapt_status choose_keys(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
+                                size_t classic, uint8_t *keys_out, adapt_error *error) {
+    size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
+    int deep = n > 2 * head;
+    size_t size, best_size;
+    uint8_t k, best = ADAPT_KEYS_CLASSIC;
+    adapt_status status;
+    *keys_out = ADAPT_KEYS_CLASSIC;
+    /* the second max model, or the normal profile: the profiles whose
+     * second, third and fourth arbiters run */
+    if ((sizes.max ? !sizes.model2 : sizes.fast || sizes.mid) || sizes.adaptive || sizes.bmp) {
+        return ADAPT_OK;
+    }
+    if (classic == 0) {
+        sizes.keys = ADAPT_KEYS_CLASSIC;
+        status = trial(sizes, sizes.class_code, sizes.set_code, block, head, coded, coded_cap, &classic, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+    }
+    best_size = deep ? SET_MARGIN(classic) : classic;
+    for (k = ADAPT_KEYS_TEXT; k <= ADAPT_KEYS_BINARY; k++) {
+        sizes.keys = k;
+        status = trial(sizes, sizes.class_code, sizes.set_code, block, head, coded, coded_cap, &size, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        if (size < best_size) {
+            best_size = size;
+            best = k;
+        }
+    }
+    *keys_out = best;
     return ADAPT_OK;
 }
 
@@ -1917,12 +1991,19 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         sizes.set_code = 3;
         sizes.lean = (uint8_t)(sizes.max && !sizes.adaptive && !sizes.bmp);
     }
+    sizes.keys = ADAPT_KEYS_CLASSIC;
     if (n == 0 || (entropy_256(block, n) >= SKIP_ENTROPY_256 && !repeats_within(block, n, scan))) {
         sizes.class_code = 0;
         sizes.set_code = sizes.contexts == ADAPT_CONTEXTS_LEAN ? 3 : 0;
         sizes.period = 0;
     } else {
-        status = choose_model(sizes, block, n, framed, framed_cap, &sizes.class_code, &sizes.set_code, &sizes.period, error);
+        size_t sample;
+        status = choose_model(sizes, block, n, framed, framed_cap, &sizes.class_code, &sizes.set_code, &sizes.period, &sample,
+                              error);
+        if (status != ADAPT_OK) {
+            goto done;
+        }
+        status = choose_keys(sizes, block, n, framed, framed_cap, sample, &sizes.keys, error);
         if (status != ADAPT_OK) {
             goto done;
         }
@@ -1967,12 +2048,17 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         header[9] = (uint8_t)(sizes.period >> 8);
         header_len += ADAPT_PERIOD_BYTES;
     }
-    if (header[4] == ADAPT_MAX_SIZED_VERSION || header[4] == ADAPT_MAX_PRESSURE_VERSION) {
+    if (header[4] == ADAPT_MAX_SIZED_VERSION || header[4] == ADAPT_MAX_PRESSURE_VERSION || header[4] == ADAPT_MAX_KEYS_VERSION ||
+        header[4] == ADAPT_MAX_KEYS_BINARY_VERSION) {
         header[header_len] = (uint8_t)((sizes.compact ? ADAPT_SIZING_COMPACT : 0) | (sizes.lean ? ADAPT_SIZING_LEAN : 0) |
                                        (text ? ADAPT_SIZING_TEXT : 0) | (unsigned)sizes.table_frac << ADAPT_SIZING_FRAC_SHIFT |
                                        (sizes.low_start ? ADAPT_SIZING_LOW_START : 0) |
                                        (sizes.model2 ? ADAPT_SIZING_MODEL2 : 0));
         header_len += ADAPT_SIZING_BYTES;
+    }
+    if (header[4] == ADAPT_NORMAL_KEYS_VERSION) {
+        header[header_len] = (uint8_t)(sizes.keys | (text ? ADAPT_POLICY_TEXT : 0));
+        header_len += ADAPT_POLICY_BYTES;
     }
     if (sizes.bmp) {
         bmp_store32(header + header_len, sizes.bmp_offset);
@@ -2347,7 +2433,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);

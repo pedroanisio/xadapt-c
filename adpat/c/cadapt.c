@@ -588,8 +588,10 @@ static void print_usage(FILE *stream) {
             "the normal profile's tables, about a quarter less time for 1.4 %% (enwik8) to\n"
             "2.4 %% (enwik9) more bytes; --max the max profile, which writes\n"
             "fewer bytes for about three times the time in the same memory; the default is\n"
-            "the normal profile. Normal/fast/mid/max streams use versions %u/%u/%u/%u;\n"
-            "named files and folders include metadata in versions %u/%u/%u/%u.\n"
+            "the normal profile. Normal/fast/mid/max streams use versions %u/%u/%u/%u (the\n"
+            "max profile %u or %u and the normal profile %u when their arbiters take the class\n"
+            "or recall keys, chosen per file); named files and folders include metadata in\n"
+            "versions %u/%u/%u/%u (%u, %u, %u).\n"
             "--adaptive rates/sparse/retained select experimental causal predictors\n"
             "over normal or --max. auto spools the\n"
             "source once to temporary disk and selects the smallest complete container\n"
@@ -601,8 +603,10 @@ static void print_usage(FILE *stream) {
             "--transform bmp explicitly selects that reversible transform. Search\n"
             "uses up to eight encodes, temporary disk of input plus two containers, and\n"
             "verifies only with --verify (one model, also for pipes).\n",
-            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MID_VERSION, ADAPT_MAX_PRESSURE_VERSION,
-            ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION, ADAPT_MID_METADATA_VERSION, ADAPT_MAX_PRESSURE_METADATA_VERSION);
+            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MID_VERSION, ADAPT_MAX_PRESSURE_VERSION, ADAPT_MAX_KEYS_VERSION,
+            ADAPT_MAX_KEYS_BINARY_VERSION, ADAPT_NORMAL_KEYS_VERSION, ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION,
+            ADAPT_MID_METADATA_VERSION, ADAPT_MAX_PRESSURE_METADATA_VERSION, ADAPT_MAX_KEYS_METADATA_VERSION,
+            ADAPT_MAX_KEYS_BINARY_METADATA_VERSION, ADAPT_NORMAL_KEYS_METADATA_VERSION);
     fprintf(stream,
             "The text transform (versions 62--66, 67--71 with metadata) replaces a word both\n"
             "sides have seen three times by a code the model reads as one symbol; the book\n"
@@ -4097,6 +4101,9 @@ static int info_command(int argc, char **argv) {
     printf("x86 transform   %s\n", sizes.x86 ? "yes" : "no");
     printf("text transform  %s\n", sizes.text == ADAPT_TEXT_ON ? "yes" : "no");
     printf("arbiter start   %s\n", sizes.low_start ? "1/32" : "1/4");
+    if (!sizes.fast && !sizes.mid) {
+        printf("arbiter keys    %s\n", sizes.keys == ADAPT_KEYS_TEXT ? "classes and nesting" : sizes.keys == ADAPT_KEYS_BINARY ? "classes and recall" : "classic");
+    }
     if (sizes.bmp) printf("bmp transform   %lu x %lu, pixel offset %lu\n", (unsigned long)sizes.bmp_width,
                           (unsigned long)sizes.bmp_rows, (unsigned long)sizes.bmp_offset);
     printf("holds           %s\n", sizes.archive ? "a folder (an adapt archive)" : "a file");

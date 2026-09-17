@@ -33,6 +33,11 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Fixed
 
+- `make check` builds the codec once before its parallel parts: the
+  provenance part ran `make all` in the same build directory as the codec
+  part, and two makes relinking `cadapt` at once left the safety suite
+  executing a half-written binary (`Permission denied`) whenever the
+  sources had changed since the last build.
 - Restore Linux access ACLs after other attributes, preserving read-only ACLs
   together with user attributes on regular files, sparse files, directories
   and folder roots.
@@ -46,6 +51,12 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Changed
 
+- The floors re-locked on the keyed-arbiters binary (LOCKS.md,
+  2026-09-16): enwik8-8MiB 1,669,716 B, enwik8-16MiB 3,236,535 B, enwik8
+  17,800,141 B, enwik9 145,784,134 B in 1,054.0 CPU s (the enwik8 rows'
+  throughput floors stand: equal in the interleaved comparison); the
+  `--max -6` mixed-corpus floors lowered on 19 of 23 rows (39,694,991 ->
+  39,458,213 B in total), the default command's unchanged.
 - The locked baseline: `tools/ratio_floor.json` names `encode --max
   --allocation context --contexts lean` and its floors are re-locked on
   that command (enwik8 17,902,645 B in 117.1 CPU s, enwik9 146,797,785 B;
@@ -54,6 +65,37 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Added
 
+- The normal profile's arbiters keyed the same way (version 84, 85 with
+  metadata; `ADAPT_NORMAL_KEYS_VERSION`): the model of version 19 with
+  the key policies of 80 and 81 on its second, third and fourth
+  arbiters, chosen per file on the first block as under `--max`, the
+  classic keys keeping 19, 22, 62 and 67. The normal profile has no
+  sizing byte and its text transform is a version family of its own, so
+  84 carries one policy byte after the fixed header — the key policy in
+  bits 0 and 1, the text transform in bit 2. Under the default command,
+  same time and memory: the 8 MiB proxy 1,726,147 -> 1,699,643 B
+  (-1.54 %), enwik8 18,500,473 -> 18,249,169 (-1.36 %), enwik9
+  168,451,193 -> 165,865,476 (-1.53 %), the mixed corpus 40,421,105 ->
+  40,047,647 (-0.92 %; 20 rows smaller, 3 equal, none larger), whose
+  floors are lowered; the max, fast and mid streams are unchanged. `cadapt info` prints the
+  policy for normal files too (`arbiter keys    classic` for a
+  version-19 file).
+- The max profile's arbiters keyed by the byte classes (`adapt_sizes.keys`,
+  versions 80/81, 82/83 with metadata; `ADAPT_MAX_KEYS_VERSION`): the
+  second, third and fourth arbiters' weight sets are chosen by other state
+  than before — the third by the classes of the last five bytes under both
+  new policies; under the text policy the second by the last two and two
+  thirds classes and the fourth by the nesting state with the last tag
+  and two classes, under the binary policy the fourth by recall's expected
+  byte and state. The encoder tries both against the classic keys on the
+  first block's sample (`choose_keys`) and keeps version 72 where the
+  classic keys win, so no file is written larger than before; every
+  earlier version decodes as written. `cadapt info` prints the choice as
+  `arbiter keys`. Same tables, memory and cycles: on the 8 MiB proxy of
+  the locked baseline 1,681,725 -> 1,669,716 B (-0.71 %); the enwik8,
+  enwik9 and mixed-corpus figures are in LOCKS.md. The idea is the
+  mixer-selection context of the PAQ family (Mahoney, *Data Compression
+  Explained*), the keys this codec's own (DLV-4).
 - `--mid` on encode (`adapt_sizes.mid`, `adapt_sizes_mid()`): a third
   profile between `--fast` and the default, versions 76/77 (plain, under
   the text transform) and 78/79 with metadata. It runs the normal
@@ -81,6 +123,17 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Performance
 
+- The first block's width trials stop after the first when the sample
+  codes below `CLASS_EVIDENCE` — that sample declines the class context
+  whatever the other two widths would say, so they were two wasted
+  encodes of the sample (bytes identical; a 4 KB input, whose encode is
+  mostly its trials, 0.03 -> 0.02 s under the default command with the
+  key trials included).
+- A model's arbiter weights are initialized from one row copied per set
+  instead of a lane-by-lane call for each of the 170,000 sets (bytes
+  identical): 45 % of a small file's encode, whose first-block trials
+  each build a model — the 4 KB corpus rows encode in 0.05 s instead of
+  0.08, alice29.txt in 1.33 s instead of 1.4.
 - The vector lane and learn paths of the max profile run only the slot
   groups a file's context set fills, and no longer zero the unused
   lanes bit by bit (a `rep stos` per bit): bytes identical, the lean

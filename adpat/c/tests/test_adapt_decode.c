@@ -120,8 +120,8 @@ static int sink_write(void *context, const uint8_t *buf, size_t len) {
 }
 
 /* The mid profile's versions: 76 plain, 77 under the text transform, 78
- * and 79 the same with metadata; 80 is no version; a set code is refused
- * (the profile's set is fixed). */
+ * and 79 the same with metadata; a set code is refused (the profile's set
+ * is fixed). */
 static void test_mid_versions(void) {
     uint8_t file[ADAPT_HEADER_BYTES];
     adapt_sizes sizes;
@@ -140,11 +140,97 @@ static void test_mid_versions(void) {
     CHECK(adapt_header_has_metadata(file));
     file[4] = ADAPT_TEXT_MID_METADATA_VERSION;
     CHECK(adapt_header_has_metadata(file));
-    file[4] = (uint8_t)(ADAPT_TEXT_MID_METADATA_VERSION + 1);
-    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     file[4] = ADAPT_MID_VERSION;
     file[6] = (uint8_t)(16 | 3 << 5);
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+}
+
+/* The keyed max profile's versions: 80 the text keys, 81 the binary keys,
+ * 82 and 83 the same with metadata, each version 72's model and sizing
+ * byte (the second max model's bit required); 84 is no version. */
+static void test_keys_versions(void) {
+    uint8_t file[ADAPT_HEADER_BYTES + ADAPT_SIZING_BYTES];
+    adapt_sizes sizes;
+    adapt_error error;
+    memcpy(file, "ADPT", 4);
+    file[4] = ADAPT_MAX_KEYS_VERSION;
+    file[5] = 20;
+    file[6] = 16;
+    file[7] = 20;
+    file[8] = ADAPT_SIZING_MODEL2;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.max == 1 && sizes.model2 == 1 && sizes.keys == ADAPT_KEYS_TEXT && sizes.text == 0 && !adapt_header_has_metadata(file));
+    CHECK(adapt_header_len(file) == ADAPT_HEADER_BYTES + ADAPT_SIZING_BYTES);
+    file[4] = ADAPT_MAX_KEYS_BINARY_VERSION;
+    file[8] = ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.max == 1 && sizes.keys == ADAPT_KEYS_BINARY && sizes.text == ADAPT_TEXT_ON && sizes.low_start == 1);
+    CHECK(adapt_sizes_valid(sizes));
+    file[4] = ADAPT_MAX_KEYS_METADATA_VERSION;
+    CHECK(adapt_header_has_metadata(file));
+    file[4] = ADAPT_MAX_KEYS_BINARY_METADATA_VERSION;
+    CHECK(adapt_header_has_metadata(file));
+    /* the keys ride the second max model alone */
+    file[4] = ADAPT_MAX_KEYS_VERSION;
+    file[8] = 0;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+    /* and, as sizes, only under the max profile with it */
+    file[8] = ADAPT_SIZING_MODEL2;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    sizes.model2 = 0;
+    CHECK(!adapt_sizes_valid(sizes));
+    sizes.model2 = 1;
+    sizes.max = 0;
+    CHECK(!adapt_sizes_valid(sizes));
+    sizes.max = 1;
+    sizes.keys = ADAPT_KEYS_BINARY + 1;
+    CHECK(!adapt_sizes_valid(sizes));
+}
+
+/* The keyed normal profile: version 84 with its policy byte (the key
+ * policy in bits 0 and 1, the text transform in bit 2, nothing else),
+ * 85 the same with metadata; 86 is no version; a policy naming the
+ * classic keys, a fourth policy or a spare bit is refused; as sizes the
+ * keys go only with the normal profile. */
+static void test_normal_keys_versions(void) {
+    uint8_t file[ADAPT_HEADER_BYTES + ADAPT_POLICY_BYTES];
+    adapt_sizes sizes;
+    adapt_error error;
+    memcpy(file, "ADPT", 4);
+    file[4] = ADAPT_NORMAL_KEYS_VERSION;
+    file[5] = 20;
+    file[6] = 16;
+    file[7] = 20;
+    file[8] = ADAPT_KEYS_TEXT;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.max == 0 && sizes.fast == 0 && sizes.mid == 0 && sizes.keys == ADAPT_KEYS_TEXT && sizes.text == 0);
+    CHECK(!adapt_header_has_metadata(file) && adapt_header_len(file) == ADAPT_HEADER_BYTES + ADAPT_POLICY_BYTES);
+    CHECK(adapt_sizes_valid(sizes) && adapt_sizes_header_bytes(sizes) == adapt_header_len(file));
+    file[8] = ADAPT_KEYS_BINARY | ADAPT_POLICY_TEXT;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.keys == ADAPT_KEYS_BINARY && sizes.text == ADAPT_TEXT_ON);
+    file[4] = ADAPT_NORMAL_KEYS_METADATA_VERSION;
+    CHECK(adapt_header_has_metadata(file));
+    file[4] = (uint8_t)(ADAPT_NORMAL_KEYS_METADATA_VERSION + 1);
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
+    file[4] = ADAPT_NORMAL_KEYS_VERSION;
+    file[8] = ADAPT_KEYS_CLASSIC;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+    file[8] = ADAPT_KEYS_BINARY + 1;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+    file[8] = ADAPT_KEYS_TEXT | 8;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+    CHECK_STATUS(adapt_read_header(file, ADAPT_HEADER_BYTES, &sizes, &error), ADAPT_ERROR_TRUNCATED);
+    file[8] = ADAPT_KEYS_TEXT;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    sizes.fast = 1;
+    CHECK(!adapt_sizes_valid(sizes));
+    sizes.fast = 0;
+    sizes.mid = 1;
+    CHECK(!adapt_sizes_valid(sizes));
+    sizes.mid = 0;
+    sizes.adaptive = 1;
+    CHECK(!adapt_sizes_valid(sizes));
 }
 
 static void test_vector(const char *name, const char *source) {
@@ -584,10 +670,10 @@ static void test_framing(void) {
     file[4] = 4;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
-    /* past the mid profile's last version nothing is named */
-    file[4] = ADAPT_TEXT_MID_METADATA_VERSION + 1;
+    /* past the keyed normal profile's last version nothing is named */
+    file[4] = ADAPT_NORMAL_KEYS_METADATA_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_TEXT_MID_METADATA_VERSION + 1);
+    CHECK(error.detail == ADAPT_NORMAL_KEYS_METADATA_VERSION + 1);
     /* the text versions front the five models in order, and their
      * metadata variants five higher carry a record; nothing else does */
     {
@@ -1650,7 +1736,18 @@ int main(int argc, char **argv) {
     SHARD(test_vector("text-fast.adpt", "text.bin"));
     SHARD(test_vector("text-mid.adpt", "text.bin"));
     SHARD(test_vector("text-max.adpt", "text.bin"));
+    SHARD(test_vector("text-max2.adpt", "text.bin"));
+    SHARD(test_vector("text-max3.adpt", "text.bin"));
+    SHARD(test_vector("abc-max2.adpt", "abc.bin"));
+    SHARD(test_vector("abc-max3.adpt", "abc.bin"));
     SHARD(test_mid_versions());
+    SHARD(test_keys_versions());
+    SHARD(test_normal_keys_versions());
+    SHARD(test_vector("text-keyed.adpt", "text.bin"));
+    SHARD(test_vector("records-keyed.adpt", "records.bin"));
+    SHARD(test_vector("cyrillic-keyed.adpt", "cyrillic.bin"));
+    SHARD(test_vector("cjk-keyed.adpt", "cjk.bin"));
+    SHARD(test_vector("segmented-keyed.adpt", "segmented.bin"));
     SHARD(test_vector("text-compact.adpt", "text.bin"));
     SHARD(test_vector("text-lean.adpt", "text.bin"));
     SHARD(test_vector("records.adpt", "records.bin"));

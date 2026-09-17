@@ -367,10 +367,16 @@ static inline uint8_t encode_header_version(adapt_sizes sizes) {
         return (uint8_t)((sizes.max ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + sizes.adaptive - 1);
     }
     if (sizes.max) {
-        return ADAPT_MAX_PRESSURE_VERSION;
+        return sizes.keys == ADAPT_KEYS_TEXT     ? ADAPT_MAX_KEYS_VERSION
+               : sizes.keys == ADAPT_KEYS_BINARY ? ADAPT_MAX_KEYS_BINARY_VERSION
+                                                 : ADAPT_MAX_PRESSURE_VERSION;
     }
     if (sizes.mid) {
         return sizes.text == ADAPT_TEXT_ON ? ADAPT_TEXT_MID_VERSION : ADAPT_MID_VERSION;
+    }
+    if (!sizes.fast && sizes.keys != ADAPT_KEYS_CLASSIC) {
+        /* the keyed normal profile: the transform rides its policy byte */
+        return ADAPT_NORMAL_KEYS_VERSION;
     }
     if (sizes.text == ADAPT_TEXT_ON) {
         return sizes.fast ? ADAPT_TEXT_FAST_VERSION : ADAPT_TEXT_VERSION;
@@ -1237,6 +1243,12 @@ typedef struct model {
     int slots_on, extra_on;
     /* the mid profile: the normal path with its first arbiter alone */
     int mid;
+    /* the arbiters' key policy (adapt_sizes.keys): under ADAPT_KEYS_TEXT
+     * and ADAPT_KEYS_BINARY the third and fourth arbiters' rows are set
+     * per byte (keys_row3, keys_row4, see keys_rows) and the second's set
+     * is by the classes under ADAPT_KEYS_TEXT */
+    int keys;
+    size_t keys_row3, keys_row4;
     /* groups of eight slots the vector lane path runs: ceil((1 + hashed) / 8) */
     int lane_groups;
     size_t mix34_row_mask;
@@ -1838,6 +1850,28 @@ static inline void run_slots(const model *m, const uint64_t hk[HASHED], uint64_t
     }
 }
 
+/* The third and fourth arbiters' rows for the byte after `classes`,
+ * `nest_*` and the recall state, under the key policies (adapt.h,
+ * ADAPT_MAX_KEYS_VERSION): both policies key the third by the classes of
+ * the last five bytes; the fourth ADAPT_KEYS_TEXT keys by the nesting
+ * state — link and template depth, in a tag, the last tag — with the
+ * last two classes, ADAPT_KEYS_BINARY by recall's expected byte (256 for
+ * none) and its state. Rows, not sets: the partial byte is added per bit. */
+static inline void keys_rows(int keys, size_t row_mask, uint64_t classes, uint32_t nest_link, uint32_t nest_tmpl,
+                             uint32_t nest_intag, uint64_t nest_last, uint32_t mlen, uint32_t mmiss, uint8_t mbyte,
+                             size_t *row3, size_t *row4) {
+    uint64_t k4;
+    *row3 = ((size_t)(mix64((classes & 0x7FFF) | ((uint64_t)33 << 56)) >> 48) & row_mask) * 256;
+    if (keys == ADAPT_KEYS_TEXT) {
+        k4 = mix64((uint64_t)(nest_link & 3) | (uint64_t)(nest_tmpl & 3) << 2 | (uint64_t)(nest_intag != 0) << 4 |
+                   (nest_last & 0x7FF) << 5 | (classes & 0x3F) << 16 | ((uint64_t)43 << 56));
+    } else {
+        uint64_t live = mlen > 0 && !mmiss;
+        k4 = mix64((live ? (uint64_t)mbyte : 256) | (uint64_t)(!live ? 0 : mlen < 16 ? 1 : 2) << 9 | ((uint64_t)31 << 56));
+    }
+    *row4 = ((size_t)(k4 >> 48) & row_mask) * 256;
+}
+
 static inline void start_byte(model *m, int fast) {
     uint64_t c = m->c8;
     uint64_t rh;
@@ -1901,6 +1935,11 @@ static inline void start_byte(model *m, int fast) {
     slots_refresh(m);
     m->apm2_row = ((size_t)(mix64((c & 0xFFFF) | ((uint64_t)21 << 56)) >> 46) & (m->apm2_mask >> 8)) << 8;
     m->wset4_row = ((size_t)(mix64(m->word + 1) >> 48) & m->mix34_row_mask) * 256;
+    if (m->keys != ADAPT_KEYS_CLASSIC) {
+        keys_rows(m->keys, m->mix34_row_mask, m->classes, m->nest_link, m->nest_tmpl, m->nest_intag, m->nest_last, m->mlen,
+                  m->mmiss, m->mbyte, &m->keys_row3, &m->keys_row4);
+        m->wset4_row = m->keys_row4;
+    }
 }
 
 static inline size_t recall_key(uint64_t c8, size_t mmask);
@@ -1952,6 +1991,15 @@ static inline void prefetch_byte(model *m, uint8_t b, int fast, int now) {
         size_t w3 = (((size_t)(hk[H_O2] >> 48) & m->mix34_row_mask) * 256 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
         size_t w4 = (((size_t)(mix64(v.word + 1) >> 48) & m->mix34_row_mask) * 256 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
         size_t k;
+        if (m->keys != ADAPT_KEYS_CLASSIC) {
+            /* the view's recall state after `b`: a match `b` confirms
+             * goes on, one it breaks is guessed absent */
+            size_t row3, row4;
+            keys_rows(m->keys, m->mix34_row_mask, v.classes, v.nest_link, v.nest_tmpl, v.nest_intag, v.nest_last, v.mlen, 0,
+                      (uint8_t)v.mbyte, &row3, &row4);
+            w3 = (row3 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
+            w4 = (row4 + 1) * (size_t)ARBITER_STRIDE(0, m->max);
+        }
         ADAPT_PREFETCH(m->apm[((size_t)b << 8 | 1) & (APM_CONTEXTS - 1)]);
         ADAPT_PREFETCH((const char *)m->apm[((size_t)b << 8 | 1) & (APM_CONTEXTS - 1)] + 64);
         ADAPT_PREFETCH(m->apm2[(row2 | 1) & m->apm2_mask]);
@@ -2331,6 +2379,14 @@ static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast
      * set) and of the word hash, each with the partial byte */
     m->wset2 = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (size_t)(m->c8 & 0xFF);
     m->wset3 = ((size_t)(m->h[1] >> 48) & m->mix34_row_mask) * 256 + (m->c0 & 255);
+    if (m->keys != ADAPT_KEYS_CLASSIC) {
+        /* the key policies (keys_rows): the third arbiter's row by the
+         * classes, the second's set by them too under ADAPT_KEYS_TEXT */
+        m->wset3 = m->keys_row3 + (m->c0 & 255);
+        if (m->keys == ADAPT_KEYS_TEXT) {
+            m->wset2 = (mstate * 2 + (m->rcnt[0] > 0)) * 256 + (size_t)(m->classes & 0xFF);
+        }
+    }
     m->wset4 = m->wset4_row + (m->c0 & 255);
     if (!fast && !max && m->mid) {
         /* the mid profile: the first arbiter alone is the verdict, the
@@ -2793,6 +2849,7 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
     m->class_bits = 3 * CLASS_WIDTHS[sizes.class_code];
     m->fast = sizes.fast != 0;
     m->mid = sizes.mid != 0;
+    m->keys = sizes.keys;
     m->max = sizes.max != 0;
     m->compact = sizes.compact != 0;
     m->low_start = sizes.low_start != 0;
@@ -2848,11 +2905,20 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
     /* Weights of one first-layer arbiter at the start: the context inputs'
      * stretched probabilities begin trusted; their other lanes and the run
      * inputs earn it. */
+    /* Every set of an arbiter starts from the same row, so the row is
+     * built once and copied: the lane-by-lane call for each of the
+     * 170,000 sets of the max profile was 45 % of a small file's encode,
+     * whose first-block trials each build a model. */
     if (m->model2) {
         /* the int16 arbiters start at the same weights in their own
          * units (1/32768: half the int32 value), the fifth like the rest */
         size_t lanes2 = (size_t)LANES(0, 1);
         size_t sets2 = MIXER2_SETS, sets34 = MIXER34_SETS(m->compact);
+        int16_t row16[LANES(0, 1) + 1];
+        for (j = 0; j < lanes2; j++) {
+            row16[j] = (int16_t)(initial_weight(j, 0, 1, m->low_start) >> 1);
+        }
+        row16[lanes2] = 0;
         for (i = 0; i < MIXER_SETS + sets2 + 2 * sets34 + EXTRA_SETS; i++) {
             int16_t *w = i < MIXER_SETS                    ? m->w16 + i * (lanes2 + 1)
                          : i < MIXER_SETS + sets2          ? m->w16_2 + (i - MIXER_SETS) * (lanes2 + 1)
@@ -2860,29 +2926,28 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
                          : i < MIXER_SETS + sets2 + 2 * sets34
                              ? m->w16_4 + (i - MIXER_SETS - sets2 - sets34) * (lanes2 + 1)
                              : m->w16_x + (i - MIXER_SETS - sets2 - 2 * sets34) * (lanes2 + 1);
-            for (j = 0; j < lanes2; j++) {
-                w[j] = (int16_t)(initial_weight(j, 0, 1, m->low_start) >> 1);
-            }
-            w[lanes2] = 0;
+            memcpy(w, row16, (lanes2 + 1) * sizeof(int16_t));
         }
     } else {
         size_t lanes = (size_t)LANES(m->fast, m->max), lanes2 = (size_t)LANES(0, m->max);
+        int32_t row[LANES(0, 1) + 1], row2[LANES(0, 1) + 1];
+        for (j = 0; j < lanes; j++) {
+            row[j] = initial_weight(j, m->fast, m->max, m->low_start);
+        }
+        row[lanes] = 0;
+        for (j = 0; j < lanes2; j++) {
+            row2[j] = initial_weight(j, 0, m->max, m->low_start);
+        }
+        row2[lanes2] = 0;
         for (i = 0; i < MIXER_SETS; i++) {
-            int32_t *w = m->weights + i * (lanes + 1);
-            for (j = 0; j < lanes; j++) {
-                w[j] = initial_weight(j, m->fast, m->max, m->low_start);
-            }
-            w[lanes] = 0;
+            memcpy(m->weights + i * (lanes + 1), row, (lanes + 1) * sizeof(int32_t));
         }
         for (i = 0; i < MIXER2_SETS + 2 * MIXER34_SETS(m->compact); i++) {
             int32_t *w = i < MIXER2_SETS ? m->weights2 + i * (lanes2 + 1)
                          : i < MIXER2_SETS + MIXER34_SETS(m->compact)
                              ? m->weights3 + (i - MIXER2_SETS) * (lanes2 + 1)
                              : m->weights4 + (i - MIXER2_SETS - MIXER34_SETS(m->compact)) * (lanes2 + 1);
-            for (j = 0; j < lanes2; j++) {
-                w[j] = initial_weight(j, 0, m->max, m->low_start);
-            }
-            w[lanes2] = 0;
+            memcpy(w, row2, (lanes2 + 1) * sizeof(int32_t));
         }
     }
     /* the final arbiter starts as the mean of its verdicts, four or five */
@@ -3100,7 +3165,9 @@ static inline int sizes_valid(adapt_sizes s) {
            s.text <= ADAPT_TEXT_OFF && (s.text != ADAPT_TEXT_ON || (!s.adaptive && !s.bmp && !s.x86)) &&
            s.low_start <= 1 && (!s.low_start || (s.max && !s.adaptive && !s.bmp)) &&
            s.model2 <= 1 && (!s.model2 || s.max) &&
-           s.mid <= 1 && (!s.mid || (!s.fast && !s.max && !s.adaptive && !s.bmp && s.set_code == 0));
+           s.mid <= 1 && (!s.mid || (!s.fast && !s.max && !s.adaptive && !s.bmp && s.set_code == 0)) &&
+           s.keys <= ADAPT_KEYS_BINARY &&
+           (s.keys == ADAPT_KEYS_CLASSIC || (s.max ? s.model2 != 0 : !s.fast && !s.mid && !s.adaptive && !s.bmp));
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {
