@@ -337,6 +337,133 @@ def measure(
     }
 
 
+# The container's version map, read from the codec's own header rather than
+# transcribed. Transcribing it is what let this reader fall behind: it accepted
+# versions 19 to 52 while the encoder had reached 85, and every telemetry run
+# that inspected a container failed. adapt.h is the one place a new version is
+# declared, so a new version reaches this reader by existing.
+ADAPT_H = ROOT / "adpat/c/adapt.h"
+
+
+def adapt_constants(path: Path = ADAPT_H) -> dict[str, int]:
+    """Every `#define ADAPT_<NAME> <integer>` in the codec's header."""
+    try:
+        text = path.read_text()
+    except OSError as failure:
+        raise ValueError(f"cannot read the codec header at {path}: {failure}") from failure
+    found = dict(re.findall(r"^#define\s+(ADAPT_[A-Z0-9_]+)\s+(\d+)u?\s*$", text, re.M))
+    if "ADAPT_FORMAT_VERSION" not in found:
+        raise ValueError(f"{path} declares no ADAPT_FORMAT_VERSION; it is not the codec header")
+    return {name: int(value) for name, value in found.items()}
+
+
+_C = adapt_constants()
+
+
+def _span(first: str, last: str) -> range:
+    return range(_C[first], _C[last] + 1)
+
+
+ADAPTIVE_VERSION = _C["ADAPT_ADAPTIVE_VERSION"]
+MAX_ADAPTIVE_VERSION = _C["ADAPT_MAX_ADAPTIVE_VERSION"]
+ADAPTIVE_VERSIONS = frozenset(_span("ADAPT_ADAPTIVE_VERSION", "ADAPT_ADAPTIVE_LAST_VERSION")) | \
+    frozenset(_span("ADAPT_ADAPTIVE_METADATA_VERSION", "ADAPT_ADAPTIVE_METADATA_LAST_VERSION"))
+MAX_ADAPTIVE_VERSIONS = frozenset(_span("ADAPT_MAX_ADAPTIVE_VERSION", "ADAPT_MAX_ADAPTIVE_LAST_VERSION")) | \
+    frozenset(_span("ADAPT_MAX_ADAPTIVE_METADATA_VERSION", "ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION"))
+BMP_VERSIONS = frozenset(_span("ADAPT_BMP_VERSION", "ADAPT_BMP_METADATA_LAST_VERSION")) | \
+    frozenset(_span("ADAPT_MAX_BMP_VERSION", "ADAPT_MAX_BMP_METADATA_LAST_VERSION"))
+# The sized max families carry the sizing byte; header_is_sized in adapt_decode.c.
+SIZED_VERSIONS = frozenset({
+    _C["ADAPT_MAX_SIZED_VERSION"], _C["ADAPT_MAX_SIZED_METADATA_VERSION"],
+    _C["ADAPT_MAX_PRESSURE_VERSION"], _C["ADAPT_MAX_PRESSURE_METADATA_VERSION"],
+}) | frozenset(_span("ADAPT_MAX_KEYS_VERSION", "ADAPT_MAX_KEYS_BINARY_METADATA_VERSION"))
+# The keyed normal profile carries the policy byte instead; header_has_policy.
+POLICY_VERSIONS = frozenset({_C["ADAPT_NORMAL_KEYS_VERSION"], _C["ADAPT_NORMAL_KEYS_METADATA_VERSION"]})
+KEYED_MAX_VERSIONS = frozenset(_span("ADAPT_MAX_KEYS_VERSION", "ADAPT_MAX_KEYS_BINARY_METADATA_VERSION"))
+MID_VERSIONS = frozenset(_span("ADAPT_MID_VERSION", "ADAPT_TEXT_MID_METADATA_VERSION"))
+FAST_VERSIONS = frozenset({_C["ADAPT_FAST_VERSION"], _C["ADAPT_METADATA_FAST_VERSION"],
+                           _C["ADAPT_TEXT_FAST_VERSION"], _C["ADAPT_TEXT_FAST_VERSION"] + _C["ADAPT_TEXT_METADATA_OFFSET"]})
+TEXT_VERSIONS = frozenset(_span("ADAPT_TEXT_VERSION", "ADAPT_TEXT_METADATA_LAST_VERSION"))
+MAX_VERSIONS = frozenset({_C["ADAPT_MAX_VERSION"], _C["ADAPT_METADATA_MAX_VERSION"],
+                          _C["ADAPT_MAX_COMPACT_VERSION"], _C["ADAPT_MAX_COMPACT_METADATA_VERSION"],
+                          _C["ADAPT_MAX_LEAN_VERSION"], _C["ADAPT_MAX_LEAN_METADATA_VERSION"],
+                          _C["ADAPT_TEXT_MAX_VERSION"], _C["ADAPT_TEXT_MAX_COMPACT_VERSION"],
+                          _C["ADAPT_TEXT_MAX_LEAN_VERSION"]}) | \
+    frozenset(t + _C["ADAPT_TEXT_METADATA_OFFSET"] for t in
+              (_C["ADAPT_TEXT_MAX_VERSION"], _C["ADAPT_TEXT_MAX_COMPACT_VERSION"], _C["ADAPT_TEXT_MAX_LEAN_VERSION"])) | \
+    SIZED_VERSIONS | MAX_ADAPTIVE_VERSIONS | frozenset(_span("ADAPT_MAX_BMP_VERSION", "ADAPT_MAX_BMP_METADATA_LAST_VERSION"))
+METADATA_VERSIONS = frozenset(_span("ADAPT_METADATA_VERSION", "ADAPT_METADATA_MAX_VERSION")) | frozenset({
+    _C["ADAPT_MAX_COMPACT_METADATA_VERSION"], _C["ADAPT_MAX_LEAN_METADATA_VERSION"],
+    _C["ADAPT_MAX_SIZED_METADATA_VERSION"], _C["ADAPT_MAX_PRESSURE_METADATA_VERSION"],
+    _C["ADAPT_MID_METADATA_VERSION"], _C["ADAPT_TEXT_MID_METADATA_VERSION"],
+    _C["ADAPT_MAX_KEYS_METADATA_VERSION"], _C["ADAPT_MAX_KEYS_BINARY_METADATA_VERSION"],
+    _C["ADAPT_NORMAL_KEYS_METADATA_VERSION"],
+}) | frozenset(_span("ADAPT_TEXT_METADATA_VERSION", "ADAPT_TEXT_METADATA_LAST_VERSION")) | \
+    frozenset(_span("ADAPT_ADAPTIVE_METADATA_VERSION", "ADAPT_ADAPTIVE_METADATA_LAST_VERSION")) | \
+    frozenset(_span("ADAPT_BMP_METADATA_VERSION", "ADAPT_BMP_METADATA_LAST_VERSION")) | \
+    frozenset(_span("ADAPT_MAX_ADAPTIVE_METADATA_VERSION", "ADAPT_MAX_ADAPTIVE_METADATA_LAST_VERSION")) | \
+    frozenset(_span("ADAPT_MAX_BMP_METADATA_VERSION", "ADAPT_MAX_BMP_METADATA_LAST_VERSION"))
+KNOWN_VERSIONS = frozenset({_C["ADAPT_FORMAT_VERSION"]}) | FAST_VERSIONS | MAX_VERSIONS | MID_VERSIONS | \
+    TEXT_VERSIONS | ADAPTIVE_VERSIONS | BMP_VERSIONS | METADATA_VERSIONS | POLICY_VERSIONS
+
+SIZING_COMPACT = _C["ADAPT_SIZING_COMPACT"]
+SIZING_LEAN = _C["ADAPT_SIZING_LEAN"]
+SIZING_TEXT = _C["ADAPT_SIZING_TEXT"]
+SIZING_LOW_START = _C["ADAPT_SIZING_LOW_START"]
+SIZING_MODEL2 = _C["ADAPT_SIZING_MODEL2"]
+SIZING_FRAC_SHIFT = _C["ADAPT_SIZING_FRAC_SHIFT"]
+SIZING_FRAC_MAX = _C["ADAPT_SIZING_FRAC_MAX"]
+POLICY_KEYS_MASK = _C["ADAPT_POLICY_KEYS_MASK"]
+POLICY_TEXT = _C["ADAPT_POLICY_TEXT"]
+KEYS_CLASSIC = _C["ADAPT_KEYS_CLASSIC"]
+KEYS_TEXT = _C["ADAPT_KEYS_TEXT"]
+KEYS_BINARY = _C["ADAPT_KEYS_BINARY"]
+
+
+def base_profile(version: int) -> str:
+    """Which model the version names: fast, mid, max or normal."""
+    if version in FAST_VERSIONS:
+        return "fast"
+    if version in MID_VERSIONS:
+        return "mid"
+    if version in MAX_VERSIONS:
+        return "max"
+    return "normal"
+
+
+def key_policy(version: int, sizing: int | None, policy: int | None) -> str:
+    """The arbiters' key policy: classic, text or binary.
+
+    A keyed max version names its policy in the version itself; the keyed
+    normal profile names it in the policy byte. Every other version is classic.
+    """
+    if policy is not None:
+        return {KEYS_TEXT: "text", KEYS_BINARY: "binary"}[policy & POLICY_KEYS_MASK]
+    if version in KEYED_MAX_VERSIONS:
+        binary = version in (_C["ADAPT_MAX_KEYS_BINARY_VERSION"], _C["ADAPT_MAX_KEYS_BINARY_METADATA_VERSION"])
+        return "binary" if binary else "text"
+    return "classic"
+
+
+def text_transform(version: int, sizing: int | None, policy: int | None) -> bool:
+    """Whether the text transform is on: named by the version, the sizing byte
+    or the policy byte, depending on the family."""
+    if policy is not None:
+        return bool(policy & POLICY_TEXT)
+    if sizing is not None:
+        return bool(sizing & SIZING_TEXT)
+    return version in TEXT_VERSIONS or version in {_C["ADAPT_TEXT_MID_VERSION"], _C["ADAPT_TEXT_MID_METADATA_VERSION"]}
+
+
+def context_table_bytes(shift: int, sizing: int | None) -> int:
+    """The context table's size, with the sized versions' eighths applied."""
+    base = 16 << shift
+    if sizing is None:
+        return base
+    fraction = (sizing >> SIZING_FRAC_SHIFT) & SIZING_FRAC_MAX
+    return base + (base * fraction) // 8
+
+
 def inspect_container(path: Path) -> dict[str, Any]:
     """Summarize framing and block methods, without claiming payload verification."""
     size = path.stat().st_size
@@ -349,19 +476,36 @@ def inspect_container(path: Path) -> dict[str, Any]:
             return data
 
         header = read(8)
-        if header[:4] != b"ADPT" or header[4] not in range(19, 53):
+        version = header[4]
+        if header[:4] != b"ADPT" or version not in KNOWN_VERSIONS:
             raise ValueError("unsupported container header")
         period = int.from_bytes(read(2), "little") if header[7] & 0x80 else 0
-        bmp_descriptor = read(12) if (31 <= header[4] <= 38 or 45 <= header[4] <= 52) else b""
+        # The sizing byte and the policy byte both follow the period, and no
+        # version carries both: the sized max families carry the first, the
+        # keyed normal profile the second.
+        sizing = read(1)[0] if version in SIZED_VERSIONS else None
+        policy = read(1)[0] if version in POLICY_VERSIONS else None
+        if policy is not None and (policy & ~(POLICY_KEYS_MASK | POLICY_TEXT) or
+                                   policy & POLICY_KEYS_MASK not in (KEYS_TEXT, KEYS_BINARY)):
+            raise ValueError("invalid key policy byte")
+        if sizing is not None and sizing & ~(SIZING_COMPACT | SIZING_LEAN | SIZING_TEXT |
+                                             SIZING_LOW_START | SIZING_MODEL2 |
+                                             (SIZING_FRAC_MAX << SIZING_FRAC_SHIFT)):
+            raise ValueError("invalid sizing byte")
+        bmp_descriptor = read(12) if version in BMP_VERSIONS else b""
         bmp = None
         if bmp_descriptor:
             bmp = dict(zip(("offset", "width", "rows"), (int.from_bytes(bmp_descriptor[i:i + 4], "little") for i in (0, 4, 8))))
             if bmp["offset"] < 54 or not (0 < bmp["width"] <= 0x7fffffff and 0 < bmp["rows"] <= 0x7fffffff):
                 raise ValueError("invalid BMP descriptor")
         filesystem_metadata = None
-        if header[4] in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52):
+        if version in METADATA_VERSIONS:
             metadata = read(32)
-            checksum_input = header + (period.to_bytes(2, "little") if header[7] & 0x80 else b"") + bmp_descriptor + metadata[:28]
+            checksum_input = (header +
+                              (period.to_bytes(2, "little") if header[7] & 0x80 else b"") +
+                              (bytes([sizing]) if sizing is not None else b"") +
+                              (bytes([policy]) if policy is not None else b"") +
+                              bmp_descriptor + metadata[:28])
             if zlib.crc32(checksum_input) != int.from_bytes(metadata[28:], "little"):
                 raise ValueError("metadata header checksum mismatch")
             filesystem_metadata = dict(
@@ -375,24 +519,30 @@ def inspect_container(path: Path) -> dict[str, Any]:
                     filesystem_metadata["atime_nanoseconds"] >= 1_000_000_000 or
                     filesystem_metadata["mtime_nanoseconds"] >= 1_000_000_000):
                 raise ValueError("invalid filesystem metadata")
-        version = header[4]
-        max_profile = version in (21, 24) or version >= 39
-        normalized = version - 14 if version >= 39 else version
         if bmp:
+            normalized = version - 14 if version >= MAX_ADAPTIVE_VERSION else version
             adaptive = ("normal", "rates", "sparse", "retained")[(normalized - 31) % 4]
-        elif 25 <= normalized <= 30:
-            adaptive = ("rates", "sparse", "retained")[(normalized - 25) % 3]
+        elif version in ADAPTIVE_VERSIONS:
+            adaptive = ("rates", "sparse", "retained")[(version - ADAPTIVE_VERSION) % 3]
+        elif version in MAX_ADAPTIVE_VERSIONS:
+            adaptive = ("rates", "sparse", "retained")[(version - MAX_ADAPTIVE_VERSION) % 3]
         else:
             adaptive = None
         result: dict[str, Any] = dict(
             format_version=version,
-            base_profile="max" if max_profile else "fast" if version in (20, 23) else "normal",
+            base_profile=base_profile(version),
             adaptive_profile=adaptive,
+            key_policy=key_policy(version, sizing, policy),
+            text_transform=text_transform(version, sizing, policy),
+            sizing_byte=sizing,
+            policy_byte=policy,
             bmp_transform=bmp,
             transform_metadata_bytes=len(bmp_descriptor),
             filesystem_metadata=filesystem_metadata,
             metadata_bytes=32 if filesystem_metadata is not None else 0,
-            context_table_bytes=16 << (header[5] & 31),
+            # A sized version's table fraction grows the table an eighth of its
+            # next doubling at a time, so the header byte alone understates it.
+            context_table_bytes=context_table_bytes(header[5] & 31, sizing),
             recall_table_bytes=4 << (header[6] & 31),
             window_bytes=1 << (header[7] & 31),
             x86_transform=bool(header[7] & 0x20),
@@ -511,6 +661,10 @@ def run_benchmark(args: argparse.Namespace) -> int:
         raise ValueError("--time-binary must be GNU time")
     if args.segment_bytes % 262144 or args.segment_bytes > 0xFFFFFFFF:
         raise ValueError("--segment-bytes must be whole 262144-byte blocks and fit in u32")
+    for budget in args.memory:
+        # Caught here rather than when the plan is built, so a budget the
+        # encoder cannot honour is a usage error and not a half-written session.
+        memory_tier(budget)
     if not args.no_plots:
         import importlib.util
 

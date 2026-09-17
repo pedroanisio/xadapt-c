@@ -35,12 +35,19 @@ check:
 	else \
 	    echo "make check exceeded $(CHECK_SECONDS) s or failed after $$(( $$(date +%s) - start )) s at load average$$(uptime | sed 's/.*load average//') (see _tmp/check/*.log)"; exit 1; \
 	fi
-	@for p in codec provenance floor-tool fetch-corpus docs; do grep -hE "^ok |^OK$$|checks passed$$" _tmp/check/$$p.log | tail -3; done
-check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus _tmp/check/docs
+	@for p in codec provenance floor-tool fetch-corpus docs bench ltcb; do grep -hE "^ok |^OK$$|checks passed$$" _tmp/check/$$p.log | tail -3; done
+check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus _tmp/check/docs _tmp/check/bench _tmp/check/ltcb
 _tmp/check/codec: ; @$(MAKE) -C adpat/c check > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/provenance: ; @$(PYTHON) -B tools/test_provenance.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/floor-tool: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_check_ratio_floor.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/fetch-corpus: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_fetch_corpus.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+# The measurement tooling and the LTCB tooling. Both went ungated for weeks and
+# both rotted: telemetry drove the encoder with a decode-only option and its
+# container reader stopped at version 52, and the LTCB page builder read a
+# rendering .gitignore excludes. A suite nothing runs is a suite that is wrong.
+# The bench suite needs the built codec, which the codec part builds first.
+_tmp/check/bench: _tmp/check/codec ; @$(PYTHON) -B -m unittest discover -s bench -p 'test_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+_tmp/check/ltcb: ; @$(PYTHON) -B -m unittest discover -s tools/ltcb -p 'test_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 # the documents against the code: tools/test_docs.py needs the built codec, which the codec part builds first
 _tmp/check/docs: _tmp/check/codec ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_docs.py' > $@.log 2>&1 && $(PYTHON) -B tools/render_floors.py check >> $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
