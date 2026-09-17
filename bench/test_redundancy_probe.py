@@ -111,6 +111,25 @@ class RedundancyProbeTest(unittest.TestCase):
             )
         self.assertIn("4096 bytes", done.stdout.decode())
 
+    def test_limit_accepts_a_suffixed_size(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            source = Path(scratch) / "input"
+            source.write_bytes(b"x" * 100000)
+            done = subprocess.run([str(self.probe), str(source), "--limit", "4KiB"],
+                                  capture_output=True, check=True)
+        self.assertIn("4096 bytes", done.stdout.decode())
+
+    def test_an_unknown_option_is_refused_rather_than_ignored(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            source = Path(scratch) / "input"
+            source.write_bytes(b"x" * 1000)
+            done = subprocess.run([str(self.probe), str(source), "--limit", "500", "--typo", "1"],
+                                  capture_output=True)
+            self.assertEqual(done.returncode, 2)
+            done = subprocess.run([str(self.probe), str(source), "--limit", "notasize"],
+                                  capture_output=True)
+            self.assertEqual(done.returncode, 2)
+
     def test_bad_arguments_and_missing_files_are_refused(self):
         self.assertEqual(subprocess.run([str(self.probe)], capture_output=True).returncode, 2)
         self.assertEqual(

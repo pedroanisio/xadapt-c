@@ -20,13 +20,17 @@
  * probe says what a shortcut *could* cover, never what it would cost in
  * container bytes. That number comes from an encode.
  *
+ * The prediction a context makes does not depend on the run threshold that
+ * gates the bypass, so each order is hashed once and every threshold is
+ * scored against that one pass — the same figures for a fifth of the work.
+ *
  * Authored with Claude Opus 5 (Claude Code), 2026-09-16.
  */
+#include "probe_util.h"
+
 #include <inttypes.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
+#define WHO "redundancy_probe"
 
 /* Slots in each probe table. Large enough that collisions do not drive the
  * answer on the corpus rows, small enough to stay in a few tens of MiB. */
@@ -52,216 +56,157 @@ typedef struct gate_cell {
     uint8_t mixed;
 } gate_cell;
 
-typedef struct probe_input {
-    uint8_t *bytes;
-    size_t length;
-} probe_input;
-
-static uint64_t mix64(uint64_t x) {
-    x ^= x >> 33;
-    x *= 0xff51afd7ed558ccdULL;
-    x ^= x >> 33;
-    x *= 0xc4ceb9fe1a85ec53ULL;
-    x ^= x >> 33;
-    return x;
-}
-
 /* The `order` bytes before position `at`, hashed into a table slot. The
  * bytes are read from the input rather than from a packed history, so an
  * order above eight is a different context from order eight. */
 static size_t context_slot(const uint8_t *bytes, size_t at, int order, uint64_t salt) {
-    uint64_t hash = salt;
-    int j;
-    for (j = order; j > 0; j--) hash = (hash ^ bytes[at - (size_t)j]) * 0x100000001b3ULL;
-    return (size_t)(mix64(hash) & (PROBE_TABLE_SLOTS - 1));
+    return (size_t)(probe_hash_seeded(salt, bytes + at - (size_t)order, (size_t)order) & (PROBE_TABLE_SLOTS - 1));
 }
 
-/* Reads the whole file, or the first `limit` bytes of it when limit is not
- * zero. Returns 0 on success; on failure the reason is already printed and
- * the input is left empty. */
-static int read_input(const char *path, uint64_t limit, probe_input *out) {
-    FILE *file = fopen(path, "rb");
-    long size;
-    size_t want;
-
-    out->bytes = NULL;
-    out->length = 0;
-    if (!file) {
-        fprintf(stderr, "redundancy_probe: cannot open %s\n", path);
-        return 1;
+/* One pass over the input for a single order: fills `correct[i]` with
+ * whether the context before byte i predicted it. Every LZP row for that
+ * order is scored from this, because neither the prediction nor the run of
+ * consecutive hits depends on the threshold that gates the bypass. */
+static void lzp_predictions(const probe_input *in, int order, uint32_t *table, uint8_t *correct) {
+    size_t i;
+    memset(table, 0, PROBE_TABLE_SLOTS * sizeof(*table));
+    memset(correct, 0, (size_t)order < in->length ? (size_t)order : in->length);
+    for (i = (size_t)order; i < in->length; i++) {
+        size_t slot = context_slot(in->bytes, i, order, 0x5bd1ULL);
+        uint32_t seen_at = table[slot];
+        correct[i] = (uint8_t)(seen_at != 0 && in->bytes[seen_at] == in->bytes[i]);
+        table[slot] = (uint32_t)i;
     }
-    if (fseek(file, 0, SEEK_END) != 0 || (size = ftell(file)) < 0 || fseek(file, 0, SEEK_SET) != 0) {
-        fprintf(stderr, "redundancy_probe: cannot size %s\n", path);
-        fclose(file);
-        return 1;
-    }
-    want = (size_t)size;
-    if (limit && limit < (uint64_t)want) want = (size_t)limit;
-    if (want == 0) {
-        fprintf(stderr, "redundancy_probe: %s is empty\n", path);
-        fclose(file);
-        return 1;
-    }
-    out->bytes = malloc(want);
-    if (!out->bytes) {
-        fprintf(stderr, "redundancy_probe: cannot hold %zu bytes\n", want);
-        fclose(file);
-        return 1;
-    }
-    if (fread(out->bytes, 1, want, file) != want) {
-        fprintf(stderr, "redundancy_probe: short read on %s\n", path);
-        free(out->bytes);
-        out->bytes = NULL;
-        fclose(file);
-        return 1;
-    }
-    out->length = want;
-    fclose(file);
-    return 0;
 }
 
-/* One LZP configuration: `order` bytes of context, bypass after `run`
- * consecutive correct predictions. */
-static int report_lzp_row(const probe_input *in, int order, int run_threshold) {
-    uint32_t *table = calloc(PROBE_TABLE_SLOTS, sizeof(uint32_t));
-    uint64_t hits = 0, bypassed = 0, missed_in = 0, coded_bits = 0;
+/* Score one bypass threshold against a finished prediction pass. */
+static void report_lzp_row(const probe_input *in, const uint8_t *correct, uint64_t hits, int order,
+                           int run_threshold) {
+    uint64_t bypassed = 0, missed_in = 0, coded_bits = 0;
     int run = 0;
     size_t i;
 
-    if (!table) {
-        fprintf(stderr, "redundancy_probe: cannot hold the LZP table\n");
-        return 1;
-    }
     for (i = 0; i < in->length; i++) {
-        int correct = 0;
-        if (i >= (size_t)order) {
-            size_t slot = context_slot(in->bytes, i, order, 0x5bd1ULL);
-            uint32_t seen_at = table[slot];
-            if (seen_at) correct = in->bytes[seen_at] == in->bytes[i];
-            table[slot] = (uint32_t)i;
-        }
-        if (correct) hits++;
         if (run >= run_threshold) {
             bypassed++;
             coded_bits += 1; /* the flag */
-            if (!correct) {
+            if (!correct[i]) {
                 missed_in++;
                 coded_bits += 8; /* the escaped byte, modelled as usual */
             }
         } else {
             coded_bits += 8;
         }
-        run = correct ? run + 1 : 0;
+        run = correct[i] ? run + 1 : 0;
     }
-    free(table);
     printf("lzp   %-5d %-5d %8.2f %10" PRIu64 " %9.2f %9.2f %8.1f\n", order, run_threshold,
            100.0 * (double)hits / (double)in->length, bypassed,
            100.0 * (double)bypassed / (double)in->length,
            bypassed ? 100.0 * (double)missed_in / (double)bypassed : 0.0,
            100.0 * (double)coded_bits / (8.0 * (double)in->length));
-    return 0;
 }
 
 /* One settled-context gate: orders `low` and `high`, both settled after
  * `min_seen` occurrences, firing only where they agree. */
-static int report_gate_row(const probe_input *in, int low, int high, int min_seen) {
-    gate_cell *low_table = calloc(PROBE_TABLE_SLOTS, sizeof(gate_cell));
-    gate_cell *high_table = calloc(PROBE_TABLE_SLOTS, sizeof(gate_cell));
+static void report_gate_row(const probe_input *in, gate_cell *low_table, gate_cell *high_table, int low, int high,
+                            int min_seen) {
     uint64_t gated = 0, wrong = 0;
     double share;
     size_t i;
 
-    if (!low_table || !high_table) {
-        fprintf(stderr, "redundancy_probe: cannot hold the gate tables\n");
-        free(low_table);
-        free(high_table);
-        return 1;
-    }
+    memset(low_table, 0, PROBE_TABLE_SLOTS * sizeof(*low_table));
+    memset(high_table, 0, PROBE_TABLE_SLOTS * sizeof(*high_table));
     for (i = (size_t)high; i < in->length; i++) {
         gate_cell *a = &low_table[context_slot(in->bytes, i, low, 0x9e37ULL)];
         gate_cell *b = &high_table[context_slot(in->bytes, i, high, 0xc2b2ULL)];
-        int a_settled = a->seen >= min_seen && !a->mixed;
-        int b_settled = b->seen >= min_seen && !b->mixed;
-        if (a_settled && b_settled && a->byte == b->byte) {
+        uint8_t here = in->bytes[i];
+        if (a->seen >= min_seen && !a->mixed && b->seen >= min_seen && !b->mixed && a->byte == b->byte) {
             gated++;
-            if (a->byte != in->bytes[i]) wrong++;
+            if (a->byte != here) wrong++;
         }
         if (a->seen == 0) {
-            a->byte = in->bytes[i];
+            a->byte = here;
             a->seen = 1;
         } else {
-            if (a->byte != in->bytes[i]) a->mixed = 1;
+            if (a->byte != here) a->mixed = 1;
             if (a->seen < 255) a->seen++;
         }
         if (b->seen == 0) {
-            b->byte = in->bytes[i];
+            b->byte = here;
             b->seen = 1;
         } else {
-            if (b->byte != in->bytes[i]) b->mixed = 1;
+            if (b->byte != here) b->mixed = 1;
             if (b->seen < 255) b->seen++;
         }
     }
-    free(low_table);
-    free(high_table);
     share = (double)gated / (double)in->length;
     printf("gate  %-5d %-5d %8.2f %10" PRIu64 " %9.2f %9.3f %8.1f\n", low, high, 100.0 * share, gated,
            100.0 * share, gated ? 100.0 * (double)wrong / (double)gated : 0.0,
            100.0 * (share * GATED_WORK_SHARE + (1.0 - share)));
-    return 0;
 }
 
-static void usage(void) {
+static int usage(void) {
     fprintf(stderr,
             "usage: redundancy_probe <file> [--limit <bytes>] [--min-seen <n>]\n"
             "  --limit     read only the first <bytes> of the file (0: all)\n"
             "  --min-seen  occurrences before a gate context counts as settled "
             "(default 2)\n");
+    return PROBE_EXIT_USAGE;
 }
 
 int main(int argc, char **argv) {
+    static const char *const OPTIONS[] = {"--limit", "--min-seen"};
     probe_input in;
     uint64_t limit = 0;
-    int min_seen = 2;
-    int argi;
-    size_t row;
+    const char *text;
+    int min_seen = 2, status;
+    size_t row, k;
+    uint32_t *lzp_table;
+    uint8_t *correct;
+    gate_cell *low_table, *high_table;
 
-    if (argc < 2) {
-        usage();
-        return 2;
+    if (argc < 2 || !probe_only_options(argc, argv, 2, OPTIONS, sizeof(OPTIONS) / sizeof(OPTIONS[0]))) {
+        return usage();
     }
-    for (argi = 2; argi < argc; argi++) {
-        if (argi + 1 < argc && strcmp(argv[argi], "--limit") == 0) {
-            limit = strtoull(argv[++argi], NULL, 10);
-        } else if (argi + 1 < argc && strcmp(argv[argi], "--min-seen") == 0) {
-            min_seen = atoi(argv[++argi]);
-            if (min_seen < 1 || min_seen > 255) {
-                fprintf(stderr, "redundancy_probe: --min-seen out of 1..255\n");
-                return 2;
-            }
-        } else {
-            usage();
-            return 2;
+    if (probe_option(argc, argv, 2, "--limit", &text) == 1 && !probe_parse_size(text, &limit)) {
+        return probe_fail(WHO, PROBE_EXIT_USAGE, "--limit: not a size: %s", text);
+    }
+    if (probe_option(argc, argv, 2, "--min-seen", &text) == 1) {
+        min_seen = atoi(text);
+        if (min_seen < 1 || min_seen > 255) {
+            return probe_fail(WHO, PROBE_EXIT_USAGE, "--min-seen out of 1..255");
         }
     }
-    if (read_input(argv[1], limit, &in)) return 1;
+    status = probe_read_input(WHO, argv[1], limit, &in);
+    if (status != PROBE_EXIT_OK) return status;
+    if (in.length == 0) {
+        return probe_fail(WHO, PROBE_EXIT_FAILED, "%s is empty", argv[1]);
+    }
+
+    lzp_table = probe_calloc(WHO, PROBE_TABLE_SLOTS, sizeof(*lzp_table));
+    correct = probe_calloc(WHO, in.length, 1);
 
     printf("input %s  %zu bytes  min-seen %d\n", argv[1], in.length, min_seen);
     printf("pass  %-5s %-5s %8s %10s %9s %9s %8s\n", "loA", "hiB", "hit%", "covered", "cover%", "err%", "work%");
     for (row = 0; row < sizeof(LZP_ORDERS) / sizeof(LZP_ORDERS[0]); row++) {
-        size_t k;
+        uint64_t hits = 0;
+        size_t i;
+        lzp_predictions(&in, LZP_ORDERS[row], lzp_table, correct);
+        for (i = 0; i < in.length; i++) hits += correct[i];
         for (k = 0; k < sizeof(LZP_RUNS) / sizeof(LZP_RUNS[0]); k++) {
-            if (report_lzp_row(&in, LZP_ORDERS[row], LZP_RUNS[k])) {
-                free(in.bytes);
-                return 1;
-            }
+            report_lzp_row(&in, correct, hits, LZP_ORDERS[row], LZP_RUNS[k]);
         }
     }
+    free(lzp_table);
+    free(correct);
+
+    low_table = probe_calloc(WHO, PROBE_TABLE_SLOTS, sizeof(*low_table));
+    high_table = probe_calloc(WHO, PROBE_TABLE_SLOTS, sizeof(*high_table));
     for (row = 0; row < sizeof(GATE_PAIRS) / sizeof(GATE_PAIRS[0]); row++) {
-        if (report_gate_row(&in, GATE_PAIRS[row][0], GATE_PAIRS[row][1], min_seen)) {
-            free(in.bytes);
-            return 1;
-        }
+        report_gate_row(&in, low_table, high_table, GATE_PAIRS[row][0], GATE_PAIRS[row][1], min_seen);
     }
-    free(in.bytes);
-    return 0;
+    free(low_table);
+    free(high_table);
+    probe_free_input(&in);
+    return PROBE_EXIT_OK;
 }

@@ -29,11 +29,11 @@
  * Standard library only. No codec source or constant is involved.
  * Authored with Claude Opus 5 (Claude Code), 2026-09-17.
  */
+#include "probe_util.h"
+
 #include <inttypes.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
+#define WHO "stream_census"
 
 /* Slots in the token tables. Enough that collisions do not drive the answer
  * on a 100 MB text fixture. */
@@ -65,15 +65,6 @@ typedef struct census {
 static uint8_t *seen_count;   /* occurrences of a word token, saturating */
 static uint8_t *seen_markup;  /* occurrences of a markup token */
 
-static uint64_t mix64(uint64_t x) {
-    x ^= x >> 33;
-    x *= 0xff51afd7ed558ccdULL;
-    x ^= x >> 33;
-    x *= 0xc4ceb9fe1a85ec53ULL;
-    x ^= x >> 33;
-    return x;
-}
-
 static int is_word_byte(uint8_t b) {
     return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b >= 0x80;
 }
@@ -81,10 +72,7 @@ static int is_word_byte(uint8_t b) {
 static int is_digit_byte(uint8_t b) { return b >= '0' && b <= '9'; }
 
 static size_t token_slot(const uint8_t *bytes, size_t at, size_t len) {
-    uint64_t hash = 0xcbf29ce484222325ULL;
-    size_t j;
-    for (j = 0; j < len; j++) hash = (hash ^ bytes[at + j]) * 0x100000001b3ULL;
-    return (size_t)(mix64(hash) & (CENSUS_SLOTS - 1));
+    return (size_t)(probe_hash_seeded(PROBE_FNV_BASIS, bytes + at, len) & (CENSUS_SLOTS - 1));
 }
 
 /* Count one token against a table; return 1 once it has been seen enough
@@ -134,63 +122,37 @@ static void report(const census *c, const char *path) {
            c->utf8_bytes / 2, 100.0 * (double)(c->utf8_bytes / 2) / total);
 }
 
+static int usage(void) {
+    fprintf(stderr, "usage: stream_census <file> [--limit <bytes>]\n"
+                    "  --limit  read only the first <bytes> of the file (0: all)\n");
+    return PROBE_EXIT_USAGE;
+}
+
 int main(int argc, char **argv) {
-    const char *path;
+    static const char *const OPTIONS[] = {"--limit"};
+    probe_input in;
     uint64_t limit = 0;
-    FILE *file;
-    long size;
+    const char *text;
+    const uint8_t *buf;
     size_t want, i;
-    uint8_t *buf;
+    int status;
     census c;
 
-    if (argc < 2) {
-        fprintf(stderr, "usage: stream_census <file> [--limit <bytes>]\n");
-        return 2;
+    if (argc < 2 || !probe_only_options(argc, argv, 2, OPTIONS, sizeof(OPTIONS) / sizeof(OPTIONS[0]))) {
+        return usage();
     }
-    path = argv[1];
-    if (argc >= 4 && strcmp(argv[2], "--limit") == 0) {
-        limit = strtoull(argv[3], NULL, 10);
-    } else if (argc != 2) {
-        fprintf(stderr, "usage: stream_census <file> [--limit <bytes>]\n");
-        return 2;
+    if (probe_option(argc, argv, 2, "--limit", &text) == 1 && !probe_parse_size(text, &limit)) {
+        return probe_fail(WHO, PROBE_EXIT_USAGE, "--limit: not a size: %s", text);
     }
-    file = fopen(path, "rb");
-    if (!file) {
-        fprintf(stderr, "stream_census: cannot open %s\n", path);
-        return 1;
+    status = probe_read_input(WHO, argv[1], limit, &in);
+    if (status != PROBE_EXIT_OK) return status;
+    if (in.length == 0) {
+        return probe_fail(WHO, PROBE_EXIT_FAILED, "%s is empty", argv[1]);
     }
-    if (fseek(file, 0, SEEK_END) != 0 || (size = ftell(file)) < 0 || fseek(file, 0, SEEK_SET) != 0) {
-        fprintf(stderr, "stream_census: cannot size %s\n", path);
-        fclose(file);
-        return 1;
-    }
-    want = (size_t)size;
-    if (limit && limit < (uint64_t)want) want = (size_t)limit;
-    if (want == 0) {
-        fprintf(stderr, "stream_census: %s is empty\n", path);
-        fclose(file);
-        return 1;
-    }
-    buf = malloc(want);
-    seen_count = calloc(CENSUS_SLOTS, 1);
-    seen_markup = calloc(CENSUS_SLOTS, 1);
-    if (!buf || !seen_count || !seen_markup) {
-        fprintf(stderr, "stream_census: out of memory\n");
-        free(buf);
-        free(seen_count);
-        free(seen_markup);
-        fclose(file);
-        return 1;
-    }
-    if (fread(buf, 1, want, file) != want) {
-        fprintf(stderr, "stream_census: short read on %s\n", path);
-        free(buf);
-        free(seen_count);
-        free(seen_markup);
-        fclose(file);
-        return 1;
-    }
-    fclose(file);
+    buf = in.bytes;
+    want = in.length;
+    seen_count = probe_calloc(WHO, CENSUS_SLOTS, 1);
+    seen_markup = probe_calloc(WHO, CENSUS_SLOTS, 1);
 
     memset(&c, 0, sizeof(c));
     c.total = want;
@@ -243,9 +205,9 @@ int main(int argc, char **argv) {
             }
         }
     }
-    report(&c, path);
-    free(buf);
+    report(&c, argv[1]);
+    probe_free_input(&in);
     free(seen_count);
     free(seen_markup);
-    return 0;
+    return PROBE_EXIT_OK;
 }

@@ -90,6 +90,29 @@ class MarkupBookProtoTest(unittest.TestCase):
         self.assertEqual(
             subprocess.run([str(self.proto), "wat", "a", "b"], capture_output=True).returncode, 2)
 
+    def test_a_missing_input_fails_and_does_not_pass_for_an_empty_one(self):
+        """An unreadable input must not take the empty input's quiet path."""
+        with tempfile.TemporaryDirectory() as scratch:
+            missing = Path(scratch) / "absent"
+            out = Path(scratch) / "out"
+            done = subprocess.run([str(self.proto), "enc", str(missing), str(out)], capture_output=True)
+            self.assertEqual(done.returncode, 1)
+            self.assertIn("cannot open", done.stderr.decode())
+
+    def test_truncated_coded_input_is_refused(self):
+        """A code cut short is corruption, not something to decode part of."""
+        with tempfile.TemporaryDirectory() as scratch:
+            source = Path(scratch) / "in"
+            coded = Path(scratch) / "coded"
+            cut = Path(scratch) / "cut"
+            out = Path(scratch) / "out"
+            source.write_bytes(b"<page><page><page><page><page>")
+            subprocess.run([str(self.proto), "enc", str(source), str(coded)], check=True, capture_output=True)
+            body = coded.read_bytes()
+            cut.write_bytes(body[:-1] + bytes([0xF5]))
+            done = subprocess.run([str(self.proto), "dec", str(cut), str(out)], capture_output=True)
+            self.assertEqual(done.returncode, 1)
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):

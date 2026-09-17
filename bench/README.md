@@ -206,6 +206,20 @@ The measurements the rows gave are in
 [research/scripts-measurement.md](../research/scripts-measurement.md).
 
 
+## The probes' shared machinery
+
+`probe_util.h` holds what every C probe in this directory needs: the mixer and
+the seeded FNV hash, the input loader, the byte-size parser, a buffered
+writer, a checked allocator and one failure path with one set of exit codes
+(0 fine, 1 the run failed, 2 the arguments were wrong). It is header-only,
+standard library only, and nothing in the build, the library or the CLI loads
+it.
+
+Two rules it exists to keep. An empty input and an unreadable one never share
+a branch, so "no such file" can never be reported as "nothing to do". And a
+table that could not be allocated stops the probe rather than letting every
+figure below it come out wrong.
+
 ## The redundancy probe
 
 `redundancy_probe.c` prices the two front-end shortcuts that make
@@ -295,3 +309,25 @@ python3 -B bench/test_markup_book_proto.py
 What it measured — on the `xml` row a smaller container in half the time, on
 enwik8 a larger one — is in
 [research/front-end-census-2026-09-17.md](../research/front-end-census-2026-09-17.md).
+
+## The codec harness
+
+`codec_bench.py` measures any codec on one footing — bytes, seconds both
+ways, peak RSS, and a byte-for-byte comparison of the restored file against
+the source. Every cross-codec figure in `research/` before it came from
+whatever each tool happened to report; this runs one process per measurement
+so the peak RSS is that process's own, and it **fails the run** when a codec
+does not restore its input, because a ratio from a codec that loses a byte is
+not a number.
+
+It drives binaries that already exist and is not a codec path. `cadapt`'s
+profiles are always available; `xz`, `zstd` and a built `kanzi` are included
+when they are on the machine.
+
+```sh
+make
+python3 -B bench/codec_bench.py --input static/corpus/enwik8
+python3 -B bench/codec_bench.py --input <f> --only cadapt-mid,xz-9e,zstd-19
+python3 -B bench/codec_bench.py --input <f> --json bench/results/row.json
+python3 -B bench/test_codec_bench.py
+```
