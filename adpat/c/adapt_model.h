@@ -2848,11 +2848,20 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
     /* Weights of one first-layer arbiter at the start: the context inputs'
      * stretched probabilities begin trusted; their other lanes and the run
      * inputs earn it. */
+    /* Every set of an arbiter starts from the same row, so the row is
+     * built once and copied: the lane-by-lane call for each of the
+     * 170,000 sets of the max profile was 45 % of a small file's encode,
+     * whose first-block trials each build a model. */
     if (m->model2) {
         /* the int16 arbiters start at the same weights in their own
          * units (1/32768: half the int32 value), the fifth like the rest */
         size_t lanes2 = (size_t)LANES(0, 1);
         size_t sets2 = MIXER2_SETS, sets34 = MIXER34_SETS(m->compact);
+        int16_t row16[LANES(0, 1) + 1];
+        for (j = 0; j < lanes2; j++) {
+            row16[j] = (int16_t)(initial_weight(j, 0, 1, m->low_start) >> 1);
+        }
+        row16[lanes2] = 0;
         for (i = 0; i < MIXER_SETS + sets2 + 2 * sets34 + EXTRA_SETS; i++) {
             int16_t *w = i < MIXER_SETS                    ? m->w16 + i * (lanes2 + 1)
                          : i < MIXER_SETS + sets2          ? m->w16_2 + (i - MIXER_SETS) * (lanes2 + 1)
@@ -2860,29 +2869,28 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
                          : i < MIXER_SETS + sets2 + 2 * sets34
                              ? m->w16_4 + (i - MIXER_SETS - sets2 - sets34) * (lanes2 + 1)
                              : m->w16_x + (i - MIXER_SETS - sets2 - 2 * sets34) * (lanes2 + 1);
-            for (j = 0; j < lanes2; j++) {
-                w[j] = (int16_t)(initial_weight(j, 0, 1, m->low_start) >> 1);
-            }
-            w[lanes2] = 0;
+            memcpy(w, row16, (lanes2 + 1) * sizeof(int16_t));
         }
     } else {
         size_t lanes = (size_t)LANES(m->fast, m->max), lanes2 = (size_t)LANES(0, m->max);
+        int32_t row[LANES(0, 1) + 1], row2[LANES(0, 1) + 1];
+        for (j = 0; j < lanes; j++) {
+            row[j] = initial_weight(j, m->fast, m->max, m->low_start);
+        }
+        row[lanes] = 0;
+        for (j = 0; j < lanes2; j++) {
+            row2[j] = initial_weight(j, 0, m->max, m->low_start);
+        }
+        row2[lanes2] = 0;
         for (i = 0; i < MIXER_SETS; i++) {
-            int32_t *w = m->weights + i * (lanes + 1);
-            for (j = 0; j < lanes; j++) {
-                w[j] = initial_weight(j, m->fast, m->max, m->low_start);
-            }
-            w[lanes] = 0;
+            memcpy(m->weights + i * (lanes + 1), row, (lanes + 1) * sizeof(int32_t));
         }
         for (i = 0; i < MIXER2_SETS + 2 * MIXER34_SETS(m->compact); i++) {
             int32_t *w = i < MIXER2_SETS ? m->weights2 + i * (lanes2 + 1)
                          : i < MIXER2_SETS + MIXER34_SETS(m->compact)
                              ? m->weights3 + (i - MIXER2_SETS) * (lanes2 + 1)
                              : m->weights4 + (i - MIXER2_SETS - MIXER34_SETS(m->compact)) * (lanes2 + 1);
-            for (j = 0; j < lanes2; j++) {
-                w[j] = initial_weight(j, 0, m->max, m->low_start);
-            }
-            w[lanes2] = 0;
+            memcpy(w, row2, (lanes2 + 1) * sizeof(int32_t));
         }
     }
     /* the final arbiter starts as the mean of its verdicts, four or five */

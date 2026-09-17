@@ -86,6 +86,11 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Performance
 
+- A model's arbiter weights are initialized from one row copied per set
+  instead of a lane-by-lane call for each of the 170,000 sets (bytes
+  identical): 45 % of a small file's encode, whose first-block trials
+  each build a model — the 4 KB corpus rows encode in 0.05 s instead of
+  0.08, alice29.txt in 1.33 s instead of 1.4.
 - The vector lane and learn paths of the max profile run only the slot
   groups a file's context set fills, and no longer zero the unused
   lanes bit by bit (a `rep stos` per bit): bytes identical, the lean
