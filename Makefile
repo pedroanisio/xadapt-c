@@ -22,8 +22,13 @@ all test clean:
 # prints its wall time and the load average, so a budget failure can be
 # told from a code failure, and CHECK_SECONDS may be raised for the run.
 CHECK_SECONDS ?= 120
+# The codec is built once, before the parts run: the provenance part runs
+# `make all` in the same build directory (tools/test_provenance.py), and
+# two makes relinking cadapt at once left the safety part executing a
+# half-written binary.
 check:
 	rm -rf _tmp/check && mkdir -p _tmp/check
+	$(MAKE) -C adpat/c BUILD=$(BUILD) all
 	@start=$$(date +%s); \
 	if timeout $(CHECK_SECONDS) $(MAKE) -j check-parts; then \
 	    echo "make check: $$(( $$(date +%s) - start )) s of the $(CHECK_SECONDS) s wall budget, load average$$(uptime | sed 's/.*load average//')"; \

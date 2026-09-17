@@ -33,6 +33,11 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Fixed
 
+- `make check` builds the codec once before its parallel parts: the
+  provenance part ran `make all` in the same build directory as the codec
+  part, and two makes relinking `cadapt` at once left the safety suite
+  executing a half-written binary (`Permission denied`) whenever the
+  sources had changed since the last build.
 - Restore Linux access ACLs after other attributes, preserving read-only ACLs
   together with user attributes on regular files, sparse files, directories
   and folder roots.
