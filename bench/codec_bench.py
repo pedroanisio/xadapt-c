@@ -35,13 +35,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CADAPT = ROOT / "adpat/c/build/cadapt"
 
-# One measured process, so its peak RSS is its own and not a parent's.
+# One measured process, so its peak RSS is its own and not a parent's. `out`
+# names a file to take the child's stdout when the codec writes to a pipe;
+# without it stdout is discarded and the codec writes its own files. That is
+# the only difference between the two kinds of measurement, so there is one
+# runner.
 CHILD = (
     "import json,resource,subprocess,sys,time;"
-    "argv=json.loads(sys.argv[1]);"
+    "argv=json.loads(sys.argv[1]);out=sys.argv[2];"
+    "f=open(out,'wb') if out else subprocess.DEVNULL;"
     "t=time.monotonic();"
-    "r=subprocess.run(argv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE);"
+    "r=subprocess.run(argv,stdout=f,stderr=subprocess.PIPE);"
     "e=time.monotonic()-t;"
+    "f.close() if out else None;"
     "u=resource.getrusage(resource.RUSAGE_CHILDREN);"
     "print(json.dumps({'rc':r.returncode,'wall':e,"
     "'cpu':u.ru_utime+u.ru_stime,'rss':u.ru_maxrss*1024,"
@@ -126,35 +132,15 @@ def CODECS() -> list[dict]:
     return rows
 
 
-def run_once(argv: list[str]) -> tuple[float, float, float]:
-    """Run one process that writes its own files; return (CPU s, wall s, peak RSS)."""
-    done = subprocess.run([sys.executable, "-c", CHILD, json.dumps(argv)], capture_output=True)
-    try:
-        info = json.loads(done.stdout.decode())
-    except Exception as failure:
-        raise BenchError(f"{argv[0]}: no measurement came back ({failure}); {done.stderr.decode()[-300:]}")
-    if info["rc"]:
-        raise BenchError(f"{argv[0]}: exited {info['rc']}: {info['err'].strip()}")
-    return info["cpu"], info["wall"], info["rss"]
+def run_once(argv: list[str], out: Path | None = None) -> tuple[float, float, float]:
+    """Run one measured process; return (CPU s, wall s, peak RSS).
 
-
-CHILD_TO_FILE = (
-    "import json,resource,subprocess,sys,time;"
-    "argv=json.loads(sys.argv[1]);out=sys.argv[2];"
-    "f=open(out,'wb');"
-    "t=time.monotonic();"
-    "r=subprocess.run(argv,stdout=f,stderr=subprocess.PIPE);"
-    "e=time.monotonic()-t;f.close();"
-    "u=resource.getrusage(resource.RUSAGE_CHILDREN);"
-    "print(json.dumps({'rc':r.returncode,'wall':e,"
-    "'cpu':u.ru_utime+u.ru_stime,'rss':u.ru_maxrss*1024,"
-    "'err':r.stderr.decode('utf-8','replace')[-400:]}))"
-)
-
-
-def run_to_file(argv: list[str], out: Path) -> tuple[float, float, float]:
-    """Run one process whose output is its stdout; return (CPU s, wall s, peak RSS)."""
-    done = subprocess.run([sys.executable, "-c", CHILD_TO_FILE, json.dumps(argv), str(out)], capture_output=True)
+    With `out` the child's stdout becomes that file, for a codec that writes to
+    a pipe; without it the codec writes its own files.
+    """
+    done = subprocess.run(
+        [sys.executable, "-c", CHILD, json.dumps(argv), str(out) if out else ""],
+        capture_output=True)
     try:
         info = json.loads(done.stdout.decode())
     except Exception as failure:
@@ -176,12 +162,8 @@ def measure(codec: dict, source: Path, scratch: Path) -> Row:
 
     enc_argv = fill(codec["encode"], mapping)
     dec_argv = fill(codec["decode"], mapping)
-    if to_stdout:
-        enc_cpu, enc_wall, enc_rss = run_to_file(enc_argv, encoded)
-        dec_cpu, dec_wall, dec_rss = run_to_file(dec_argv, decoded)
-    else:
-        enc_cpu, enc_wall, enc_rss = run_once(enc_argv)
-        dec_cpu, dec_wall, dec_rss = run_once(dec_argv)
+    enc_cpu, enc_wall, enc_rss = run_once(enc_argv, encoded if to_stdout else None)
+    dec_cpu, dec_wall, dec_rss = run_once(dec_argv, decoded if to_stdout else None)
 
     source_bytes = source.stat().st_size
     restored = decoded.exists() and decoded.stat().st_size == source_bytes and \
