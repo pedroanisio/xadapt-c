@@ -1,11 +1,15 @@
-"""Measure any codec on one footing: bytes, seconds both ways, peak memory.
+"""Measure any codec on one footing: bytes, CPU and wall seconds, peak memory.
 
 Every cross-codec comparison in research/ before this one measured what a
 particular tool happened to report, on whatever host it ran on. This runs each
 codec the same way — one process per measurement so the peak RSS is its own,
-wall seconds around that process, and a byte-for-byte comparison of the
+CPU and wall seconds around that process, and a byte-for-byte comparison of the
 restored file against the source, because a ratio from a codec that does not
 restore is not a number.
+
+CPU seconds are the figure to read. Threads move work between cores without
+removing any of it, so a wall figure credits a threaded run for parallelism it
+spent rather than for work it saved.
 
     python3 -B bench/codec_bench.py --input static/corpus/enwik8
     python3 -B bench/codec_bench.py --input <f> --only cadapt-mid,xz-9e
@@ -38,8 +42,9 @@ CHILD = (
     "t=time.monotonic();"
     "r=subprocess.run(argv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE);"
     "e=time.monotonic()-t;"
-    "m=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss;"
-    "print(json.dumps({'rc':r.returncode,'seconds':e,'rss':m*1024,"
+    "u=resource.getrusage(resource.RUSAGE_CHILDREN);"
+    "print(json.dumps({'rc':r.returncode,'wall':e,"
+    "'cpu':u.ru_utime+u.ru_stime,'rss':u.ru_maxrss*1024,"
     "'err':r.stderr.decode('utf-8','replace')[-400:]}))"
 )
 
@@ -50,12 +55,17 @@ class BenchError(RuntimeError):
 
 @dataclass(frozen=True)
 class Row:
+    """CPU seconds are the headline: threads move work between cores, they do
+    not remove it, so a wall figure flatters a threaded run against a budget
+    that is really about work done."""
     codec: str
     input_bytes: int
     output_bytes: int
     ratio: float
-    encode_seconds: float
-    decode_seconds: float
+    encode_cpu: float
+    decode_cpu: float
+    encode_wall: float
+    decode_wall: float
     encode_rss_mib: float
     decode_rss_mib: float
     restored: bool
@@ -111,8 +121,8 @@ def CODECS() -> list[dict]:
     return rows
 
 
-def run_once(argv: list[str]) -> tuple[float, float]:
-    """Run one process that writes its own files; return (seconds, peak RSS)."""
+def run_once(argv: list[str]) -> tuple[float, float, float]:
+    """Run one process that writes its own files; return (CPU s, wall s, peak RSS)."""
     done = subprocess.run([sys.executable, "-c", CHILD, json.dumps(argv)], capture_output=True)
     try:
         info = json.loads(done.stdout.decode())
@@ -120,7 +130,7 @@ def run_once(argv: list[str]) -> tuple[float, float]:
         raise BenchError(f"{argv[0]}: no measurement came back ({failure}); {done.stderr.decode()[-300:]}")
     if info["rc"]:
         raise BenchError(f"{argv[0]}: exited {info['rc']}: {info['err'].strip()}")
-    return info["seconds"], info["rss"]
+    return info["cpu"], info["wall"], info["rss"]
 
 
 CHILD_TO_FILE = (
@@ -130,14 +140,15 @@ CHILD_TO_FILE = (
     "t=time.monotonic();"
     "r=subprocess.run(argv,stdout=f,stderr=subprocess.PIPE);"
     "e=time.monotonic()-t;f.close();"
-    "m=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss;"
-    "print(json.dumps({'rc':r.returncode,'seconds':e,'rss':m*1024,"
+    "u=resource.getrusage(resource.RUSAGE_CHILDREN);"
+    "print(json.dumps({'rc':r.returncode,'wall':e,"
+    "'cpu':u.ru_utime+u.ru_stime,'rss':u.ru_maxrss*1024,"
     "'err':r.stderr.decode('utf-8','replace')[-400:]}))"
 )
 
 
-def run_to_file(argv: list[str], out: Path) -> tuple[float, float]:
-    """Run one process whose output is its stdout; return (seconds, peak RSS)."""
+def run_to_file(argv: list[str], out: Path) -> tuple[float, float, float]:
+    """Run one process whose output is its stdout; return (CPU s, wall s, peak RSS)."""
     done = subprocess.run([sys.executable, "-c", CHILD_TO_FILE, json.dumps(argv), str(out)], capture_output=True)
     try:
         info = json.loads(done.stdout.decode())
@@ -145,7 +156,7 @@ def run_to_file(argv: list[str], out: Path) -> tuple[float, float]:
         raise BenchError(f"{argv[0]}: no measurement came back ({failure}); {done.stderr.decode()[-300:]}")
     if info["rc"]:
         raise BenchError(f"{argv[0]}: exited {info['rc']}: {info['err'].strip()}")
-    return info["seconds"], info["rss"]
+    return info["cpu"], info["wall"], info["rss"]
 
 
 def fill(argv: list[str], mapping: dict[str, str]) -> list[str]:
@@ -161,18 +172,18 @@ def measure(codec: dict, source: Path, scratch: Path) -> Row:
     enc_argv = fill(codec["encode"], mapping)
     dec_argv = fill(codec["decode"], mapping)
     if to_stdout:
-        enc_seconds, enc_rss = run_to_file(enc_argv, encoded)
-        dec_seconds, dec_rss = run_to_file(dec_argv, decoded)
+        enc_cpu, enc_wall, enc_rss = run_to_file(enc_argv, encoded)
+        dec_cpu, dec_wall, dec_rss = run_to_file(dec_argv, decoded)
     else:
-        enc_seconds, enc_rss = run_once(enc_argv)
-        dec_seconds, dec_rss = run_once(dec_argv)
+        enc_cpu, enc_wall, enc_rss = run_once(enc_argv)
+        dec_cpu, dec_wall, dec_rss = run_once(dec_argv)
 
     source_bytes = source.stat().st_size
     restored = decoded.exists() and decoded.stat().st_size == source_bytes and \
         subprocess.run(["cmp", "-s", str(decoded), str(source)]).returncode == 0
     row = Row(codec["name"], source_bytes, encoded.stat().st_size,
               round(encoded.stat().st_size / source_bytes, 6),
-              round(enc_seconds, 1), round(dec_seconds, 1),
+              round(enc_cpu, 1), round(dec_cpu, 1), round(enc_wall, 1), round(dec_wall, 1),
               round(enc_rss / (1 << 20), 1), round(dec_rss / (1 << 20), 1), restored)
     encoded.unlink(missing_ok=True)
     decoded.unlink(missing_ok=True)
@@ -181,11 +192,12 @@ def measure(codec: dict, source: Path, scratch: Path) -> Row:
 
 def render(rows: list[Row]) -> str:
     width = max((len(r.codec) for r in rows), default=6)
-    out = [f"{'codec':<{width}} {'bytes':>12} {'ratio':>7} {'enc s':>8} {'dec s':>8} "
-           f"{'enc MiB':>8} {'dec MiB':>8}  restored"]
+    out = [f"{'codec':<{width}} {'bytes':>12} {'ratio':>7} {'encCPU':>8} {'decCPU':>8} "
+           f"{'encWall':>8} {'decWall':>8} {'encMiB':>8} {'decMiB':>8}  restored"]
     for r in sorted(rows, key=lambda r: r.output_bytes):
-        out.append(f"{r.codec:<{width}} {r.output_bytes:>12,} {r.ratio:>7.4f} {r.encode_seconds:>8.1f} "
-                   f"{r.decode_seconds:>8.1f} {r.encode_rss_mib:>8.1f} {r.decode_rss_mib:>8.1f}  "
+        out.append(f"{r.codec:<{width}} {r.output_bytes:>12,} {r.ratio:>7.4f} {r.encode_cpu:>8.1f} "
+                   f"{r.decode_cpu:>8.1f} {r.encode_wall:>8.1f} {r.decode_wall:>8.1f} "
+                   f"{r.encode_rss_mib:>8.1f} {r.decode_rss_mib:>8.1f}  "
                    f"{'yes' if r.restored else 'NO'}")
     return "\n".join(out)
 
@@ -216,9 +228,9 @@ def main(argv: list[str] | None = None) -> int:
     for codec in codecs:
         row = measure(codec, args.input, scratch)
         rows.append(row)
-        print(f"{row.codec}|{row.output_bytes}|{row.encode_seconds}|{row.decode_seconds}|"
-              f"{row.encode_rss_mib}|{row.decode_rss_mib}|{'ok' if row.restored else 'NOT RESTORED'}",
-              flush=True)
+        print(f"{row.codec}|{row.output_bytes}|cpu {row.encode_cpu}/{row.decode_cpu}|"
+              f"wall {row.encode_wall}/{row.decode_wall}|{row.encode_rss_mib}/{row.decode_rss_mib} MiB|"
+              f"{'ok' if row.restored else 'NOT RESTORED'}", flush=True)
 
     print()
     print(render(rows))

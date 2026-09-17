@@ -67,8 +67,31 @@ class CodecBenchTest(unittest.TestCase):
         self.assertEqual(row.input_bytes, self.source.stat().st_size)
         self.assertLess(row.output_bytes, row.input_bytes)
         self.assertAlmostEqual(row.ratio, row.output_bytes / row.input_bytes, places=5)
-        self.assertGreaterEqual(row.encode_seconds, 0.0)
+        self.assertGreaterEqual(row.encode_cpu, 0.0)
+        self.assertGreaterEqual(row.encode_wall, 0.0)
         self.assertGreater(row.encode_rss_mib, 0.0)
+
+    def test_threads_raise_cpu_time_even_as_wall_time_falls(self):
+        """The reason CPU is the headline: threads move work, they do not
+        remove it, so a wall figure flatters a threaded run."""
+        import multiprocessing
+        if multiprocessing.cpu_count() < 2:
+            self.skipTest("needs two cores")
+        spin = self.scratch / "spin.py"
+        spin.write_text(
+            "import sys, threading\n"
+            "def burn():\n"
+            "    x = 0\n"
+            "    for _ in range(4_000_000): x += 1\n"
+            "ts = [threading.Thread(target=burn) for _ in range(int(sys.argv[1]))]\n"
+            "[t.start() for t in ts]; [t.join() for t in ts]\n"
+            "open(sys.argv[3], 'wb').write(open(sys.argv[2], 'rb').read())\n")
+        codec = {"name": "spin", "tool": str(spin),
+                 "encode": [sys.executable, str(spin), "2", "{in}", "{enc}"],
+                 "decode": [sys.executable, str(spin), "1", "{enc}", "{dec}"]}
+        row = codec_bench.measure(codec, self.source, self.scratch)
+        self.assertTrue(row.restored)
+        self.assertGreaterEqual(row.encode_cpu, row.encode_wall * 0.9)
 
     def test_a_codec_that_does_not_restore_is_marked_not_restored(self):
         """A ratio from a codec that loses a byte is not a number."""
@@ -81,12 +104,12 @@ class CodecBenchTest(unittest.TestCase):
 
     def test_the_run_fails_when_any_codec_did_not_restore(self):
         """The harness must not print a table and exit 0 over a broken row."""
-        row = codec_bench.Row("lossy", 10, 5, 0.5, 0.1, 0.1, 1.0, 1.0, False)
+        row = codec_bench.Row("lossy", 10, 5, 0.5, 0.1, 0.1, 0.1, 0.1, 1.0, 1.0, False)
         self.assertIn("NO", codec_bench.render([row]))
 
     def test_rows_render_smallest_first(self):
-        big = codec_bench.Row("big", 100, 90, 0.9, 1.0, 1.0, 1.0, 1.0, True)
-        small = codec_bench.Row("small", 100, 10, 0.1, 1.0, 1.0, 1.0, 1.0, True)
+        big = codec_bench.Row("big", 100, 90, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, True)
+        small = codec_bench.Row("small", 100, 10, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, True)
         lines = codec_bench.render([big, small]).splitlines()
         self.assertTrue(lines[1].startswith("small"))
 
