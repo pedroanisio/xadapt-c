@@ -133,11 +133,14 @@ $(BUILD)/runs/profile: ; @$(BUILD)/test_profile_conversion > $@.log 2>&1 && touc
 # different directories and share nothing.
 check: all
 	$(MAKE) -j check-parts
-check-parts: test coverage $(BUILD)/runs/gcov-tests $(BUILD)/runs/safety $(BUILD)/runs/probe
+check-parts: test coverage $(BUILD)/runs/gcov-tests $(BUILD)/runs/safety $(BUILD)/runs/probe $(BUILD)/runs/platform
 # This explicit rule is phony: an old success marker must never skip the gate's tests.
 $(BUILD)/runs/gcov-tests: | $(BUILD)/runs ; @$(PYTHON) -B tests/test_check_gcov.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/safety: all | $(BUILD)/runs ; @ADAPT_TEST_THREADS=$(TEST_THREADS) $(PYTHON) -B tests/test_cadapt_safety.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/probe: all | $(BUILD)/runs ; @$(PYTHON) -B tests/test_allocation_probe.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+# The feature macros against the system headers: a compile, not a run, so it
+# does not need the binary.
+$(BUILD)/runs/platform: | $(BUILD)/runs ; @$(PYTHON) -B tests/test_platform_header.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs: ; mkdir -p $@
 
 # The CLI suite's long cases on the ordinary build, after the fast check.

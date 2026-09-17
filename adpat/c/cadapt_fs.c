@@ -6,6 +6,8 @@
  * Extracted from cadapt.c, 2026-09-17: the code is unchanged, and the six
  * functions cadapt.c calls lost their `static`.
  */
+#include "cadapt_platform.h"
+
 #include "cadapt_fs.h"
 
 #include <errno.h>

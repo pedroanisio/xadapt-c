@@ -13,8 +13,13 @@
 #ifndef CADAPT_FS_H
 #define CADAPT_FS_H
 
-#include "adapt.h"
+/* cadapt_platform.h first, always: it sets _POSIX_C_SOURCE and _GNU_SOURCE,
+ * and a system header that arrives before them is compiled without them.
+ * adapt.h pulls in system headers, so putting it first is what silently
+ * turned the sparse map into its no-holes fallback. */
 #include "cadapt_platform.h"
+
+#include "adapt.h"
 
 #include <stddef.h>
 #include <stdint.h>

@@ -65,4 +65,15 @@ typedef off_t cadapt_off;
 #endif
 #endif
 
+/* The feature macros above decide what the system headers declare, so they
+ * must precede every one of them. When they do not, the declarations simply
+ * go missing and the code below compiles to a working but wrong fallback —
+ * a restored file that is dense rather than sparse, and a test far away.
+ * Fail here instead, where the cause is. */
+#if defined(__linux__) && !defined(_WIN32)
+#if !defined(SEEK_HOLE) || !defined(SEEK_DATA)
+#error "cadapt_platform.h must be included before any system header: SEEK_HOLE/SEEK_DATA are missing, so _GNU_SOURCE arrived too late"
+#endif
+#endif
+
 #endif /* CADAPT_PLATFORM_H */
