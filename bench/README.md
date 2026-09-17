@@ -64,27 +64,30 @@ thread count shows actual process threads.
 
 ## Locked floors and the CI gate
 
-`ratio_floor.json` holds the floors locked in `LOCKS.md` (2026-09-14): the
-largest container and lowest throughput `cadapt encode --max --allocation
-context` may produce on the first 8 MiB of enwik8 (the CI proxy), the first
-16 MiB (pre-merge), full enwik8 and full enwik9 (release). `check_ratio_floor.py`
-encodes a fixture with the current binary, refuses inputs whose size or MD5
-differ from the locked ones, gates size exactly, gates throughput on the
-reference host or relative to `--baseline-binary` elsewhere (and says so when it
-cannot), and with `--verify` decodes and compares byte for byte.
+The gate lives in `tools/`, not here: [`tools/check_ratio_floor.py`](../tools/check_ratio_floor.py)
+with [`tools/ratio_floor.json`](../tools/ratio_floor.json). It encodes a fixture
+with the current binary, refuses an input whose size or MD5 differs from the
+locked one, gates the container size exactly, gates throughput in CPU seconds on
+the reference host or relative to `--baseline-binary` elsewhere (and says so when
+it cannot), and with `--verify` decodes and compares byte for byte.
 
 ```sh
 make gate                                   # 8 MiB proxy, encode + verify, < 120 s
 make ratio-floor                            # full enwik8 (static/corpus/enwik8 unzipped)
 make ratio-floor FLOOR_ARGS='--fixture enwik8=static/corpus/enwik8 --fixture enwik9=/path/enwik9'
-python3 -B bench/check_ratio_floor.py --fixture enwik8-8MiB=build/enwik8-8MiB \
+python3 -B tools/check_ratio_floor.py --fixture enwik8-8MiB=build/enwik8-8MiB \
     --baseline-binary /path/to/locked-commit/cadapt   # any host: relative throughput
-python3 -B -m unittest discover -s bench -p 'test_check_ratio_floor.py'
+python3 -B -m unittest discover -s tools -p 'test_check_ratio_floor.py'
 ```
 
 Exit 0 means every requested floor holds, 1 that a floor is broken, 2 that the
 check could not run. The proxy cannot see the allocation policy (identical
 bytes below 32 MiB), which is why the full floors exist.
+
+This directory carried a second copy of the gate and its floor file until
+2026-09-17. They were a fork of the `tools/` originals, three days behind, and
+they gated a command that was no longer the locked one, so a binary 4.3 % worse
+on enwik8 passed them. There is one gate now.
 
 ## Plot all runs
 
@@ -205,3 +208,129 @@ python3 bench/telemetry.py run --corpus static/corpus/scripts/cyrillic-ru.zip --
 The measurements the rows gave are in
 [research/scripts-measurement.md](../research/scripts-measurement.md).
 
+
+## The probes' shared machinery
+
+`probe_util.h` holds what every C probe in this directory needs: the mixer and
+the seeded FNV hash, the input loader, the byte-size parser, a buffered
+writer, a checked allocator and one failure path with one set of exit codes
+(0 fine, 1 the run failed, 2 the arguments were wrong). It is header-only,
+standard library only, and nothing in the build, the library or the CLI loads
+it.
+
+Two rules it exists to keep. An empty input and an unreadable one never share
+a branch, so "no such file" can never be reported as "nothing to do". And a
+table that could not be allocated stops the probe rather than letting every
+figure below it come out wrong.
+
+## The redundancy probe
+
+`redundancy_probe.c` prices the two front-end shortcuts that make
+byte-oriented context-mixing compressors fast, against an input, before
+either is built into the codec: a Bloom-style LZP literal-prediction bypass,
+and a flag-free gate on contexts that have settled on one following byte.
+It reads the input and writes nothing, so it reports what a shortcut could
+*cover*, never what it would cost in container bytes — that number comes from
+an encode. Standard library only; no codec source or constant is involved.
+
+```sh
+cc -std=c99 -O2 -o /tmp/redundancy-probe bench/redundancy_probe.c
+/tmp/redundancy-probe static/corpus/enwik8 --limit 8388608
+/tmp/redundancy-probe static/corpus/enwik8 --limit 8388608 --min-seen 8
+python3 -B bench/test_redundancy_probe.py          # builds its own copy
+```
+
+The measurements it gave, and the experiments they rank, are in
+[research/speed-3x-experiments-2026-09-16.md](../research/speed-3x-experiments-2026-09-16.md).
+
+## The slot price table
+
+`slot_price.py` measures what each of the max profile's twenty hashed
+contexts is worth. Every context costs three arbiter lanes of every coded bit
+and one claim of every nibble, so a context that earns little is a context the
+encoder is paying for. The tool encodes a fixture once per kind with that kind
+dropped, compares the container against the baseline, and — with `--frontier`
+— walks the kinds cheapest first to map what deleting several at once costs in
+bytes and returns in seconds.
+
+It builds and drives a development codec (`-DADAPT_SIZES_OVERRIDE`), whose
+`ADAPT_DROP_MASK` exists for this ablation. Containers written under a mask
+decode only under the same mask, so the tool's containers are never a
+deliverable; its numbers are, and running it again reproduces them.
+
+```sh
+make                                              # the codec the end-to-end test needs
+python3 -B bench/slot_price.py --fixture static/corpus/enwik8 --limit 8MiB
+python3 -B bench/slot_price.py --fixture static/corpus/enwik8 --limit 8MiB \
+        --frontier --json bench/results/slot-price-enwik8.json
+python3 -B bench/test_slot_price.py               # stub-driven, plus one real point
+```
+
+The tables it gave for enwik8 and for three Silesia rows, and the rung they
+price, are in
+[research/speed-3x-experiments-2026-09-16.md](../research/speed-3x-experiments-2026-09-16.md).
+
+## The stream census
+
+`stream_census.c` counts what is left for a second transform to remove. The
+text transform is worth 1.43× of encode time on enwik8 because time falls with
+the bytes the model is handed; the census models that transform's rule — a
+word replaced once its third occurrence has been seen — and puts every
+remaining byte in exactly one bucket, so no two candidate front ends can claim
+the same byte. It then reports, per candidate, the bytes it could remove net
+of the codes it must write.
+
+Every figure is an upper bound before the model has a say: a transform that
+removes bytes the model already predicted almost for free returns time and not
+ratio. The census ranks candidates; only an encode decides the payback.
+
+```sh
+cc -std=c99 -O2 -o /tmp/stream-census bench/stream_census.c
+/tmp/stream-census static/corpus/enwik8
+/tmp/stream-census static/corpus/mixed/silesia/xml --limit 16777216
+python3 -B bench/test_stream_census.py
+```
+
+The numbers it gave, and what they closed and opened, are in
+[research/front-end-census-2026-09-17.md](../research/front-end-census-2026-09-17.md).
+
+## The markup-book prototype
+
+`markup_book_proto.c` is the candidate the census ranked first, implemented
+outside the container so its payback could be measured before a format version
+was spent on it: a complete `<...>` tag coded once it has been seen three
+times, the book built as the file is read, nothing sent ahead, with its
+inverse. It writes no container and nothing in the build loads it.
+
+```sh
+cc -std=c99 -O2 -o /tmp/markup-proto bench/markup_book_proto.c
+/tmp/markup-proto enc static/corpus/mixed/silesia/xml /tmp/xml.mk
+/tmp/markup-proto dec /tmp/xml.mk /tmp/xml.back    # must match the source
+python3 -B bench/test_markup_book_proto.py
+```
+
+What it measured — on the `xml` row a smaller container in half the time, on
+enwik8 a larger one — is in
+[research/front-end-census-2026-09-17.md](../research/front-end-census-2026-09-17.md).
+
+## The codec harness
+
+`codec_bench.py` measures any codec on one footing — bytes, seconds both
+ways, peak RSS, and a byte-for-byte comparison of the restored file against
+the source. Every cross-codec figure in `research/` before it came from
+whatever each tool happened to report; this runs one process per measurement
+so the peak RSS is that process's own, and it **fails the run** when a codec
+does not restore its input, because a ratio from a codec that loses a byte is
+not a number.
+
+It drives binaries that already exist and is not a codec path. `cadapt`'s
+profiles are always available; `xz`, `zstd` and a built `kanzi` are included
+when they are on the machine.
+
+```sh
+make
+python3 -B bench/codec_bench.py --input static/corpus/enwik8
+python3 -B bench/codec_bench.py --input <f> --only cadapt-mid,xz-9e,zstd-19
+python3 -B bench/codec_bench.py --input <f> --json bench/results/row.json
+python3 -B bench/test_codec_bench.py
+```

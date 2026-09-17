@@ -4,6 +4,7 @@ Source: OpenAI GPT-6 via Codex. The codec's default build/test gate remains
 independent of the optional plotting dependencies.
 """
 
+import importlib.util
 import json
 import tempfile
 import unittest
@@ -13,7 +14,13 @@ from unittest.mock import patch
 import plots
 import telemetry
 
+# Matplotlib is in bench/requirements.txt and not in the codec's own gate, so
+# a checkout without it skips this rather than failing: an absent optional
+# dependency is not a broken plotter.
+NO_MATPLOTLIB = importlib.util.find_spec("matplotlib") is None
 
+
+@unittest.skipIf(NO_MATPLOTLIB, "install bench/requirements.txt for the plotting tests")
 class PlotTest(unittest.TestCase):
     def test_all_adaptive_and_unknown_profiles_render_without_dropping_runs(self):
         profiles = (

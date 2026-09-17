@@ -253,15 +253,18 @@ class TelemetryTest(unittest.TestCase):
                     "--output",
                     str(output),
                     "--profiles",
+                    "normal-bmp",
                     "fast",
                     "--memory",
-                    "1",
                     "64MiB",
                     "--repeats",
                     "2",
                     "--no-plots",
                 ]
             )
+        # normal-bmp asks for the BMP transform on a text corpus, which the
+        # encoder refuses: one configuration fails per repeat while the other
+        # succeeds, and both stay in the history.
         self.assertEqual(rc, 1)
         records = telemetry.load_runs([output, output])
         self.assertEqual(len(records), 4)
@@ -271,7 +274,7 @@ class TelemetryTest(unittest.TestCase):
                 self.assertNotIn("compression_percent", record["metrics"])
             else:
                 self.assertEqual(record["codec"]["declared_bytes"], self.source.stat().st_size)
-                self.assertEqual(record["codec"]["format_version"], 23)
+                self.assertEqual(record["codec"]["base_profile"], "fast")
         session_path = next(output.glob("*/session.json"))
         session = json.loads(session_path.read_text())
         self.assertTrue(session["complete"])
@@ -309,11 +312,46 @@ class TelemetryTest(unittest.TestCase):
             )
         self.assertEqual(rc, 0)
         records = telemetry.load_runs([output])
-        self.assertEqual([record["codec"]["format_version"] for record in records], [22, 23, 24])
+        # The profile is the invariant; the version number moves whenever a
+        # profile gains a family, as it did at 80-85.
+        self.assertEqual([record["codec"]["base_profile"] for record in records], ["normal", "fast", "max"])
+        self.assertTrue(all(v in telemetry.METADATA_VERSIONS
+                            for v in (r["codec"]["format_version"] for r in records)))
         for record in records:
             self.assertTrue(record["config"]["verify"])
             self.assertEqual(record["codec"]["segments"], 2)
             self.assertIn("verified", (Path(record["_directory"]) / "stderr.txt").read_text())
+
+    def test_a_memory_budget_below_the_smallest_preset_is_refused(self) -> None:
+        """encode's budget is a preset, so a byte budget no preset fits is a
+        usage error rather than a session of runs recorded at a budget the
+        encoder never honoured."""
+        with contextlib.redirect_stderr(io.StringIO()) as error, contextlib.redirect_stdout(io.StringIO()):
+            rc = telemetry.main([
+                "run", "--binary", str(CADAPT), "--corpus", str(self.source),
+                "--output", str(self.root / "tiny"), "--memory", "1", "--no-plots",
+            ])
+        self.assertEqual(rc, 2)
+        self.assertIn("below the smallest memory preset", error.getvalue())
+
+    def test_a_byte_budget_snaps_down_to_a_preset(self) -> None:
+        """The preset chosen is the largest that fits, and the plan records
+        that preset's own budget rather than the one asked for."""
+        self.assertEqual(telemetry.memory_tier(674 * telemetry.MIB), ("-9", 674 * telemetry.MIB))
+        self.assertEqual(telemetry.memory_tier(673 * telemetry.MIB), ("-8", 370 * telemetry.MIB))
+        self.assertEqual(telemetry.memory_tier(4 << 30), ("-11", 2 << 30))
+        with self.assertRaises(ValueError):
+            telemetry.memory_tier(0)
+
+    def test_every_version_the_encoder_writes_is_read_back(self) -> None:
+        """The reader's version map comes from adapt.h, so a profile's new
+        version family is known without editing this file."""
+        self.assertIn(telemetry._C["ADAPT_NORMAL_KEYS_VERSION"], telemetry.KNOWN_VERSIONS)
+        self.assertIn(telemetry._C["ADAPT_MAX_KEYS_BINARY_METADATA_VERSION"], telemetry.KNOWN_VERSIONS)
+        self.assertIn(telemetry._C["ADAPT_TEXT_MID_METADATA_VERSION"], telemetry.KNOWN_VERSIONS)
+        self.assertEqual(telemetry.SIZED_VERSIONS & telemetry.POLICY_VERSIONS, frozenset())
+        with self.assertRaises(ValueError):
+            telemetry.adapt_constants(self.root / "absent.h")
 
     def test_cli_reports_bad_input_without_traceback(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()) as error:
@@ -322,16 +360,21 @@ class TelemetryTest(unittest.TestCase):
         self.assertIn("no run.json records", error.getvalue())
 
     def test_profiles_and_segment_framing(self) -> None:
-        for profile, version in (([], 22), (["--fast"], 23), (["--max"], 24)):
-            with self.subTest(version=version):
-                output = self.root / f"{version}.adpt"
+        """Every profile the CLI writes is read back by profile, not by a
+        version number: a container written to a file carries metadata, so its
+        version is whatever family that profile currently writes."""
+        for profile, name in (([], "normal"), (["--fast"], "fast"), (["--mid"], "mid"), (["--max"], "max")):
+            with self.subTest(profile=name):
+                output = self.root / f"{name}.adpt"
                 subprocess.run(
                     [str(CADAPT), "encode", str(self.source), "-o", str(output), *profile],
                     check=True,
                     capture_output=True,
                 )
                 metadata = telemetry.inspect_container(output)
-                self.assertEqual(metadata["format_version"], version)
+                self.assertEqual(metadata["base_profile"], name)
+                self.assertIn(metadata["format_version"], telemetry.METADATA_VERSIONS)
+                self.assertIn(metadata["key_policy"], ("classic", "text", "binary"))
                 self.assertEqual(metadata["metadata_bytes"], 32)
                 self.assertEqual(metadata["filesystem_metadata"]["mode"], self.source.stat().st_mode & 0o7777)
                 self.assertFalse(metadata["x86_transform"])

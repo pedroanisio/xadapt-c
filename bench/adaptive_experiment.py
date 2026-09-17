@@ -424,8 +424,9 @@ def main(argv: list[str] | None = None) -> int:
                 str(source),
                 "-o",
                 str(encoded),
-                "--max-memory",
-                str(args.memory),
+                # encode's budget is a preset; --max-memory is decode's cap
+                # alone and the encoder refuses it (telemetry.memory_tier).
+                telemetry.memory_tier(args.memory)[0],
             ]
             if args.base_profile == "max":
                 command.append("--max")

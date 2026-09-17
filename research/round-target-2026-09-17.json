@@ -1,0 +1,202 @@
+{
+  "schema": "cadapt.round-target.v1",
+  "measured_on": "2026-09-17",
+  "host": "Intel Xeon @ 2.10GHz, 4 cores, 15 GiB, shared container",
+  "harness": "bench/codec_bench.py \u2014 one process per measurement, peak RSS by getrusage, every restore compared byte for byte",
+  "target": {
+    "enwik8": {
+      "bytes": 17000000,
+      "encode_seconds": 30,
+      "decode_seconds": 30,
+      "rss_mib": 600
+    },
+    "enwik9": {
+      "bytes": 146000000,
+      "encode_seconds": 500,
+      "decode_seconds": 530,
+      "rss_mib": 600
+    }
+  },
+  "enwik8": [
+    {
+      "codec": "cadapt --max --allocation context --contexts lean",
+      "input_bytes": 100000000,
+      "output_bytes": 17902645,
+      "ratio": 0.179026,
+      "encode_seconds": 127.3,
+      "decode_seconds": 137.9,
+      "encode_rss_mib": 655.0,
+      "decode_rss_mib": 654.4,
+      "restored": true
+    },
+    {
+      "codec": "cadapt --max --allocation context --contexts lean -8",
+      "input_bytes": 100000000,
+      "output_bytes": 18118964,
+      "ratio": 0.18119,
+      "encode_seconds": 128.4,
+      "decode_seconds": 137.6,
+      "encode_rss_mib": 355.0,
+      "decode_rss_mib": 354.5,
+      "restored": true
+    },
+    {
+      "codec": "cadapt --max --allocation context --contexts lean --threads 4",
+      "input_bytes": 100000000,
+      "output_bytes": 18966492,
+      "ratio": 0.189665,
+      "encode_seconds": 60.1,
+      "decode_seconds": 39.0,
+      "encode_rss_mib": 514.9,
+      "decode_rss_mib": 653.4,
+      "restored": true
+    },
+    {
+      "codec": "cadapt --threads 3",
+      "input_bytes": 100000000,
+      "output_bytes": 19335301,
+      "ratio": 0.193353,
+      "encode_seconds": 38.1,
+      "decode_seconds": 40.6,
+      "encode_rss_mib": 602.2,
+      "decode_rss_mib": 601.9,
+      "restored": true
+    },
+    {
+      "codec": "cadapt --threads 4",
+      "input_bytes": 100000000,
+      "output_bytes": 19454846,
+      "ratio": 0.194548,
+      "encode_seconds": 23.5,
+      "decode_seconds": 24.8,
+      "encode_rss_mib": 528.1,
+      "decode_rss_mib": 511.4,
+      "restored": true
+    },
+    {
+      "codec": "cadapt --mid --threads 3",
+      "input_bytes": 100000000,
+      "output_bytes": 19595070,
+      "ratio": 0.195951,
+      "encode_seconds": 26.4,
+      "decode_seconds": 29.0,
+      "encode_rss_mib": 602.2,
+      "decode_rss_mib": 602.3,
+      "restored": true
+    },
+    {
+      "codec": "cadapt --mid --threads 4",
+      "input_bytes": 100000000,
+      "output_bytes": 19712074,
+      "ratio": 0.197121,
+      "encode_seconds": 16.6,
+      "decode_seconds": 18.4,
+      "encode_rss_mib": 526.1,
+      "decode_rss_mib": 512.5,
+      "restored": true
+    }
+  ],
+  "enwik9": [
+    {
+      "codec": "cadapt --max --allocation context --contexts lean --threads 4",
+      "input_bytes": 1000000000,
+      "output_bytes": 161113398,
+      "ratio": 0.161113,
+      "encode_seconds": 434.7,
+      "decode_seconds": 362.7,
+      "encode_rss_mib": 515.5,
+      "decode_rss_mib": 817.9,
+      "restored": true
+    },
+    {
+      "codec": "cadapt --threads 4",
+      "input_bytes": 1000000000,
+      "output_bytes": 166333147,
+      "ratio": 0.166333,
+      "encode_seconds": 218.5,
+      "decode_seconds": 242.7,
+      "encode_rss_mib": 546.6,
+      "decode_rss_mib": 683.3,
+      "restored": true
+    },
+    {
+      "codec": "cadapt --mid --threads 4",
+      "input_bytes": 1000000000,
+      "output_bytes": 169145966,
+      "ratio": 0.169146,
+      "encode_seconds": 152.3,
+      "decode_seconds": 168.8,
+      "encode_rss_mib": 546.8,
+      "decode_rss_mib": 685.9,
+      "restored": true
+    },
+    {
+      "codec": "xz -9e -T1",
+      "input_bytes": 1000000000,
+      "output_bytes": 211776220,
+      "ratio": 0.211776,
+      "encode_seconds": 908.7,
+      "decode_seconds": 11.1,
+      "encode_rss_mib": 675.3,
+      "decode_rss_mib": 66.1,
+      "restored": true
+    },
+    {
+      "codec": "zstd -19 -T1",
+      "input_bytes": 1000000000,
+      "output_bytes": 235515928,
+      "ratio": 0.235516,
+      "encode_seconds": 585.6,
+      "decode_seconds": 1.4,
+      "encode_rss_mib": 221.2,
+      "decode_rss_mib": 12.1,
+      "restored": true
+    }
+  ],
+  "enwik9_single_thread_locked": {
+    "bytes": 146797785,
+    "note": "tools/ratio_floor.json, 1056.2 CPU s on the reference host"
+  },
+  "decode_frontier": {
+    "note": "same enwik8 container (18,966,492 B) and enwik9 container (161,113,398 B); --max-memory walks the worker count down until the bound fits",
+    "enwik8": [
+      {
+        "decode": "--threads 1",
+        "seconds": 149.4,
+        "rss_mib": 153.2
+      },
+      {
+        "decode": "--threads 2",
+        "seconds": 79.4,
+        "rss_mib": 349.8
+      },
+      {
+        "decode": "--threads 4",
+        "seconds": 40.8,
+        "rss_mib": 652.9
+      },
+      {
+        "decode": "--threads 4 --max-memory 629145600",
+        "seconds": 68.6,
+        "rss_mib": 514.4
+      },
+      {
+        "decode": "--threads 4 --max-memory 419430400",
+        "seconds": 80.7,
+        "rss_mib": 349.7
+      }
+    ],
+    "enwik9": [
+      {
+        "decode": "--threads 4",
+        "seconds": 362.7,
+        "rss_mib": 817.9
+      },
+      {
+        "decode": "--threads 4 --max-memory 629145600",
+        "seconds": 724.8,
+        "rss_mib": 487.8
+      }
+    ]
+  }
+}
