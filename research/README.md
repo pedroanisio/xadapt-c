@@ -22,6 +22,7 @@ numbers that stand are in [tools/ratio_floor.json](../tools/ratio_floor.json).
 | [three-axis-strategy-2026-09-17.md](three-axis-strategy-2026-09-17.md) | 2026-09-17 | The path to winning ratio, memory and speed together: the profile x tier x reference surface in [three-axis-surface.json](three-axis-surface.json), the domination test, and the phased plan |
 | [front-end-census-2026-09-17.md](front-end-census-2026-09-17.md) | 2026-09-17 | What is left for a second transform, by [bench/stream_census.c](../bench/stream_census.c): the front end is spent on enwik8 and worth up to 2× on the mixed corpus; the markup book prototyped in [bench/markup_book_proto.c](../bench/markup_book_proto.c) and measured |
 | [codec-row-enwik8-2026-09-17.md](codec-row-enwik8-2026-09-17.md) | 2026-09-17 | enwik8 through [bench/codec_bench.py](../bench/codec_bench.py): cadapt, `xz -9e`, `zstd -19` and kanzi on one harness, every restore byte-checked, scored against the round's 17 MB / 30 s / 600 MB target |
+| [round-target-2026-09-17.md](round-target-2026-09-17.md) | 2026-09-17 | The round's enwik8/enwik9 target measured: threads close the time and memory halves and cost ratio; the decoder-sizing defect that puts enwik9's decode over the envelope |
 
 The CSV and JSON files beside the notes are their data. The renderings
 `make ltcb` writes here are not tracked.

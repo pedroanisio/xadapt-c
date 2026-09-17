@@ -61,12 +61,16 @@ class Row:
     restored: bool
 
 
-def cadapt(name: str, *flags: str) -> dict:
+def cadapt(name: str, *flags: str, threads: int = 1) -> dict:
+    """A cadapt row. With threads > 1 the encoder cuts segments and the
+    decoder is told the same count, so both sides are measured threaded."""
+    thread_flags = ["--threads", str(threads)] if threads > 1 else []
     return {
         "name": name,
         "tool": str(CADAPT),
-        "encode": [str(CADAPT), "encode", *flags, "{in}", "-o", "{enc}", "--no-verify", "--force"],
-        "decode": [str(CADAPT), "decode", "{enc}", "-o", "{dec}", "--force"],
+        "encode": [str(CADAPT), "encode", *flags, *thread_flags, "{in}", "-o", "{enc}",
+                   "--no-verify", "--force"],
+        "decode": [str(CADAPT), "decode", *thread_flags, "{enc}", "-o", "{dec}", "--force"],
     }
 
 
@@ -80,6 +84,14 @@ def CODECS() -> list[dict]:
         cadapt("cadapt-mid", "--mid"),
         cadapt("cadapt-default"),
         cadapt("cadapt-max-lean", "--max", "--allocation", "context", "--contexts", "lean"),
+        cadapt("cadapt-max-lean-t4", "--max", "--allocation", "context", "--contexts", "lean", threads=4),
+        cadapt("cadapt-mid-t4", "--mid", threads=4),
+        cadapt("cadapt-max-lean-8", "--max", "--allocation", "context", "--contexts", "lean", "-8"),
+        cadapt("cadapt-max-lean-8-t4", "--max", "--allocation", "context", "--contexts", "lean", "-8", threads=4),
+        cadapt("cadapt-mid-t2", "--mid", threads=2),
+        cadapt("cadapt-mid-t3", "--mid", threads=3),
+        cadapt("cadapt-default-t4", threads=4),
+        cadapt("cadapt-default-t3", threads=3),
     ]
     if xz:
         rows.append({"name": "xz-9e", "tool": xz,
