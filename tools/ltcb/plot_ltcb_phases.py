@@ -114,6 +114,18 @@ def frontier_bpb_at(points: list[FrontierPoint], speed: float) -> float | None:
     return min(reachable) if reachable else None
 
 
+def write_phase_table(rows: list[ltcb.Entry], path: Path) -> Path:
+    """Write the phase table as CSV, without drawing anything.
+
+    The figure needs Matplotlib; the table behind it needs only the published
+    entries, so anything that wants the numbers — the interactive page, a test
+    — takes them from here rather than from a rendering that `make ltcb` may
+    not have built.
+    """
+    _write_table(path, {name: frontier_points(rows, key) for name, key in AXES})
+    return path
+
+
 def _write_table(path: Path, per_axis: dict[str, list[FrontierPoint]]) -> None:
     fields = ["axis", "phase", "family", "program", "speed_ns_per_byte", "enwik9_bpb",
               "phase_start_ns_per_byte", "phase_end_ns_per_byte", "phase_gain_per_decade",
@@ -275,7 +287,7 @@ def render(rows: list[ltcb.Entry], output: Path, source: str = ltcb.DEFAULT_SOUR
     fig.savefig(svg, format="svg", metadata={"Date": None})
     fig.savefig(png, format="png", dpi=100)
     plt.close(fig)
-    _write_table(table, {name: frontier_points(rows, key) for name, key in AXES})
+    write_phase_table(rows, table)
     return [svg, png, table]
 
 

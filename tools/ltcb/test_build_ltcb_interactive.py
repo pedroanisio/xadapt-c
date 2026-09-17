@@ -12,14 +12,28 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import analyze_ltcb
 import build_ltcb_interactive as build
+import plot_ltcb_phases as phases_tool
 import plot_ltcb_tables as ltcb
 from test_plot_ltcb_tables import LOCAL_HEADER
 
 HERE = Path(__file__).resolve().parent
 DATA = ltcb.RESEARCH
+# The phase table and the analysis are renderings `make ltcb` builds, and
+# .gitignore excludes them, so a fresh clone does not have them. Building both
+# here from the tracked CSVs keeps the suite runnable on any checkout and
+# needs no Matplotlib: the phase table's numbers come from the writer the
+# figure shares, and the analysis tool draws nothing.
+_generated = tempfile.TemporaryDirectory()
+GENERATED = Path(_generated.name)
+phases_tool.write_phase_table(ltcb.load_rows(DATA / "ltcb-main-table.csv"),
+                              GENERATED / "ltcb-phases.csv")
+analyze_ltcb.main(["--local", str(DATA / "ltcb-local-entries.csv"),
+                   "--output", str(GENERATED / "ltcb-analysis.json")])
+
 INPUTS = dict(table=DATA / "ltcb-main-table.csv", local=DATA / "ltcb-local-entries.csv",
-              phases=DATA / "ltcb-phases.csv", analysis=DATA / "ltcb-analysis.json",
+              phases=GENERATED / "ltcb-phases.csv", analysis=GENERATED / "ltcb-analysis.json",
               template=HERE / "ltcb-interactive.template.html")
 
 
@@ -77,9 +91,15 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_main_writes_the_page(self):
+        """main() defaults to the renderings in research/, so it is given the
+        generated ones explicitly rather than requiring `make ltcb` first."""
         with tempfile.TemporaryDirectory() as temporary:
             out = Path(temporary) / "page.html"
-            self.assertEqual(build.main(["--output", str(out)]), 0)
+            self.assertEqual(build.main([
+                "--output", str(out),
+                "--phases", str(INPUTS["phases"]),
+                "--analysis", str(INPUTS["analysis"]),
+            ]), 0)
             self.assertGreater(out.stat().st_size, 50_000)
 
 
