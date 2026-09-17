@@ -57,10 +57,13 @@ def units(
     cli: tuple[int, int],
     header: tuple[int, int] = (9, 10),
     archive: tuple[int, int] = (10, 10),
+    fs: tuple[int, int] = (0, 0),
 ):
-    """The four unit reports the gate reads: the header appears in both
+    """The five unit reports the gate reads: the header appears in both
     library units that inline it, as gcov reports an inlined header; the
-    archive unit stands alone. The command line's report comes last."""
+    archive unit stands alone. The command line's two units come last:
+    cadapt.c, then the filesystem layer cadapt_fs.c (no branches unless
+    given, so `cli` alone sets the command line's figure)."""
     return [
         report({"adapt_decode.c": decode, "adapt_model.h": header, "adapt_adaptive.h": (0, 0), "adapt_bmp.h": (0, 0),
                 "adapt_text.h": (0, 0)}),
@@ -68,6 +71,7 @@ def units(
                 "adapt_text.h": (0, 0)}),
         report({"adapt_archive.c": archive}),
         report({"cadapt.c": cli}),
+        report({"cadapt_fs.c": fs}),
     ]
 
 
@@ -145,17 +149,20 @@ class GateTest(unittest.TestCase):
 
     def test_a_missing_or_duplicated_source_fails(self) -> None:
         paths = self.write_units(units((50, 50), (50, 50), (90, 100)))
-        code, _, err = self.run_gate(*paths[:3])
+        code, _, err = self.run_gate(*paths[:3], paths[4])
         self.assertEqual(code, 1)
         self.assertIn("lacks ['cadapt.c']", err)
-        code, _, err = self.run_gate(*paths[:2], paths[3])
+        code, _, err = self.run_gate(*paths[:4])
+        self.assertEqual(code, 1)
+        self.assertIn("lacks ['cadapt_fs.c']", err)
+        code, _, err = self.run_gate(*paths[:2], *paths[3:])
         self.assertEqual(code, 1)
         self.assertIn("lacks ['adapt_archive.c']", err)
         code, _, err = self.run_gate(*paths, paths[0])
         self.assertEqual(code, 1)
         self.assertIn("duplicate source evidence", err)
         twice = self.write("twice.json", report({"adapt_decode.c": (5, 5), "adapt_encode.c": (5, 5)}))
-        code, _, err = self.run_gate(twice, paths[1], paths[2], paths[3])
+        code, _, err = self.run_gate(twice, paths[1], paths[2], paths[3], paths[4])
         self.assertEqual(code, 1)
         self.assertIn("duplicate source evidence", err)
 
