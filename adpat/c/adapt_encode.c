@@ -807,33 +807,117 @@ static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_cod
  * are what a sample can be trusted for: measured on 16 MiB of enwik8, a
  * lean set that won its 32 KiB sample by a hair and its 256 KiB block by
  * less than a thousandth lost the whole file by seven. */
+typedef struct model_choice {
+    /* the class-history width, the context set and the arbiters' key
+     * policy, as header codes; the record period */
+    uint8_t class_code, set_code, keys;
+    uint16_t period;
+    /* the sample's size under class_code and set_code, when a trial coded
+     * exactly that (choose_keys reuses it as the classic keys' size); 0
+     * when none did — a given set, whose width trials run on the full set */
+    size_t sample;
+} model_choice;
+
+/* The whole-block proof of a chosen set against the full one, shared by
+ * the fast and normal set choices: the set stays only where it codes the
+ * block within PROOF_MARGIN of the full set's coding, which the width's
+ * proof may already have made (`whole`, `have_whole`). */
+static adapt_status prove_set(adapt_sizes sizes, uint8_t class_code, uint8_t *set_code, const uint8_t *block, size_t n,
+                              uint8_t *coded, size_t coded_cap, size_t *whole, int *have_whole, adapt_error *error) {
+    size_t lean;
+    adapt_status status;
+    if (*set_code == 0) {
+        return ADAPT_OK;
+    }
+    status = trial(sizes, class_code, *set_code, block, n, coded, coded_cap, &lean, error);
+    if (status != ADAPT_OK) {
+        return status;
+    }
+    if (!*have_whole) {
+        status = trial(sizes, class_code, 0, block, n, coded, coded_cap, whole, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        *have_whole = 1;
+    }
+    if (lean > PROOF_MARGIN(*whole)) {
+        *set_code = 0;
+    }
+    return ADAPT_OK;
+}
+
+/* The arbiters' key policy (adapt.h, ADAPT_MAX_KEYS_VERSION) for a file
+ * whose width and set are chosen: the two keyed policies on the sample
+ * against the classic keys' size there (`choice->sample` when a trial
+ * coded exactly the chosen width and set, else coded here), the smallest
+ * taken when it beats the classic keys — by SET_MARGIN on a block longer
+ * than two samples, outright when the sample is the block. The classic
+ * keys stay the fallback, so no file is written larger than version 72
+ * or 19 wrote it, and a sample that is the whole file decides exactly. A
+ * proof on the whole block, as the width and the set have, changed no
+ * decision on any row of the mixed corpus and cost small files a third
+ * of their time, so the sample decides. The second max model and the
+ * normal profile choose (ADAPT_MAX_KEYS_VERSION, ADAPT_NORMAL_KEYS_VERSION);
+ * the fast and mid profiles, whose one arbiter has no such key, and the
+ * adaptive and BMP variants keep the classic keys. */
+static adapt_status choose_keys(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
+                                model_choice *choice, adapt_error *error) {
+    size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
+    int deep = n > 2 * head;
+    size_t classic = choice->sample, size, best_size;
+    uint8_t k, best = ADAPT_KEYS_CLASSIC;
+    adapt_status status;
+    choice->keys = ADAPT_KEYS_CLASSIC;
+    if ((sizes.max ? !sizes.model2 : sizes.fast || sizes.mid) || sizes.adaptive || sizes.bmp) {
+        return ADAPT_OK;
+    }
+    sizes.period = choice->period;
+    if (classic == 0) {
+        sizes.keys = ADAPT_KEYS_CLASSIC;
+        status = trial(sizes, choice->class_code, choice->set_code, block, head, coded, coded_cap, &classic, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+    }
+    best_size = deep ? SET_MARGIN(classic) : classic;
+    for (k = ADAPT_KEYS_TEXT; k <= ADAPT_KEYS_BINARY; k++) {
+        sizes.keys = k;
+        status = trial(sizes, choice->class_code, choice->set_code, block, head, coded, coded_cap, &size, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        if (size < best_size) {
+            best_size = size;
+            best = k;
+        }
+    }
+    choice->keys = best;
+    return ADAPT_OK;
+}
+
+/* The model of a file from its first block: the period, the width, the
+ * set and the keys, in that order, each chosen on what the earlier
+ * choices fixed (the comment above choose_keys says how the keys are). */
 static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
-                                 uint8_t *class_out, uint8_t *set_out, uint16_t *period_out, size_t *sample_out,
-                                 adapt_error *error) {
+                                 model_choice *choice, adapt_error *error) {
     /* ADAPT_CONTEXTS_LEAN: the set is given (set 3, and `lean` under the
      * max profile, both already in `sizes`); the width is still chosen.
      * The mid profile's set is the profile's (set 0 with MID_DROPPED). */
     const int set_given = sizes.contexts == ADAPT_CONTEXTS_LEAN || sizes.mid;
     size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
-    /* the sample's size under the chosen width and set, for choose_keys;
-     * 0 where no trial coded exactly that (a given set: the width trials
-     * run on the full set) */
-    *sample_out = 0;
-    /* The period first: the contexts every trial runs depend on it. */
-    sizes.period = sizes.fast ? 0 : adapt_detect_period(block, head);
-    *period_out = sizes.period;
+    int deep = n > 2 * head;
     size_t coded_len[3];
     size_t none, best_size, full;
     /* the whole block under the chosen width and the full set, once proved */
     size_t whole = 0;
     int have_whole = 0;
-    uint8_t code, class_code, set_code;
-    int deep = n > 2 * head;
-    /* choice: smallest sample, then fewest contexts, then lower code */
-    size_t choice_size;
-    unsigned choice_contexts;
-    uint8_t choice_code;
+    uint8_t code, class_code = 0, set_code = 0;
     adapt_status status;
+    choice->keys = ADAPT_KEYS_CLASSIC;
+    choice->sample = 0;
+    /* The period first: the contexts every trial runs depend on it. */
+    sizes.period = sizes.fast ? 0 : adapt_detect_period(block, head);
+    choice->period = sizes.period;
     /* the width without a class history first: a sample it codes below
      * CLASS_EVIDENCE declines the class context whatever the other two
      * widths would say, so they are not tried (a 4 KB input's encode is
@@ -844,12 +928,11 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     }
     none = coded_len[0];
     if (none < CLASS_EVIDENCE) {
-        *class_out = 0;
-        *set_out = set_given ? sizes.set_code : 0;
+        set_code = set_given ? sizes.set_code : 0;
         /* the full set, width none: the trial just run, unless the set is
          * given (the trial ran on the full set, not the given one) */
-        if (!set_given) *sample_out = none;
-        return ADAPT_OK;
+        if (!set_given) choice->sample = none;
+        goto chosen;
     }
     for (code = 1; code < 3; code++) {
         status = trial(sizes, code, 0, block, head, coded, coded_cap, &coded_len[code], error);
@@ -858,7 +941,6 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         }
     }
     best_size = none - none / 1024;
-    class_code = 0;
     for (code = 1; code < 3; code++) {
         if (coded_len[code] < best_size) {
             best_size = coded_len[code];
@@ -895,18 +977,16 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
 #endif
     full = coded_len[class_code];
     if (set_given) {
-        *class_out = class_code;
-        *set_out = sizes.set_code;
-        return ADAPT_OK;
+        set_code = sizes.set_code;
+        goto chosen;
     }
-    *sample_out = full;
-    /* The fast profile's sets all cost the decoder the same, so every one
-     * is tried and the smallest taken, on the terms below: it must beat
-     * the first set by SET_MARGIN of the sample, and a choice on a
-     * block longer than two samples is proved on the block. */
+    choice->sample = full;
     if (sizes.fast) {
-        choice_size = SET_MARGIN(full);
-        choice_code = 0;
+        /* The fast profile's sets all cost the decoder the same, so every
+         * one is tried and the smallest taken, on the terms below: it must
+         * beat the first set by SET_MARGIN of the sample, and a choice on a
+         * block longer than two samples is proved on the block. */
+        size_t choice_size = SET_MARGIN(full);
         for (code = 1; code < ADAPT_FAST_SETS; code++) {
             size_t size;
             status = trial(sizes, class_code, code, block, head, coded, coded_cap, &size, error);
@@ -915,37 +995,23 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
             }
             if (size < choice_size) {
                 choice_size = size;
-                choice_code = code;
+                set_code = code;
             }
         }
-        set_code = choice_code;
-        if (set_code != 0 && deep) {
-            size_t lean;
-            status = trial(sizes, class_code, set_code, block, n, coded, coded_cap, &lean, error);
+        if (deep) {
+            status = prove_set(sizes, class_code, &set_code, block, n, coded, coded_cap, &whole, &have_whole, error);
             if (status != ADAPT_OK) {
                 return status;
             }
-            if (!have_whole) {
-                status = trial(sizes, class_code, 0, block, n, coded, coded_cap, &whole, error);
-                if (status != ADAPT_OK) {
-                    return status;
-                }
-            }
-            if (lean > PROOF_MARGIN(whole)) {
-                set_code = 0;
-            }
         }
-        *class_out = class_code;
-        *set_out = set_code;
-        return ADAPT_OK;
-    }
-    choice_size = SET_MARGIN(full);
-    choice_contexts = HASHED + 1;
-    choice_code = 0;
-    {
-        /* consider(code): the trial and the ranking; returns whether the
-         * set beat the full one, which decides whether its family goes on */
+        if (set_code != 0) choice->sample = choice_size;
+    } else {
+        /* choice: smallest sample, then fewest contexts, then lower code;
+         * consider(code): the trial and the ranking; whether the set beat
+         * the full one decides whether its family goes on */
         static const uint8_t families[2][4] = {{1, 2, 6, 0}, {3, 4, 5, 7}};
+        size_t choice_size = SET_MARGIN(full);
+        unsigned choice_contexts = HASHED + 1;
         size_t f, k;
         for (f = 0; f < 2; f++) {
             for (k = 0; k < 4; k++) {
@@ -966,92 +1032,29 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
                 contexts = HASHED + 1 - popcount16(CONTEXT_SETS[code]);
                 beats = size <= SET_MARGIN(full);
                 better = size < choice_size ||
-                         (size == choice_size && (contexts < choice_contexts || (contexts == choice_contexts && code < choice_code)));
+                         (size == choice_size && (contexts < choice_contexts || (contexts == choice_contexts && code < set_code)));
                 if (better) {
                     choice_size = size;
                     choice_contexts = contexts;
-                    choice_code = code;
+                    set_code = code;
                 }
                 if (k == 0 && !beats) {
                     break;
                 }
             }
         }
-    }
-    set_code = choice_code;
-    if (set_code != 0 && deep) {
-        size_t lean;
-        status = trial(sizes, class_code, set_code, block, n, coded, coded_cap, &lean, error);
-        if (status != ADAPT_OK) {
-            return status;
-        }
-        if (!have_whole) {
-            status = trial(sizes, class_code, 0, block, n, coded, coded_cap, &whole, error);
+        if (deep) {
+            status = prove_set(sizes, class_code, &set_code, block, n, coded, coded_cap, &whole, &have_whole, error);
             if (status != ADAPT_OK) {
                 return status;
             }
         }
-        if (lean > PROOF_MARGIN(whole)) {
-            set_code = 0;
-        }
+        if (set_code != 0) choice->sample = choice_size;
     }
-    if (set_code != 0) {
-        *sample_out = choice_size;
-    }
-    *class_out = class_code;
-    *set_out = set_code;
-    return ADAPT_OK;
-}
-
-/* The arbiters' key policy (adapt.h, ADAPT_MAX_KEYS_VERSION) for a max
- * profile file, from the first block once its width and set are chosen:
- * the two keyed policies on the sample against the classic keys' size
- * there (`classic`, from choose_model's trials when one coded exactly
- * the chosen width and set, else coded here), the smallest taken when it
- * beats the classic keys — by SET_MARGIN on a block longer than two
- * samples, outright when the sample is the block. The classic keys stay
- * the fallback, so no file is written larger than version 72 wrote it,
- * and a sample that is the whole file decides exactly. A proof on the
- * whole block, as the width and the set have, changed no decision on
- * any row of the mixed corpus and cost small files a third of their
- * time, so the sample decides. The normal profile chooses the same way
- * (ADAPT_NORMAL_KEYS_VERSION); the fast and mid profiles, whose one
- * arbiter has no such key, and the adaptive and BMP variants keep the
- * classic keys. */
-static adapt_status choose_keys(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
-                                size_t classic, uint8_t *keys_out, adapt_error *error) {
-    size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
-    int deep = n > 2 * head;
-    size_t size, best_size;
-    uint8_t k, best = ADAPT_KEYS_CLASSIC;
-    adapt_status status;
-    *keys_out = ADAPT_KEYS_CLASSIC;
-    /* the second max model, or the normal profile: the profiles whose
-     * second, third and fourth arbiters run */
-    if ((sizes.max ? !sizes.model2 : sizes.fast || sizes.mid) || sizes.adaptive || sizes.bmp) {
-        return ADAPT_OK;
-    }
-    if (classic == 0) {
-        sizes.keys = ADAPT_KEYS_CLASSIC;
-        status = trial(sizes, sizes.class_code, sizes.set_code, block, head, coded, coded_cap, &classic, error);
-        if (status != ADAPT_OK) {
-            return status;
-        }
-    }
-    best_size = deep ? SET_MARGIN(classic) : classic;
-    for (k = ADAPT_KEYS_TEXT; k <= ADAPT_KEYS_BINARY; k++) {
-        sizes.keys = k;
-        status = trial(sizes, sizes.class_code, sizes.set_code, block, head, coded, coded_cap, &size, error);
-        if (status != ADAPT_OK) {
-            return status;
-        }
-        if (size < best_size) {
-            best_size = size;
-            best = k;
-        }
-    }
-    *keys_out = best;
-    return ADAPT_OK;
+chosen:
+    choice->class_code = class_code;
+    choice->set_code = set_code;
+    return choose_keys(sizes, block, n, coded, coded_cap, choice, error);
 }
 
 /* ------------------------------------------------------------------------
@@ -1997,16 +2000,15 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         sizes.set_code = sizes.contexts == ADAPT_CONTEXTS_LEAN ? 3 : 0;
         sizes.period = 0;
     } else {
-        size_t sample;
-        status = choose_model(sizes, block, n, framed, framed_cap, &sizes.class_code, &sizes.set_code, &sizes.period, &sample,
-                              error);
+        model_choice choice;
+        status = choose_model(sizes, block, n, framed, framed_cap, &choice, error);
         if (status != ADAPT_OK) {
             goto done;
         }
-        status = choose_keys(sizes, block, n, framed, framed_cap, sample, &sizes.keys, error);
-        if (status != ADAPT_OK) {
-            goto done;
-        }
+        sizes.class_code = choice.class_code;
+        sizes.set_code = choice.set_code;
+        sizes.period = choice.period;
+        sizes.keys = choice.keys;
     }
     /* Machine code goes through the branch transform, when the budget
      * holds the extra block the proof needs; otherwise it is declined. */
@@ -2433,7 +2435,7 @@ static adapt_status encode_in_memory(const uint8_t *data, size_t data_len, adapt
     adapt_status status;
     memory_source reader;
     growing_sink sink;
-    adapt_sizes floor = {TABLE_LOG_MIN, MATCH_LOG_MIN, WINDOW_LOG_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    adapt_sizes floor = {.table_log = TABLE_LOG_MIN, .match_log = MATCH_LOG_MIN, .window_log = WINDOW_LOG_MIN};
     uint64_t budget, minimum = adapt_encode_memory_bound(floor);
     if ((data == NULL && data_len != 0) || out == NULL || out_len == NULL) {
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
