@@ -6,12 +6,22 @@ across machines. -->
 
 Part of [adapt](../README.md).
 
-This codec owns every operating point below 20 MB on enwik8 and loses the
-region above it: `kanzi -l9` produces 20,035,687 B in 35.7 s where `--fast`
-produces 21,663,531 B in 35.6 s, so at equal time the reference is **8.1 %
-smaller**, and `kanzi -l8` is both smaller and 1.6× faster than `--fast`.
-Below 20 MB the reference has no entry at all. The deficit is therefore one
-profile, not the codec.
+> **Superseded in part, 2026-09-17.** This note measured bytes and seconds
+> only. With peak memory measured too, and with `--mid` run at every tier
+> instead of interpolated, two claims below do not survive:
+> "the deficit is one profile, not the codec" and "about 1.3× at matched
+> ratio". The deficit is **every** profile and it is **1.60× to 3.91×**,
+> measured. See [three-axis-strategy-2026-09-17.md](three-axis-strategy-2026-09-17.md),
+> which replaces this note's conclusions; the table below stands as measured.
+
+This codec reaches ratios no reference reaches, and is slower than the
+reference at every point where they overlap: `kanzi -l9` produces
+20,035,687 B in 35.7 s where `--fast` produces 21,663,531 B in 35.6 s, so at
+equal time the reference is **8.1 % smaller**, and `kanzi -l8` is both smaller
+and 1.6× faster than `--fast`. Below 20 MB the reference has no entry at all,
+which is territory rather than a win: the strategy note tests whether any
+configuration of ours beats a reference point on all three axes at once, and
+none does.
 
 ## Method
 
@@ -64,13 +74,14 @@ this host.**
 stops 6.8 % above it, and `mcm -x9`'s published 18,379,121 B is 2.6 % above
 `--max --contexts lean`. The ratio leadership is real and it is not close.
 
-**The gap is one design decision, not a constant factor.** `--mid`, landed the
-same day, already reaches 18.76 MB in 56.3 s — a point kanzi cannot reach at
-any level. Interpolating this codec's ladder to kanzi `-l9`'s 20.04 MB puts it
-near 47 s against kanzi's 35.7 s, so the deficit at matched ratio is about
-1.3×, not the threefold the earlier note was hunting. Threefold was never the
-gap; the gap is a missing profile between `--fast` and `--mid`, and a `--fast`
-that is worse than useless above 20 MB.
+**The gap is not threefold — but the 1.3× figure this note first gave was an
+interpolation, and it was wrong.** `--mid` reaches 18.76 MB in 56.3 s, a point
+kanzi cannot reach at any level. Estimating this codec's time at kanzi `-l9`'s
+20.04 MB by interpolating between `--fast` and `--mid` gave about 47 s. Run
+instead of interpolated, `--mid -5` produces 20,041,401 B — kanzi `-l9`'s size
+to within 0.03 % — in **58.9 s**, because `--mid`'s time barely moves with the
+memory tier. The measured deficit at matched ratio is therefore **1.60× to
+1.72×**, not 1.3×. Threefold was never the gap; 1.6× is.
 
 ## Measured and rejected on the way
 
