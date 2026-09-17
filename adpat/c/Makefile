@@ -55,8 +55,11 @@ $(BUILD)/adapt_encode.o: adapt_encode.c adapt.h adapt_model.h adapt_adaptive.h a
 $(BUILD)/adapt_archive.o: adapt_archive.c adapt.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ adapt_archive.c
 
-$(BUILD)/cadapt.o: cadapt.c adapt.h | $(BUILD)
+$(BUILD)/cadapt.o: cadapt.c adapt.h cadapt_platform.h cadapt_fs.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ cadapt.c
+
+$(BUILD)/cadapt_fs.o: cadapt_fs.c cadapt_fs.h cadapt_platform.h adapt.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ cadapt_fs.c
 
 $(BUILD)/test_adapt_decode.o: tests/test_adapt_decode.c adapt.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ tests/test_adapt_decode.c
@@ -70,8 +73,8 @@ $(BUILD)/test_adapt_archive.o: tests/test_adapt_archive.c adapt.h | $(BUILD)
 $(LIB): $(BUILD)/adapt_decode.o $(BUILD)/adapt_encode.o $(BUILD)/adapt_archive.o
 	$(AR) rcs $@ $(BUILD)/adapt_decode.o $(BUILD)/adapt_encode.o $(BUILD)/adapt_archive.o
 
-$(BIN): $(BUILD)/cadapt.o $(LIB)
-	$(CC) $(CFLAGS) -o $@ $(BUILD)/cadapt.o $(LIB) $(LDFLAGS)
+$(BIN): $(BUILD)/cadapt.o $(BUILD)/cadapt_fs.o $(LIB)
+	$(CC) $(CFLAGS) -o $@ $(BUILD)/cadapt.o $(BUILD)/cadapt_fs.o $(LIB) $(LDFLAGS)
 
 $(BUILD)/test_adapt_decode: $(BUILD)/test_adapt_decode.o $(LIB)
 	$(CC) $(CFLAGS) -o $@ $(BUILD)/test_adapt_decode.o $(LIB) $(LDFLAGS)
@@ -149,7 +152,7 @@ COV = $(BUILD)-cov
 # -O1: the instrumented per-bit path runs 1.6 times faster than at -O0 and
 # writes the same bytes; the branches gcov counts are the source's either way.
 COVFLAGS = -std=c99 -O1 --coverage -DADAPT_NO_MULTIVERSION -Wall -Wextra -Wpedantic -Werror $(THREADS)
-COVUNITS = adapt_decode adapt_encode adapt_archive cadapt
+COVUNITS = adapt_decode adapt_encode adapt_archive cadapt cadapt_fs
 
 # The suites run at once, each process writing its counts under its own
 # GCOV_PREFIX (GCOV_PREFIX_STRIP drops the object directory's path, so the

@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "adapt-0.12.0",
-  "documentNamespace": "urn:uuid:049eadab-46ff-5a46-9642-391a1c14f35d",
+  "documentNamespace": "urn:uuid:97837a2c-8385-5102-a29e-e6eec0ec1e1c",
   "creationInfo": {
-    "created": "2026-09-17T10:21:03Z",
+    "created": "2026-09-17T11:31:26Z",
     "creators": [
       "Tool: tools/provenance.py",
       "Person: Pedro Anisio de Luna e Silva (pedroanisio@faz.ai)"
@@ -22,7 +22,7 @@
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": true,
       "packageVerificationCode": {
-        "packageVerificationCodeValue": "323b03d4df534128bdbc7cae644d1fc998846a61"
+        "packageVerificationCodeValue": "6d0db26f32569e72962e8a9cc2ded29a682dd2f0"
       },
       "hasFiles": [
         "SPDXRef-File-adapt-h",
@@ -33,7 +33,10 @@
         "SPDXRef-File-adapt-encode-c",
         "SPDXRef-File-adapt-model-h",
         "SPDXRef-File-adapt-text-h",
-        "SPDXRef-File-cadapt-c"
+        "SPDXRef-File-cadapt-c",
+        "SPDXRef-File-cadapt-fs-c",
+        "SPDXRef-File-cadapt-fs-h",
+        "SPDXRef-File-cadapt-platform-h"
       ],
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
@@ -288,11 +291,77 @@
       "checksums": [
         {
           "algorithm": "SHA1",
-          "checksumValue": "b004b615149a8b806ca16917cf0b210fd60413ee"
+          "checksumValue": "725fa1a7d8524c821abac88a4499ef43b192d5da"
         },
         {
           "algorithm": "SHA256",
-          "checksumValue": "0e1e63b44908a6dc0c6bf916ec563fdd06694299b96aae2b6914c42ee54c3d1d"
+          "checksumValue": "bf041a4709e1fc2897af95d43ea260f3685106251b7d7072a279c4101459c8a9"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/cadapt_fs.c",
+      "SPDXID": "SPDXRef-File-cadapt-fs-c",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "522a1dc0a5c44fab4daf876e66ab3dd264e9738c"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "9642fd8ece0e471a142dd693b514dd439d7530cf112b301a2fab40b67737b069"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/cadapt_fs.h",
+      "SPDXID": "SPDXRef-File-cadapt-fs-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "562ca31def1ca74a7ba2f1d3593be921a9ab23a0"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "06954b51cd7bcbbb6aa0c8abbe7c82c99527f7273c16a0fb99ed6527d8d252f0"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "Copyright (c) 2026 Pedro Anisio de Luna e Silva"
+    },
+    {
+      "fileName": "./adpat/c/cadapt_platform.h",
+      "SPDXID": "SPDXRef-File-cadapt-platform-h",
+      "fileTypes": [
+        "SOURCE"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "a12efdb2e5b855307cd7f309b4e8f807a15aa5cc"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "998dc884dc95428b367557d47b77836be2db235271819637316d3f1b9b27e948"
         }
       ],
       "licenseConcluded": "MIT",
@@ -377,6 +446,21 @@
       "spdxElementId": "SPDXRef-Package-adapt",
       "relationshipType": "CONTAINS",
       "relatedSpdxElement": "SPDXRef-File-cadapt-c"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-cadapt-fs-c"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-cadapt-fs-h"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-adapt",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-cadapt-platform-h"
     }
   ]
 }

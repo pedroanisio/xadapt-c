@@ -21,7 +21,9 @@ import provenance
 ROOT = Path(__file__).resolve().parent.parent
 TOOL = ROOT / "tools" / "provenance.py"
 CODEC = ROOT / "adpat" / "c"
-SOURCES = ["adapt_adaptive.h", "adapt_bmp.h", "adapt.h", "adapt_model.h", "adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "cadapt.c"]
+SOURCES = ["adapt_adaptive.h", "adapt_bmp.h", "adapt.h", "adapt_model.h", "adapt_decode.c",
+           "adapt_encode.c", "adapt_archive.c", "cadapt.c", "cadapt_fs.c", "cadapt_fs.h",
+           "cadapt_platform.h"]
 
 
 def run(*args, **kwargs):

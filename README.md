@@ -54,7 +54,7 @@ refuses versions 10–18. The header of
 
 | Path | What |
 |---|---|
-| [adpat/c/](adpat/c/) | The codec: `adapt.h` (public interface), `adapt_model.h` (the predictor, coder and framing, shared by both units), `adapt_text.h` (the text transform), `adapt_bmp.h` and `adapt_adaptive.h` (the BMP transform and the adaptive predictors), `adapt_decode.c`, `adapt_encode.c`, `adapt_archive.c` (the folder archive stream), `cadapt.c` (the command line) and its manual `cadapt.1`, `Makefile` |
+| [adpat/c/](adpat/c/) | The codec: `adapt.h` (public interface), `adapt_model.h` (the predictor, coder and framing, shared by both units), `adapt_text.h` (the text transform), `adapt_bmp.h` and `adapt_adaptive.h` (the BMP transform and the adaptive predictors), `adapt_decode.c`, `adapt_encode.c`, `adapt_archive.c` (the folder archive stream), `cadapt.c` (the command line) with `cadapt_fs.c`/`cadapt_fs.h` (the extended attributes and sparse maps it preserves) and `cadapt_platform.h` (the feature macros and the calls whose names differ off POSIX), its manual `cadapt.1`, `Makefile` |
 | [adpat/c/tests/](adpat/c/tests/) | C unit tests for both units, the CLI's Python tests, the coverage gate's tests, and the committed vectors |
 | [adpat/c/fuzz/](adpat/c/fuzz/) | A libFuzzer harness for the two decoders |
 | [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |

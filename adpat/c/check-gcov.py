@@ -20,7 +20,7 @@ from pathlib import Path
 
 LIBRARY = {"adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "adapt_model.h", "adapt_adaptive.h", "adapt_bmp.h",
            "adapt_text.h"}
-CLI = {"cadapt.c"}
+CLI = {"cadapt.c", "cadapt_fs.c"}
 FLOORS = {"library": 80.0, "cli": 60.0}
 
 
