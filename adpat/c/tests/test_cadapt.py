@@ -37,19 +37,31 @@ SOURCE = b"optional verification\n" * 128
 # 82 and 83 the same with metadata.
 MAX_STREAM = (72, 80, 81)
 MAX_NAMED = (75, 82, 83)
+# ... and a normal encode: 19 (62 under the text transform) with the classic
+# keys, 84 with a key policy, whose policy byte carries the transform; 22,
+# 67 and 85 the same with metadata.
+NORMAL_STREAM = (19, 62, 84)
+NORMAL_NAMED = (22, 67, 85)
+
+
+def metadata_base(container: bytes) -> int:
+    """Where a named container's metadata starts: after the fixed header, the
+    period bytes, the BMP descriptor, and the sizing or policy byte of the
+    versions that carry one."""
+    return (8 + (2 if container[7] & 0x80 else 0) + (12 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 0)
+            + (1 if container[4] in (61, 75, 82, 83, 85) else 0))
 
 
 def payload_stream(container: bytes) -> bytes:
     """Remove only validated filesystem metadata for legacy stream comparisons."""
     if container[4] not in (22, 23, 24, 28, 29, 30, 35, 36, 37, 38, 42, 43, 44, 49, 50, 51, 52, 56, 57, 61, 67, 68, 69, 70, 71, 75,
-                            78, 79, 82, 83):
+                            78, 79, 82, 83, 85):
         return container
-    # the period bytes, the BMP descriptor and the sized max profile's sizing byte precede the metadata
-    base = (8 + (2 if container[7] & 0x80 else 0) + (12 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 0)
-            + (1 if container[4] in (61, 75, 82, 83) else 0))
+    # the period bytes, the BMP descriptor and the sizing or policy byte precede the metadata
+    base = metadata_base(container)
     assert zlib.crc32(container[:base + 28]) == int.from_bytes(container[base + 28:base + 32], "little")
     offset = (4 if (35 <= container[4] <= 38 or 49 <= container[4] <= 52) else 5 if 67 <= container[4] <= 71
-              else 2 if container[4] in (78, 79, 82, 83) else 3)
+              else 2 if container[4] in (78, 79, 82, 83) else 1 if container[4] == 85 else 3)
     return container[:4] + bytes([container[4] - offset]) + container[5:base] + container[base + 32:]
 
 
@@ -252,6 +264,8 @@ class AllocationTest(CodecTest):
         self.assertIn(b"adapt container version 72", info.stdout)
         self.assertIn(b"arbiter keys    classic\n", info.stdout)
         info = self.run_codec("info", VECTORS / "text.adpt")
+        self.assertIn(b"arbiter keys    classic\n", info.stdout)
+        info = self.run_codec("info", VECTORS / "text-fast.adpt")
         self.assertNotIn(b"arbiter keys", info.stdout)
 
     def test_lean_contexts_take_the_set_outright_and_decode(self):
@@ -375,7 +389,7 @@ class AdaptiveTest(CodecTest):
         self.assertEqual(back.stdout, prose)
         short = self.run_codec("encode", self.source, "-o", "-")
         self.assertEqual(short.returncode, 0, short.stderr)
-        self.assertEqual(short.stdout[4], 22)
+        self.assertIn(short.stdout[4], (22, 85))
         asked = self.run_codec("encode", self.source, "-o", "-", "--transform", "text", "--verify")
         self.assertEqual(asked.returncode, 0, asked.stderr)
         self.assertEqual(asked.stdout[4], 67)
@@ -750,9 +764,9 @@ class MetadataTest(CodecTest):
     def test_metadata_damage_is_rejected_without_publishing(self):
         encoded = self.run_codec("encode", self.source, "-o", "-")
         self.assertEqual(encoded.returncode, 0, encoded.stderr)
-        self.assertIn(encoded.stdout[4], (22, 23, 24))
+        self.assertIn(encoded.stdout[4], NORMAL_NAMED + (23,) + MAX_NAMED)
         damaged = bytearray(encoded.stdout)
-        metadata_at = 8 + (2 if damaged[7] & 0x80 else 0)
+        metadata_at = metadata_base(damaged)
         damaged[metadata_at] ^= 1
         output = self.root / "refused"
         decoded = self.run_codec("decode", "-", "-o", output, data=damaged)
@@ -770,7 +784,7 @@ class MetadataTest(CodecTest):
                 encoded = self.run_codec("encode", source, "-o", "-")
                 self.assertEqual(encoded.returncode, 0, encoded.stderr)
                 invalid = bytearray(encoded.stdout)
-                base = 8 + (2 if invalid[7] & 0x80 else 0)
+                base = metadata_base(invalid)
                 # A valid signed container timestamp outside filesystem ranges.
                 invalid[base + 16:base + 24] = ((1 << 63) - 1).to_bytes(8, "little")
                 invalid[base + 28:base + 32] = zlib.crc32(invalid[:base + 28]).to_bytes(4, "little")
@@ -1007,7 +1021,7 @@ class FolderTest(unittest.TestCase):
         flagged = bytearray(plain.read_bytes())
         flagged[5] |= 0x80
         # Keep the new header checksum valid to exercise the archive parser.
-        base = 8 + (2 if flagged[7] & 0x80 else 0)
+        base = metadata_base(flagged)
         flagged[base + 28:base + 32] = zlib.crc32(flagged[:base + 28]).to_bytes(4, "little")
         (self.root / "flagged.adpt").write_bytes(flagged)
         refused = self.run_codec("decode", self.root / "flagged.adpt", "-o", self.root / "flagged")
@@ -1154,8 +1168,9 @@ class PresetTest(unittest.TestCase):
         self.root = Path(scratch.name)
         self.source = self.root / "source.txt"
         # text with enough variety that the table size shows in the bytes
+        # (a vocabulary of 3,000 showed it by a single byte)
         rng = random.Random(7)
-        words = [f"w{rng.randrange(3000)}" for _ in range(40000)]
+        words = [f"w{rng.randrange(300000)}" for _ in range(100000)]
         self.source.write_bytes(" ".join(words).encode())
 
     def run_codec(self, *args, data=None):
@@ -1641,7 +1656,9 @@ class CommandTest(CodecTest):
 
     def test_info_describes_every_kind_of_file(self) -> None:
         expectations = {
-            "text.adpt": (b"format          adapt container version 19", b"declared bytes  49152", b"class history   8 bytes", b"contexts        all but field, record", b"profile         normal"),
+            "text.adpt": (b"format          adapt container version 19", b"declared bytes  49152", b"class history   8 bytes", b"contexts        all but field, record", b"profile         normal", b"arbiter keys    classic\n"),
+            "text-keyed.adpt": (b"format          adapt container version 84", b"contexts        all but field, record", b"profile         normal", b"text transform  no\n", b"arbiter keys    classes and nesting\n"),
+            "records-keyed.adpt": (b"format          adapt container version 84", b"record period   192 bytes", b"arbiter keys    classes and nesting\n"),
             "text-fast.adpt": (b"format          adapt container version 20", b"contexts        o2, o4", b"profile         fast"),
             "text-mid.adpt": (b"format          adapt container version 76", b"contexts        all but o1, field, sparse\n", b"profile         mid\n"),
             "text-max.adpt": (b"format          adapt container version 21", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter start   1/4\n", b"arbiter keys    classic\n"),
@@ -1691,7 +1708,7 @@ class CommandTest(CodecTest):
     def test_encode_switches_and_reports(self) -> None:
         text = VECTORS / "text.bin"
         # a file to standard output, and the profiles' version bytes
-        for flags, version in (((), 22), (("--fast",), 23), (("--max",), 82)):
+        for flags, version in (((), 85), (("--fast",), 23), (("--max",), 82)):
             with self.subTest(flags=flags):
                 run = self.run_codec("encode", text, "-o", "-", *flags)
                 self.assertEqual(run.returncode, 0, run.stderr)
@@ -1702,7 +1719,7 @@ class CommandTest(CodecTest):
         run = self.run_codec("encode", VECTORS / "segmented.bin", "-o", "-", "--threads", "2", "--segment-bytes", "262144")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn(b", 2 segments on 2 threads\n", run.stderr)
-        self.assertEqual(payload_stream(run.stdout), (VECTORS / "segmented.adpt").read_bytes())
+        self.assertEqual(payload_stream(run.stdout), (VECTORS / "segmented-keyed.adpt").read_bytes())
         run = self.run_codec("encode", "-", "--threads", "2", "--segment-bytes", "262144", data=(VECTORS / "segmented.bin").read_bytes())
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn(b"2 segments on 2 threads", run.stderr)

@@ -65,6 +65,21 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Added
 
+- The normal profile's arbiters keyed the same way (version 84, 85 with
+  metadata; `ADAPT_NORMAL_KEYS_VERSION`): the model of version 19 with
+  the key policies of 80 and 81 on its second, third and fourth
+  arbiters, chosen per file on the first block as under `--max`, the
+  classic keys keeping 19, 22, 62 and 67. The normal profile has no
+  sizing byte and its text transform is a version family of its own, so
+  84 carries one policy byte after the fixed header — the key policy in
+  bits 0 and 1, the text transform in bit 2. Under the default command,
+  same time and memory: the 8 MiB proxy 1,726,147 -> 1,699,643 B
+  (-1.54 %), enwik8 18,500,473 -> 18,249,169 (-1.36 %), enwik9
+  168,451,193 -> 165,865,476 (-1.53 %), the mixed corpus 40,421,105 ->
+  40,047,647 (-0.92 %; 20 rows smaller, 3 equal, none larger), whose
+  floors are lowered; the max, fast and mid streams are unchanged. `cadapt info` prints the
+  policy for normal files too (`arbiter keys    classic` for a
+  version-19 file).
 - The max profile's arbiters keyed by the byte classes (`adapt_sizes.keys`,
   versions 80/81, 82/83 with metadata; `ADAPT_MAX_KEYS_VERSION`): the
   second, third and fourth arbiters' weight sets are chosen by other state

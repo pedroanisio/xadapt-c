@@ -49,6 +49,21 @@ static int is_max_version(uint8_t version) {
     return version == ADAPT_MAX_PRESSURE_VERSION || version == ADAPT_MAX_KEYS_VERSION || version == ADAPT_MAX_KEYS_BINARY_VERSION;
 }
 
+/* The versions a current normal encode writes: 19 with the classic keys
+ * (62 under the text transform), 84 with a key policy — the policy byte
+ * then carries the transform (adapt.h, ADAPT_NORMAL_KEYS_VERSION). */
+static int is_normal_version(uint8_t version) {
+    return version == ADAPT_FORMAT_VERSION || version == ADAPT_NORMAL_KEYS_VERSION;
+}
+
+/* Whether a header names the text transform: version 62, or 84 with the
+ * policy byte's text bit (the byte follows the period bytes). */
+static int header_names_text(const uint8_t *header) {
+    if (header[4] == ADAPT_TEXT_VERSION) return 1;
+    return header[4] == ADAPT_NORMAL_KEYS_VERSION &&
+           (header[ADAPT_HEADER_BYTES + ((header[7] & ADAPT_PERIOD_FLAG) ? ADAPT_PERIOD_BYTES : 0)] & ADAPT_POLICY_TEXT) != 0;
+}
+
 static uint8_t *read_file(const char *name, size_t *len) {
     char path[512];
     FILE *f;
@@ -608,7 +623,7 @@ static void test_lean_contexts(void) {
     s.contexts = ADAPT_CONTEXTS_LEAN;
     reset(&r, data, n, 1000, &w, coded, n + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error), ADAPT_OK);
-    CHECK(w.len > 7 && coded[4] == ADAPT_FORMAT_VERSION && (coded[6] >> 5) == 3);
+    CHECK(w.len > 7 && is_normal_version(coded[4]) && (coded[6] >> 5) == 3);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
     CHECK(back_len == n && memcmp(back, data, n) == 0);
     adapt_free(back);
@@ -1179,12 +1194,14 @@ static void test_record_period(void) {
     reset(&r, image, n, 4096, &w, coded, n + 64);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                  ADAPT_OK);
-    CHECK(coded[4] == ADAPT_FORMAT_VERSION && (coded[7] & ADAPT_PERIOD_FLAG) != 0);
+    CHECK(is_normal_version(coded[4]) && (coded[7] & ADAPT_PERIOD_FLAG) != 0);
     CHECK(coded[8] == 120 && coded[9] == 0);
-    CHECK(adapt_header_len(coded) == ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES);
+    /* the policy byte of a keyed encode follows the period bytes */
+    CHECK(adapt_header_len(coded) ==
+          ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES + (coded[4] == ADAPT_NORMAL_KEYS_VERSION ? ADAPT_POLICY_BYTES : 0));
     CHECK_STATUS(adapt_read_header(coded, w.len, &read, &error), ADAPT_OK);
     CHECK(read.period == 120 && read.window_log == sizes.window_log);
-    CHECK(adapt_sizes_header_bytes(read) == ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES);
+    CHECK(adapt_sizes_header_bytes(read) == adapt_header_len(coded));
     CHECK_STATUS(adapt_read_header(coded, ADAPT_HEADER_BYTES + 1, &read, &error), ADAPT_ERROR_TRUNCATED);
     CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
     CHECK(out_len == n && memcmp(out, image, n) == 0);
@@ -1476,7 +1493,7 @@ static void test_max_profile(void) {
     reset(&r, data, n, 4096, &w, normal, n + 64);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, plain, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                  ADAPT_OK);
-    CHECK(normal[4] == ADAPT_FORMAT_VERSION);
+    CHECK(is_normal_version(normal[4]));
     sizes = adapt_sizes_max(plain);
     reset(&r, data, n, 4096, &w, coded, n + 64);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
@@ -1655,7 +1672,7 @@ static void test_fast_profile(void) {
     reset(&r, data, n, 4096, &w, normal, n + 64);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
                  ADAPT_OK);
-    CHECK(normal[4] == ADAPT_FORMAT_VERSION);
+    CHECK(is_normal_version(normal[4]));
     sizes = adapt_sizes_fast(sizes);
     reset(&r, data, n, 4096, &w, fast, n + 64);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, sizes, ADAPT_DEFAULT_MAX_MEMORY, NULL, &error),
@@ -1723,12 +1740,12 @@ static void test_text_transform(void) {
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
     plain_len = w.len;
-    CHECK(coded[4] == ADAPT_FORMAT_VERSION && stats.text_words == 0 && stats.text_bytes == 0);
+    CHECK(is_normal_version(coded[4]) && !header_names_text(coded) && stats.text_words == 0 && stats.text_bytes == 0);
     s.text = ADAPT_TEXT_ON;
     reset(&r, data, len, 4096, &w, coded, len + 4096);
     CHECK_STATUS(adapt_encode_stream(reader_read, &r, writer_write, &w, s, ADAPT_DEFAULT_MAX_MEMORY, &stats, &error), ADAPT_OK);
     text_len = w.len;
-    CHECK(coded[4] == ADAPT_TEXT_VERSION && text_len != plain_len);
+    CHECK(header_names_text(coded) && text_len != plain_len);
     CHECK(stats.input_bytes == len && stats.crc32 == adapt_crc32(data, len) && stats.output_bytes == text_len);
     CHECK(stats.text_words > 0 && stats.text_bytes > 0 && stats.text_bytes < len);
     CHECK_STATUS(adapt_read_header(coded, text_len, &read, &error), ADAPT_OK);
@@ -1769,7 +1786,7 @@ static void test_text_transform(void) {
      * for through its limits' sizes: the policy's choice, off for a file
      * this short */
     CHECK_STATUS(adapt_encode(data, len, adapt_default_limits(), &back, &back_len, &error), ADAPT_OK);
-    CHECK(back_len == plain_len && back[4] == ADAPT_FORMAT_VERSION);
+    CHECK(back_len == plain_len && is_normal_version(back[4]) && !header_names_text(back));
     adapt_free(back);
     /* the fast and max models under it */
     s = adapt_sizes_fast(s);
@@ -2206,21 +2223,21 @@ int main(int argc, char **argv) {
     SHARD(test_vector("empty.adpt", "empty.bin"));
     SHARD(test_vector("hello.adpt", "hello.bin"));
     SHARD(test_vector("abc.adpt", "abc.bin"));
-    SHARD(test_vector("text.adpt", "text.bin"));
-    SHARD(test_vector("records.adpt", "records.bin"));
-    SHARD(test_vector_profile("text.adpt", "text.bin", 0));
+    SHARD(test_vector("text-keyed.adpt", "text.bin"));
+    SHARD(test_vector("records-keyed.adpt", "records.bin"));
+    SHARD(test_vector_profile("text-keyed.adpt", "text.bin", 0));
     SHARD(test_vector_profile("text-fast.adpt", "text.bin", 1));
     SHARD(test_vector_profile("text-max3.adpt", "text.bin", 2));
     SHARD(test_vector_profile("text-mid.adpt", "text.bin", 3));
     SHARD(test_mid_profile());
-    SHARD(test_vector_profile("records.adpt", "records.bin", 0));
-    SHARD(test_vector_segments("segmented.adpt", "segmented.bin", 2, ADAPT_BLOCK_BYTES));
+    SHARD(test_vector_profile("records-keyed.adpt", "records.bin", 0));
+    SHARD(test_vector_segments("segmented-keyed.adpt", "segmented.bin", 2, ADAPT_BLOCK_BYTES));
     /* FMT-8: two scripts that are three and two bytes a character, pinned
      * like the Latin text */
-    SHARD(test_vector("cyrillic.adpt", "cyrillic.bin"));
-    SHARD(test_vector("cjk.adpt", "cjk.bin"));
-    SHARD(test_vector_profile("cyrillic.adpt", "cyrillic.bin", 0));
-    SHARD(test_vector_profile("cjk.adpt", "cjk.bin", 0));
+    SHARD(test_vector("cyrillic-keyed.adpt", "cyrillic.bin"));
+    SHARD(test_vector("cjk-keyed.adpt", "cjk.bin"));
+    SHARD(test_vector_profile("cyrillic-keyed.adpt", "cyrillic.bin", 0));
+    SHARD(test_vector_profile("cjk-keyed.adpt", "cjk.bin", 0));
     SHARD(test_sizes());
     SHARD(test_context_allocation());
     SHARD(test_compact_side_tables());

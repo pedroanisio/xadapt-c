@@ -25,7 +25,8 @@ int16 arbiters, four re-purposed context slots, four-way recall buckets
 and a fifth arbiter (the `Second max model` entry in `LOCKS.md`) — so
 21, 24, 53, 54, 56 and 57 are read and no longer written; a max encode
 whose first block prefers the class-keyed arbiters writes 80 or 81 (82,
-83 with metadata) instead. The mid
+83 with metadata) instead, and a normal encode 84 (85), whose policy
+byte also carries the text transform. The mid
 profile writes 76 (78 with metadata), 77 (79) under the text transform. The decoder
 reads every version ever published; versions 10–18 and the unused
 numbers (55, 59, 60, 73, 74) are refused. The CLI uses native filesystem APIs to
@@ -154,7 +155,9 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   enwik9 in 28 % and 26 % less; 2.1 to 2.4 times faster than `--max`
   for 4.8 % (enwik8) to 17.5 % (enwik9) more bytes. `--max`
   writes the max profile (versions 72, 80 or 81; 75, 82 or 83 with
-  metadata): ten more contexts, run memories and a wider
+  metadata; the normal profile takes the same key policies as version
+  84, 85 with metadata, its policy byte also carrying the text
+  transform): ten more contexts, run memories and a wider
   second estimation stage, fewer bytes for about 1.8 times the time; its
   second, third and fourth arbiters take one of three key policies —
   classic, the byte classes with the nesting state, or the classes with
@@ -496,6 +499,7 @@ stays readable (`DLV-1` in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)):
 | 64–66 | max, compact, lean, text transform | 69–71 | read only: the max profile writes 72 (75) under the transform |
 | 76 / 77 | mid, plain / under the text transform | 78 / 79 | the normal profile's tables, seven fixed contexts, one arbiter |
 | 80 / 81 | max, sized, the arbiters keyed by the byte classes and nesting / by the classes and recall | 82 / 83 | version 72's model and sizing byte; the encoder picks the key policy per file on the first block, 72 when the classic keys win |
+| 84 | normal, the arbiters keyed the same way | 85 | version 19's model with one policy byte after the header: the key policy (1 or 2) and the text transform; 19 or 62 when the classic keys win |
 | 55, 59, 60 | refused | — | no format |
 
 The encoder writes 19–24 by default, 53/54 (56/57) when a small tier under

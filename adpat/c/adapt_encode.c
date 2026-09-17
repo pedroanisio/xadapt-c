@@ -846,6 +846,9 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     if (none < CLASS_EVIDENCE) {
         *class_out = 0;
         *set_out = set_given ? sizes.set_code : 0;
+        /* the full set, width none: the trial just run, unless the set is
+         * given (the trial ran on the full set, not the given one) */
+        if (!set_given) *sample_out = none;
         return ADAPT_OK;
     }
     for (code = 1; code < 3; code++) {
@@ -1011,8 +1014,10 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
  * and a sample that is the whole file decides exactly. A proof on the
  * whole block, as the width and the set have, changed no decision on
  * any row of the mixed corpus and cost small files a third of their
- * time, so the sample decides. Every other profile, and the max
- * profile's adaptive and BMP variants, keep the classic keys. */
+ * time, so the sample decides. The normal profile chooses the same way
+ * (ADAPT_NORMAL_KEYS_VERSION); the fast and mid profiles, whose one
+ * arbiter has no such key, and the adaptive and BMP variants keep the
+ * classic keys. */
 static adapt_status choose_keys(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
                                 size_t classic, uint8_t *keys_out, adapt_error *error) {
     size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
@@ -1021,7 +1026,9 @@ static adapt_status choose_keys(adapt_sizes sizes, const uint8_t *block, size_t 
     uint8_t k, best = ADAPT_KEYS_CLASSIC;
     adapt_status status;
     *keys_out = ADAPT_KEYS_CLASSIC;
-    if (!sizes.max || !sizes.model2 || sizes.adaptive || sizes.bmp) {
+    /* the second max model, or the normal profile: the profiles whose
+     * second, third and fourth arbiters run */
+    if ((sizes.max ? !sizes.model2 : sizes.fast || sizes.mid) || sizes.adaptive || sizes.bmp) {
         return ADAPT_OK;
     }
     if (classic == 0) {
@@ -2048,6 +2055,10 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
                                        (sizes.low_start ? ADAPT_SIZING_LOW_START : 0) |
                                        (sizes.model2 ? ADAPT_SIZING_MODEL2 : 0));
         header_len += ADAPT_SIZING_BYTES;
+    }
+    if (header[4] == ADAPT_NORMAL_KEYS_VERSION) {
+        header[header_len] = (uint8_t)(sizes.keys | (text ? ADAPT_POLICY_TEXT : 0));
+        header_len += ADAPT_POLICY_BYTES;
     }
     if (sizes.bmp) {
         bmp_store32(header + header_len, sizes.bmp_offset);

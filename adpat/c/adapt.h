@@ -281,6 +281,25 @@ extern "C" {
 #define ADAPT_KEYS_CLASSIC 0u
 #define ADAPT_KEYS_TEXT 1u
 #define ADAPT_KEYS_BINARY 2u
+/* The normal profile's arbiters keyed the same way (ADAPT_NORMAL_KEYS_VERSION,
+ * 84; 85 with metadata, ADAPT_NORMAL_KEYS_METADATA_OFFSET): the model of
+ * version 19 with the key policies of 80 and 81 on its second, third and
+ * fourth arbiters. The normal profile has no sizing byte and its text
+ * transform is a version family of its own (62, 67), so this version
+ * carries one policy byte after the fixed header and the period bytes:
+ * bits 0 and 1 the key policy (ADAPT_POLICY_KEYS_MASK; 0 is never
+ * written, the classic keys keep 19, 22, 62 and 67), bit 2 the text
+ * transform (ADAPT_POLICY_TEXT), the rest 0. The encoder chooses the
+ * policy as for the max profile (choose_keys); measured on the mixed
+ * corpus under the default command, webster -3.0 %, nci -4.8 %, xml
+ * -3.0 %, the rest as LOCKS.md records. Never with `fast`, `mid`,
+ * `adaptive` or `bmp`. */
+#define ADAPT_NORMAL_KEYS_VERSION 84u
+#define ADAPT_NORMAL_KEYS_METADATA_VERSION 85u
+#define ADAPT_NORMAL_KEYS_METADATA_OFFSET 1u
+#define ADAPT_POLICY_BYTES 1u
+#define ADAPT_POLICY_KEYS_MASK 3u
+#define ADAPT_POLICY_TEXT 4u
 #define ADAPT_TEXT_AUTO 0u
 #define ADAPT_TEXT_ON 1u
 /* adapt_sizes.contexts: the encoder's choice of the context set. */
@@ -301,6 +320,8 @@ extern "C" {
 #define ADAPT_METADATA_HEADER_BYTES (ADAPT_METADATA_BYTES + 4u)
 #define ADAPT_HEADER_MAX_BYTES \
     (ADAPT_HEADER_BYTES + ADAPT_PERIOD_BYTES + ADAPT_BMP_BYTES + ADAPT_SIZING_BYTES + ADAPT_METADATA_HEADER_BYTES)
+/* (the policy byte of the keyed normal profile takes the sizing byte's
+ * place in that bound: no version carries both) */
 
 /* POSIX permission bits and signed Unix seconds plus nanoseconds. ctime
  * and creation time are filesystem-managed and are not reconstructed. */
@@ -452,10 +473,11 @@ typedef struct adapt_sizes {
      * names its set), compact, lean and model2 are 0. adapt_sizes_mid
      * turns normal sizes to it, as `adapt encode --mid` does. */
     uint8_t mid;
-    /* The arbiters' key policy under the max profile: ADAPT_KEYS_CLASSIC,
-     * ADAPT_KEYS_TEXT or ADAPT_KEYS_BINARY (ADAPT_MAX_KEYS_VERSION). Chosen
-     * by the encoder on the first block, read from the version; 0 under
-     * every other profile and under `adaptive` and `bmp`. */
+    /* The arbiters' key policy under the max and normal profiles:
+     * ADAPT_KEYS_CLASSIC, ADAPT_KEYS_TEXT or ADAPT_KEYS_BINARY
+     * (ADAPT_MAX_KEYS_VERSION, ADAPT_NORMAL_KEYS_VERSION). Chosen by the
+     * encoder on the first block, read from the version or the policy
+     * byte; 0 under `fast`, `mid`, `adaptive` and `bmp`. */
     uint8_t keys;
     /* The record period in bytes, or 0; found by the encoder on the first
      * block's sample (adapt_detect_period), carried after the fixed header

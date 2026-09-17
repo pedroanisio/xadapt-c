@@ -374,6 +374,10 @@ static inline uint8_t encode_header_version(adapt_sizes sizes) {
     if (sizes.mid) {
         return sizes.text == ADAPT_TEXT_ON ? ADAPT_TEXT_MID_VERSION : ADAPT_MID_VERSION;
     }
+    if (!sizes.fast && sizes.keys != ADAPT_KEYS_CLASSIC) {
+        /* the keyed normal profile: the transform rides its policy byte */
+        return ADAPT_NORMAL_KEYS_VERSION;
+    }
     if (sizes.text == ADAPT_TEXT_ON) {
         return sizes.fast ? ADAPT_TEXT_FAST_VERSION : ADAPT_TEXT_VERSION;
     }
@@ -3162,7 +3166,8 @@ static inline int sizes_valid(adapt_sizes s) {
            s.low_start <= 1 && (!s.low_start || (s.max && !s.adaptive && !s.bmp)) &&
            s.model2 <= 1 && (!s.model2 || s.max) &&
            s.mid <= 1 && (!s.mid || (!s.fast && !s.max && !s.adaptive && !s.bmp && s.set_code == 0)) &&
-           s.keys <= ADAPT_KEYS_BINARY && (s.keys == ADAPT_KEYS_CLASSIC || (s.max && s.model2));
+           s.keys <= ADAPT_KEYS_BINARY &&
+           (s.keys == ADAPT_KEYS_CLASSIC || (s.max ? s.model2 != 0 : !s.fast && !s.mid && !s.adaptive && !s.bmp));
 }
 
 static inline adapt_status read_trailer_payload(const uint8_t *payload, uint64_t *length, uint32_t *crc32) {
