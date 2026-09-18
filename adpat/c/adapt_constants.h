@@ -151,26 +151,14 @@ static const uint32_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
 #define FINAL_INPUTS_OF(m2) ((m2) ? 6 : 5)
 #define FINAL_INPUTS_ON(m, m2) (((m2) && (m)->extra_on) ? 6 : 5)
 /* ---- the second max model (ADAPT_SIZING_MODEL2) ----
- * Measured on the first 8 MiB of enwik8 under the text transform at the
- * default tier (--max --allocation context), 1,700,354 -> 1,686,110 bytes
- * with 4.9 % fewer instructions, and 6,351,878 -> 6,297,375 on the first
- * 32 MiB; every part on its own, in adpat/c/tests and LOCKS.md:
- *  - the first-layer arbiters' weights are int16 in units of 1/32768,
- *    saturating at +-1: the dot product takes sixteen lanes an instruction
- *    (vpmaddwd) and the train step is one rounded multiply (vpmulhrsw) of
- *    the input times sixteen by the error, so the four arbiters cost 10 %
- *    fewer instructions than in int32 and their tables halve; the rounded
- *    step alone was worth 0.11 % over the int32 floor-shifted one;
- *  - four kinds whose blocks evicted better ones (dropping o5, o8 and
- *    word3 each made the file smaller) carry other contexts in their
- *    slots: o5 the 21-byte class history, o8 the order-1 indirect context
- *    (what followed the previous byte the last two times), word3 recall's
- *    expected byte with its length bucket and the previous byte, sparse2
- *    recall's next two expected bytes; 0.46 % together at no cost;
- *  - a recall bucket holds the four most recent positions of its key and
- *    the longest verified candidate wins, in the same table (0.10 %);
- *  - a fifth first-layer arbiter keyed by the bytes since the last space
- *    and the previous byte's class, with the partial byte (0.13 %). */
+ * First-layer weights are int16 in units of 1/32768, saturating at +-1.
+ * The dot product and rounded training step have identical scalar and
+ * vector semantics. Four slots carry class, indirect and recall contexts:
+ * o5 uses the 21-byte class history; o8 the order-1 indirect context;
+ * word3 the recalled byte, length bucket and preceding byte; sparse2 the
+ * next two recalled bytes. A recall bucket keeps four recent positions and
+ * chooses the longest verified match. A fifth first-layer arbiter is keyed
+ * by bytes since the last space, preceding byte class and partial byte. */
 /* The parts of model2 that pay under table pressure and cost without it
  * — the o8 and word3 slots re-purposed, and the fifth arbiter — run from
  * a table of 2^MODEL2_PRESSURE_LOG blocks, the size the header names,

@@ -807,7 +807,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--binary", type=Path, default=ROOT / "adpat/c/build/cadapt")
     run.add_argument("--corpus", type=Path, default=ROOT / "static/corpus/enwik8.zip")
     run.add_argument("--member", default="enwik8", help="member to read when the corpus is a ZIP")
-    run.add_argument("--output", type=Path, default=ROOT / "bench/results", help="parent for a new, unique session")
+    run.add_argument("--output", type=Path, required=True, help="external output parent for a new measurement")
     run.add_argument("--profiles", nargs="+", choices=("normal", "fast", "max", "rates", "sparse", "retained", "auto", "normal-bmp", "rates-bmp", "sparse-bmp", "retained-bmp"), default=["normal", "fast", "max"])
     run.add_argument("--repeats", type=positive_int, default=1)
     run.add_argument("--memory", nargs="+", type=byte_count, default=[674 * MIB], metavar="BYTES")
@@ -822,10 +822,12 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--time-binary", type=Path, default=Path("/usr/bin/time"))
     run.add_argument("--no-plots", action="store_true", help="collect with only the standard library; plot later")
     plot = commands.add_parser("plot", help="plot all runs in one or more session/history directories")
-    plot.add_argument("paths", nargs="*", type=Path, default=[ROOT / "bench/results"])
-    plot.add_argument("--output", type=Path, default=ROOT / "bench/plots")
+    plot.add_argument("paths", nargs="+", type=Path)
+    plot.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.output.resolve().is_relative_to(ROOT):
+            raise ValueError("--output must be outside the source checkout")
         if args.command == "run":
             return run_benchmark(args)
         from plots import plot_runs

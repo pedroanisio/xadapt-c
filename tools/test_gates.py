@@ -1,32 +1,7 @@
 #!/usr/bin/env python3
-"""The gates against what they enumerate: the silent drift vectors of
-docs/drift-risk-map-2026-09-18.md, each held so it cannot reopen.
-
-1. The profiles the memory gate and the identical-bytes job hold come from
-   the binary (`cadapt --help`) through tools/profiles.py, never a typed
-   list; a usage without the profile group is refused.
-2. Every part of `make check` but the coverage pass is a part of
-   `make check-suites`, and the clang and macOS workflow columns run that
-   target and `make sanitize-cli` with nothing inline.
-3. (The tier ladder is held by tools/test_docs.py's TiersTest.)
-4. Every suite under adpat/c/tests/test_*.c is built and run by `make
-   test` and by the coverage pass, a new one included, with no list to add
-   it to; the coverage units are the tree's, the CLI classes the file's.
-5. The build manifest is not tracked and not exported: it names the commit
-   and the host it was made on.
-6. Every test file under tools/, bench/ and adpat/c/tests/ is run by a part
-   of `make check` — the union of what the Makefiles name.
-7. The corpus floors name every file of the corpus manifest, at its size.
-8. A revision without its release notes is refused by tools/release.sh, and
-   the workflow has no fallback body.
-9. The constants LOCKS.md states as policy are the ones in force.
-15. The source tarball — the export list of tools/release.sh, as a user gets
-    it — builds, installs under a prefix, runs and uninstalls from its own
-    contents (tools/test_install.sh --source).
-
-    python3 -B tools/test_gates.py
-
-Authored with Claude Opus 5 (Claude Code), 2026-09-18.
+"""Check that validation covers the supported profiles, suites, corpus,
+release inputs and engineering contracts. Assertions compare each dependent
+artifact with its authoritative implementation or inventory.
 """
 
 from __future__ import annotations
@@ -34,15 +9,18 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import profiles  # noqa: E402
+import release_content  # noqa: E402
 
 CODEC = ROOT / "adpat" / "c"
 CODEC_MAKEFILE = CODEC / "Makefile"
@@ -158,15 +136,15 @@ class SuitesTest(unittest.TestCase):
     def test_a_new_suite_is_built_and_run_with_no_list_to_add_it_to(self) -> None:
         """A dry run of make test with a suite that no rule names: it is
         compiled by the pattern rule and run by the runs rule."""
-        probe = CODEC / "tests" / "test_zz_drift_probe.c"
-        self.assertFalse(probe.exists())
-        probe.write_text('#include "../adapt.h"\nint main(void) { return 0; }\n')
-        try:
-            out = subprocess.run(["make", "-n", "-C", str(CODEC), "test"], capture_output=True, text=True).stdout
-        finally:
-            probe.unlink()
+        with tempfile.TemporaryDirectory() as scratch:
+            codec = Path(scratch) / "codec"
+            shutil.copytree(CODEC, codec, ignore=shutil.ignore_patterns("build*", "__pycache__"))
+            probe = codec / "tests" / "test_zz_drift_probe.c"
+            probe.write_text('#include "../adapt.h"\nint main(void) { return 0; }\n')
+            out = subprocess.run(["make", "-n", "-C", str(codec), "test"], capture_output=True, text=True).stdout
         self.assertIn("tests/test_zz_drift_probe.c", out, "the new suite is not compiled")
         self.assertRegex(out, r"build/test_zz_drift_probe\s+> build/runs/test_zz_drift_probe\.log", "the new suite is not run")
+
 
 
 class CoverageListsTest(unittest.TestCase):
@@ -217,14 +195,14 @@ class ToolTestsTest(unittest.TestCase):
             self.assertIn(f"tests/{path.name}", text, f"adpat/c/Makefile never runs {path.name}")
 
     def test_a_new_tool_test_file_outside_every_pattern_is_reported(self) -> None:
-        probe = ROOT / "tools" / "test_zz_drift_probe.py"
-        self.assertFalse(probe.exists())
-        probe.write_text("import unittest\n")
-        try:
-            unrun = self.unrun()
-        finally:
-            probe.unlink()
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            (root / "tools").mkdir()
+            (root / "tools/test_zz_drift_probe.py").write_text("import unittest\n")
+            with patch(__name__ + ".ROOT", root):
+                unrun = self.unrun()
         self.assertEqual(unrun, ["tools/test_zz_drift_probe.py"])
+
 
 
 class CorpusFloorsTest(unittest.TestCase):
@@ -275,7 +253,7 @@ class LocksTest(unittest.TestCase):
         self.assertIsNotNone(stays)
         ratio = json.loads((ROOT / "tools" / "ratio_floor.json").read_text(encoding="utf-8"))
         self.assertEqual(round(ratio["throughput_tolerance"] * 100), int(stays.group(1)), "tools/ratio_floor.json's tolerance is not the locked one")
-        corpus = re.search(r"corpus floor files stay in wall seconds at their (\d+) % tolerance", text)
+        corpus = re.search(r"corpus floor files stay in wall\s+seconds at their (\d+) % tolerance", text)
         self.assertIsNotNone(corpus)
         for floor_file in sorted((ROOT / "tools").glob("corpus_floor_*.json")):
             data = json.loads(floor_file.read_text(encoding="utf-8"))
@@ -284,24 +262,10 @@ class LocksTest(unittest.TestCase):
 
 
 class SourceTarballTest(unittest.TestCase):
-    @staticmethod
-    def export_list() -> list[str]:
-        """The paths tools/release.sh exports into the source tarball."""
-        release = (ROOT / "tools" / "release.sh").read_text(encoding="utf-8")
-        line = re.search(r'git archive "\$FULL" ([^|]*)\|', release, flags=re.S).group(1)
-        return line.replace("\\\n", " ").split()
-
     def test_the_export_list_builds_installs_and_uninstalls_as_a_source_tarball(self) -> None:
-        """What a user of cadapt-<version>-src.tar.gz gets is the export list;
-        the tarball of HEAD's export is put through tools/test_install.sh
-        --source, as tools/release.sh does for every release."""
-        paths = self.export_list()
-        self.assertIn("adpat/c", paths)
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch) / "cadapt-probe"
-            root.mkdir()
-            archive = subprocess.run(["git", "archive", "HEAD", *paths], cwd=ROOT, capture_output=True, check=True).stdout
-            subprocess.run(["tar", "-x", "-C", str(root)], input=archive, check=True)
+            release_content.export(ROOT, root)
             tarball = Path(scratch) / "cadapt-probe-src.tar.gz"
             subprocess.run(["tar", "-czf", str(tarball), "-C", scratch, "cadapt-probe"], check=True)
             run = subprocess.run(["tools/test_install.sh", "--source", str(tarball)], cwd=ROOT, capture_output=True, text=True, timeout=600)
@@ -318,8 +282,8 @@ class ManifestTest(unittest.TestCase):
         tracked = subprocess.run(["git", "ls-files", "build-manifest.json"], cwd=ROOT, capture_output=True, text=True).stdout.split()
         self.assertEqual(tracked, [], "build-manifest.json is tracked: it names the commit and the host, so it is stale by the next commit")
         release = (ROOT / "tools" / "release.sh").read_text(encoding="utf-8")
-        archive = re.search(r"git archive [^\n]*(?:\\\n[^\n]*)*", release).group(0)
-        self.assertNotIn("build-manifest.json", archive, "tools/release.sh exports a tracked build manifest")
+        inventory = json.loads((ROOT / "tools/release_assets.json").read_text())
+        self.assertNotIn("build-manifest.json", inventory["source"])
         self.assertIn("/build-manifest.json", (ROOT / ".gitignore").read_text(encoding="utf-8"))
 
 

@@ -37,6 +37,8 @@ jobs:
           - { os: macos-14, cc: clang }
     steps:
       - uses: actions/checkout@v4
+      - name: classified release inputs
+        run: python3 -B tools/release_content.py tree
       - name: toolchain
         run: |
           ${{ matrix.cc }} --version | head -1

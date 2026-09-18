@@ -50,15 +50,17 @@ working tree, so what is published is what is committed (`DLV-2`) — into
 
 | Artifact | Holds |
 |---|---|
-| `cadapt-<version>-<os>-<arch>.tar.gz` | `bin/cadapt` (stripped), `lib/libadapt.a`, `include/adapt.h`, `share/man/man1/cadapt.1` — the layout `make install` writes, relocatable under any prefix — with `LICENSE`, `NOTICE`, `CHANGELOG.md`, `sbom.spdx.json` and `build-manifest.json` |
-| `cadapt-<version>-src.tar.gz` | the sources, tools and documents; the corpora stay out (`tools/fetch_corpus.py` fetches them). Before it is packaged, `tools/test_install.sh --source` unpacks it, builds it with cc and make alone, installs it under a prefix, uses it and uninstalls it — what the README promises of a source tarball, proven from its contents |
+| `cadapt-<version>-<os>-<arch>.tar.gz` | `bin/cadapt` (stripped), `lib/libadapt.a`, `include/adapt.h`, `share/man/man1/cadapt.1` — the layout `make install` writes, relocatable under any prefix — with `LICENSE`, `NOTICE`, `CHANGELOG.md`, `SUPPORT.md`, `SECURITY.md`, `sbom.spdx.json`, `build-manifest.json` and `payload-manifest.json` |
+| `cadapt-<version>-src.tar.gz` | the classified sources, tools, documentation, workflow definitions, public benchmark data and pinned test fixtures. External mixed-corpus inputs are fetched by `tools/fetch_corpus.py`. Before it is packaged, `tools/test_install.sh --source` unpacks it, builds it with cc and make alone, installs it under a prefix, uses it and uninstalls it — what the README promises of a source tarball, proven from its contents |
 | `sbom.spdx.json` | the SPDX 2.3 document of the sources: every file by SHA-256 and SHA-1, the licence, the run-time, build-time and test-time dependencies |
 | `build-manifest.json` | the record of the build that made the binary: the sources' hashes, the compiler's version line and flags, the host, the hash and size of every output; `python3 tools/provenance.py reproduce --manifest dist/<version>/build-manifest.json` (or `make reproduce MANIFEST=…`) rebuilds and compares; not tracked in git, since it names the commit and the host it was made on |
 | `NOTICE` | the licence and dependency statement, generated from the SBOM: MIT, no third-party code bundled, the C library and POSIX threads at run time, a C compiler to build, Python and the corpora under test only |
 | `SHA256SUMS` | every artifact's SHA-256 |
 | `release-manifest.json` | the version, the commit, the date, the platform, the toolchain, and each artifact with its hash and size |
 
-Before anything is packaged the C suites run on the export; after, the
+Before publication all check suites run on the source export. GCC also runs the
+branch-coverage pass; Clang uses `check-parts` with CHECK_CODEC_TARGET=check-suites.
+The
 binary tarball is unpacked elsewhere and made to round-trip a file, so the
 tarball is proven before it is published. A tag `v<version>` must name a
 revision whose `cadapt.c` says `<version>`; the script refuses otherwise.
@@ -85,3 +87,40 @@ revision whose `cadapt.c` says `<version>`; the script refuses otherwise.
 The Large Text Compression Benchmark entry has its own assets
 (`make ltcb-release`, [ltcb-submission.md](ltcb-submission.md)), built the
 same way from an export.
+
+## Release content validation
+
+`make release-content-check` validates the explicit source inventory in
+`tools/release_assets.json`. CI runs it on clean checkouts. The commit hook
+uses `python3 -B tools/release_content.py staged` to inspect index contents,
+including force-added ignored files. Run that command before committing when
+a hook is unavailable. Inventory changes require review of purpose, accuracy,
+audience, essential rationale and reference completeness; automated scans do
+not establish those properties. Test exceptions name an exact rule and line
+digest with a reason. Fixture exceptions pin the complete file digest.
+A prompt or skill that implements product functionality can use `product_use`
+with a `consumer` naming another production asset and a `reason` explaining its
+runtime purpose. Review must verify that relationship. This narrow exception
+does not admit unclassified local state alongside the product asset.
+
+The source package includes the maintained tools, documentation, workflow
+definitions, benchmark snapshots and pinned fixtures needed by `make check`.
+`release-source.json` records its revision and source hashes so checks work
+without a Git checkout. External mixed-corpus files are fetched from their pinned manifest.
+The build manifest describes outputs before installation and stripping;
+`payload-manifest.json` describes the exact installed files after stripping.
+Both archives are inspected before publication. A failure names the file,
+member or field and the corrective action; it blocks packaging or publication.
+
+Floor definitions use `cadapt.ratio-floor.v2` with structured source-revision,
+timing-measure and verification provenance. The floor reader also accepts v1
+for comparisons against older releases; numerical acceptance rules are identical.
+
+Publication assembly verifies every downloaded build artifact before assigning
+platform-specific SBOM and manifest names. It checks source and installed
+revision identity, rejects unexpected files, and requires all platform source
+payloads to match. One source archive is retained even when tar metadata differs;
+each published manifest records that archive's actual hash and the final download
+names. The aggregate SHA256SUMS covers the complete published set. Build-directory
+checksum files are omitted from published manifests to avoid stale names and a
+checksum cycle.

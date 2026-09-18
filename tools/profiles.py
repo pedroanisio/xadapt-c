@@ -13,8 +13,7 @@ profile is gated the day it appears in --help.
     python3 tools/profiles.py --binary adpat/c/build/cadapt      # one command per line, the default profile an empty line
     python3 tools/profiles.py --binary … --profiles              # the profiles alone
 
-Authored with Claude Opus 5 (Claude Code), 2026-09-18 (the drift-risk map
-of that day, finding 1).
+Authored with Claude Opus 5 (Claude Code), 2026-09-18.
 """
 
 from __future__ import annotations

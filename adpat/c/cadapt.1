@@ -1,8 +1,8 @@
 .\" cadapt(1) — the adapt self-adaptive lossless codec, in C.
 .\" Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-15,
-.\" with Claude Opus 5 (Claude Code). Every figure is the binary's own
-.\" (cadapt --help, cadapt info) or a measurement named in LOCKS.md and
-.\" docs/performance-audit-128mib-2026-09-15.md. Render: man -l cadapt.1
+.\" with Claude Opus 5 (Claude Code). Option values follow cadapt --help;
+.\" benchmark figures are generated from the maintained floor definitions.
+.\" Render: man -l cadapt.1
 .TH CADAPT 1 "2026-09-15" "cadapt 0.12.0" "User Commands"
 .SH NAME
 cadapt \- compress and decompress files and folders with the adapt context-mixing codec
@@ -366,8 +366,7 @@ takes the lean set outright — word and field left out and, under
 .BR \-\-max ,
 o8, word3 and wordc too (the sizing byte's lean bit, written with the
 full side tables as well since this option; a reader older than it
-refuses such a file). Time for bytes on text: the measurements are in
-LOCKS.md. Not with
+refuses such a file). This trades context coverage for prediction cost. Not with
 .BR \-\-fast .
 .TP
 Decoding memory
@@ -548,11 +547,6 @@ failure discards staging and preserves the existing destination.
 .SH SEE ALSO
 .BR xz (1).
 .br
-The project's
-.I README.md
-(usage and overview),
-.I LOCKS.md
-(the decisions and measurements the figures above come from),
-.I docs/CONSTRAINTS.md
-and
-.IR docs/performance-audit-128mib-2026-09-15.md .
+The project documentation is available at
+.UR https://github.com/pedroanisio/xadapt-c
+.UE .

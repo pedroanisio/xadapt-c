@@ -134,5 +134,4 @@ the trailer arrives. It also checks restrictive umasks, legacy modes and
 cleanup on file-size limits (`SIGXFSZ`). The decoder suite exercises malformed worker results with
 null diagnostic pointers.
 
-Source: implemented by OpenAI GPT-6 via Codex from the existing archive
-attribute encoding and the P1 findings reproduced in the 2026-09-15 review.
+Source: implemented by OpenAI GPT-6 via Codex using the archive attribute encoding described above.

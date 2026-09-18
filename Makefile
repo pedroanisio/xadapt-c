@@ -16,45 +16,37 @@ FLOOR_ARGS ?=
 all test clean install uninstall sanitize sanitize-cli coverage check-suites check-long:
 	$(MAKE) -C adpat/c $@
 
-# The gate is held to CHECK_SECONDS of wall time (LOCKS.md, 2026-09-15):
-# it runs under `timeout`, so a suite that grows past the budget fails the
-# gate rather than stretching it. The codec's check and the tools' tests
-# run at once under make -j; each writes its own log, printed on failure.
-# The suite is parallel, so its wall time is what a loaded host stretches
-# (105 s at load 4 on the reference host, 115 s at load 10): the check
-# prints its wall time and the load average, so a budget failure can be
-# told from a code failure, and CHECK_SECONDS may be raised for the run.
+# Tests share one build and run concurrently within the wall-time budget.
+CHECK_LOG_DIR ?= /tmp
 CHECK_SECONDS ?= 120
+CHECK_CODEC_TARGET ?= check
 # The codec is built once, before the parts run: the provenance part runs
 # `make all` in the same build directory (tools/test_provenance.py), and
 # two makes relinking cadapt at once left the safety part executing a
 # half-written binary.
 check:
-	rm -rf _tmp/check && mkdir -p _tmp/check
 	$(MAKE) -C adpat/c BUILD=$(BUILD) all
-	@start=$$(date +%s); \
-	if timeout $(CHECK_SECONDS) $(MAKE) -j check-parts; then \
-	    echo "make check: $$(( $$(date +%s) - start )) s of the $(CHECK_SECONDS) s wall budget, load average$$(uptime | sed 's/.*load average//')"; \
+	@mkdir -p "$(CHECK_LOG_DIR)"; logs=$$(mktemp -d "$(CHECK_LOG_DIR)/cadapt-check.XXXXXX"); \
+	start=$$(date +%s); \
+	if timeout $(CHECK_SECONDS) $(MAKE) -j CHECK_LOG_DIR="$$logs" check-parts; then \
+	    echo "make check: $$(( $$(date +%s) - start )) s of the $(CHECK_SECONDS) s wall budget"; \
 	else \
-	    echo "make check exceeded $(CHECK_SECONDS) s or failed after $$(( $$(date +%s) - start )) s at load average$$(uptime | sed 's/.*load average//') (see _tmp/check/*.log)"; exit 1; \
+	    echo "make check failed after $$(( $$(date +%s) - start )) s; logs: $$logs"; exit 1; \
 	fi
-	@for p in codec provenance floor-tool fetch-corpus docs bench ltcb; do grep -hE "^ok |^OK$$|checks passed$$" _tmp/check/$$p.log | tail -3; done
-check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus _tmp/check/docs _tmp/check/bench _tmp/check/ltcb _tmp/check/gates
-_tmp/check/codec: ; @$(MAKE) -C adpat/c check > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-_tmp/check/provenance: ; @$(PYTHON) -B tools/test_provenance.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-_tmp/check/floor-tool: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_check_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-_tmp/check/fetch-corpus: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_fetch_corpus.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-# The measurement tooling and the LTCB tooling. Both went ungated for weeks and
-# both rotted: telemetry drove the encoder with a decode-only option and its
-# container reader stopped at version 52, and the LTCB page builder read a
-# rendering .gitignore excludes. A suite nothing runs is a suite that is wrong.
-# The bench suite needs the built codec, which the codec part builds first.
-_tmp/check/bench: _tmp/check/codec ; @$(PYTHON) -B -m unittest discover -s bench -p 'test_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-_tmp/check/ltcb: ; @$(PYTHON) -B -m unittest discover -s tools/ltcb -p 'test_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-# the documents against the code: tools/test_docs.py needs the built codec, which the codec part builds first
+
+check-parts: $(CHECK_LOG_DIR)/codec $(CHECK_LOG_DIR)/provenance $(CHECK_LOG_DIR)/floor-tool $(CHECK_LOG_DIR)/fetch-corpus $(CHECK_LOG_DIR)/docs $(CHECK_LOG_DIR)/bench $(CHECK_LOG_DIR)/ltcb $(CHECK_LOG_DIR)/gates $(CHECK_LOG_DIR)/release-content
+$(CHECK_LOG_DIR)/codec: ; @$(MAKE) -C adpat/c $(CHECK_CODEC_TARGET) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(CHECK_LOG_DIR)/provenance: ; @$(PYTHON) -B tools/test_provenance.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(CHECK_LOG_DIR)/floor-tool: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_check_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(CHECK_LOG_DIR)/fetch-corpus: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_fetch_corpus.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+# Measurement and comparison tools are validated with the built codec.
+# Build prerequisites finish before dependent suites start.
+$(CHECK_LOG_DIR)/bench: | all ; @$(PYTHON) -B -m unittest discover -s bench -p 'test_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(CHECK_LOG_DIR)/ltcb: ; @$(PYTHON) -B -m unittest discover -s tools/ltcb -p 'test_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+# The documentation and gate tests need the built codec.
 # the gates against what they enumerate (tools/test_gates.py needs the built codec for the profiles)
-_tmp/check/gates: _tmp/check/codec ; @$(PYTHON) -B tools/test_gates.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-_tmp/check/docs: _tmp/check/codec ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_docs.py' > $@.log 2>&1 && $(PYTHON) -B tools/render_floors.py check >> $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(CHECK_LOG_DIR)/gates: | all ; @$(PYTHON) -B tools/test_gates.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(CHECK_LOG_DIR)/docs: | all ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_docs.py' > $@.log 2>&1 && $(PYTHON) -B tools/render_floors.py check >> $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
 # Locked floors (LOCKS.md, 2026-09-14). gate: the CI proxy, the first 8 MiB of
 # enwik8 cut from the tracked zip, encoded three times for the median of
@@ -150,3 +142,8 @@ ltcb:
 bench plot:
 	@echo "Use codecbench run/history with an external cadapt adapter; see README.md."
 	@false
+
+.PHONY: release-content-check
+release-content-check:
+	$(PYTHON) -B tools/release_content.py tree
+$(CHECK_LOG_DIR)/release-content: ; @$(PYTHON) -B tools/release_content.py tree > $@.log 2>&1 && $(PYTHON) -B -m unittest discover -s tools -p 'test_release_content.py' >> $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }

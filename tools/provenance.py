@@ -62,6 +62,9 @@ def version() -> str:
 
 
 def commit() -> str | None:
+    exported = ROOT / "release-source.json"
+    if exported.exists():
+        return json.loads(exported.read_text())["commit"]
     try:
         out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
@@ -247,6 +250,7 @@ def manifest(build: Path) -> dict:
         }
     return {
         "schema": "cadapt.build-manifest.v1",
+        "stage": "build-before-install-and-strip",
         "version": version(),
         "commit": commit(),
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),

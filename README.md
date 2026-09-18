@@ -28,7 +28,7 @@ starting weight (64 to 66 and 69 to 71, the transform's own max versions,
 are read and no longer written). Every `--max` encode is now the sized
 version 72 (75 with metadata), its sizing byte's bit 7 naming the second max model —
 int16 arbiters, four re-purposed context slots, four-way recall buckets
-and a fifth arbiter (the `Second max model` entry in `LOCKS.md`) — so
+and a fifth arbiter (the format policy in `adapt.h`) — so
 21, 24, 53, 54, 56 and 57 are read and no longer written; a max encode
 whose first block prefers the class-keyed arbiters writes 80 or 81 (82,
 83 with metadata) instead, and a normal encode 84 (85), whose policy
@@ -44,12 +44,11 @@ the recovered checksum before emitting bytes. This uses temporary disk for
 the consumed input prefix and tentative output, with only one model in memory.
 Versions 72/75 identify the current predictor without that fallback.
 
-The [experimental implementation report](research/causal-byte-implementation.md)
-specifies the adaptive algorithms, their format versions, limits and
-measurement protocol; the other dated notes are indexed in
-[research/README.md](research/README.md). The numbers that stand are the
-locked floors in [tools/ratio_floor.json](tools/ratio_floor.json), each
-with the decision that moved it in [LOCKS.md](LOCKS.md).
+The [adaptive predictor reference](docs/ADAPTIVE.md) describes supported
+algorithms and their resource accounting. [MODEL.md](docs/MODEL.md) explains
+the synchronization and complete-container invariants. Regression thresholds
+are defined in [tools/ratio_floor.json](tools/ratio_floor.json), with acceptance
+contracts in [LOCKS.md](LOCKS.md).
 
 The code began as an integer-for-integer port of a Rust crate and keeps that
 crate's layout and names; since format 13 it defines its own format and
@@ -65,16 +64,15 @@ refuses versions 10–18. The header of
 | [adpat/c/examples/](adpat/c/examples/) | The library's executable examples — round trip, streams, a folder, the contract — built and run by `make check` |
 | [adpat/c/fuzz/](adpat/c/fuzz/) | libFuzzer harnesses: the two decoders, the same with the header checksum made good, the archive unpacker with its seeds |
 | [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |
-| [bench/](bench/README.md) | Retained historical benchmark scripts, measurements and plots |
-| [docs/](docs/CONSTRAINTS.md) | What the codec is held to ([CONSTRAINTS.md](docs/CONSTRAINTS.md)), the release pipeline ([release-pipeline.md](docs/release-pipeline.md)), the release notes ([release-notes/](docs/release-notes/)) and the dated performance audits |
+| [bench/](bench/README.md) | Maintained measurement tools and their regression tests |
+| [docs/](docs/CONSTRAINTS.md) | What the codec is held to ([CONSTRAINTS.md](docs/CONSTRAINTS.md)), the release pipeline ([release-pipeline.md](docs/release-pipeline.md)), the release notes ([release-notes/](docs/release-notes/)) and algorithm references |
 | [.github/workflows/](.github/workflows/) | `ci.yml`, the gates on every push and pull request; `release.yml`, the artifacts and the GitHub release on a tag |
-| [LOCKS.md](LOCKS.md) | The decisions that are settled, each with the measurements that settled it |
-| [research/](research/README.md) | Dated research notes — the literature, the byte-only strategy, the adaptive experiments, the LTCB tables — indexed with their dates |
+| [LOCKS.md](LOCKS.md) | Current compatibility, resource and regression contracts |
+| [research/](research/README.md) | Public benchmark snapshots, schemas and comparison data |
 | [static/corpus/](static/corpus/scripts/manifest.json) | The benchmark's fixtures: enwik8, text8, and the six per-script rows with their manifest |
 | [tools/](tools/provenance.py) | The provenance tool (the SPDX SBOM, the build manifest, and the rebuild that confirms it), the floor gate [check_ratio_floor.py](tools/check_ratio_floor.py) with its [ratio_floor.json](tools/ratio_floor.json) and [render_floors.py](tools/render_floors.py), and the [LTCB tooling](tools/ltcb/) |
 | [sbom.spdx.json](sbom.spdx.json) | What the codec is made of: the SPDX document of its sources and dependencies |
 | [LICENSE](LICENSE), [SECURITY.md](SECURITY.md), [SUPPORT.md](SUPPORT.md), [CHANGELOG.md](CHANGELOG.md) | The terms, the security policy, what support exists, and what changed |
-| [CLAUDE.md](CLAUDE.md) | Working rules for contributors and agents |
 | [Makefile](Makefile) | The root targets: build, `test`, `check`, `sanitize`, `coverage`, `gate`, `corpus-floor`, `memory-gate`, `ratio-floor`, `release`, `test-install`, `sbom`, `manifest`, `reproduce`, `ltcb` |
 
 ## Build
@@ -499,10 +497,8 @@ What is promised, and for how long, is in [SUPPORT.md](SUPPORT.md)
   (Russian), CJK (Chinese, Japanese) and diacritic-heavy Latin (Vietnamese,
   Czech) — in [static/corpus/scripts/](static/corpus/scripts/), fetched
   reproducibly by [bench/fetch_scripts.py](bench/fetch_scripts.py) with a
-  manifest naming every article and revision. Their measurements, by the
-  benchmark on one binary, are in
-  [research/scripts-measurement.md](research/scripts-measurement.md); the
-  model is byte-level throughout, so a script is never decoded, only seen.
+  manifest naming every article and revision. Run `bench/telemetry.py` to measure these rows with the chosen executable.
+  The model consumes bytes without decoding a character encoding.
 - `make check` is held to **120 s** of wall time (`CHECK_SECONDS` in the
   root Makefile; it runs under `timeout` and fails when exceeded — LOCKS.md,
   2026-09-15). Every suite runs at once under `make -j`, so the budget is
@@ -682,7 +678,7 @@ since 2026-09-15 (the page's own changelog line: "Sep 15 2026 - added
 cadapt 0.12.0, zmix 1.0, zmix 1.0.1"): enwik8 18,207,203 B, enwik9
 150,063,628 B, decompressor zip 209,893 B, **total 150,273,521 B, rank 30
 of 226**, 1,385 / 1,748 ns per byte, 661 MB, note 114 (tested by the
-operator on the reference host). The entry sits between nanozip 0.09a
+submitter on the reference host). The entry sits between nanozip 0.09a
 (149,328,821 B, 32,000 MB) and xwrt 3.2 (151,223,933 B, 1,691 MB). The
 whole table as of that day is
 [research/ltcb-main-table.csv](research/ltcb-main-table.csv), transcribed
@@ -690,35 +686,21 @@ by [tools/ltcb/transcribe_ltcb_table.py](tools/ltcb/transcribe_ltcb_table.py)
 under the rules [research/ltcb-tables.md](research/ltcb-tables.md) records;
 the submission itself is [docs/ltcb-submission.md](docs/ltcb-submission.md).
 
-Two goals stand on this table (`DLV-3`, which keeps the rows the judge
-of nothing but themselves):
-
-- **A place in the top 20 — the canonical enwik9 goal.** Place 20 on the
-  2026-09-15 table is paq8px_v206fix1 at 125,099,359 B of enwik9 plus
-  decompressor, so the goal is **enwik9 at most 124,889,465 B** with the
-  entry's 209,893 B decompressor (that total, less the zip, less one byte:
-  a tie does not overtake). The figure is computed from the snapshot by
-  [tools/ltcb/ltcb_goal.py](tools/ltcb/ltcb_goal.py) and never typed —
-  the table moves as entries are added, a re-fetched snapshot moves the
-  figure, and `make check` (`tools/test_docs.py`) holds this section and
-  `docs/CONSTRAINTS.md` to the figure the tool prints.
-- **The leader on memory footprint.** At 661 MB the entry already uses
-  the least memory of every entry ranked above it — the least above is
-  drt|lpaq9m at 1,542 MB, and every entry in the top 20 uses 3,751 MB or
-  more (gmix v1) — and it is to stay the smallest of every entry it
-  overtakes: a gain that needs a larger model than the tier holds is not
-  this goal's gain (`RUN-1`). The same tool states the claim from the
-  snapshot.
+The snapshot can be queried with [ltcb_goal.py](tools/ltcb/ltcb_goal.py).
+For example, place 20 is paq8px_v206fix1 at 125,099,359 B including the
+decompressor; a 209,893 B decompressor leaves at most 124,889,465 B of
+enwik9 to overtake it. This is a comparison calculation, not a release goal.
+The snapshot's cadapt entry uses 661 MB; the least memory above it is
+1,542 MB for drt|lpaq9m. Refreshing the snapshot changes these comparisons.
 
 ## Benchmark ownership
 
 General benchmark runs belong to the independent `codecbench` tool. Install it
 separately and describe the `cadapt` executable with an external command adapter;
 its examples include normal, fast, max, adaptive and segmented configurations.
-The codec builds and passes `make check` without either `bench/` or codecbench.
-`make bench` and `make plot` report this migration instead of invoking the old
-collector. Historical scripts, result bundles, plots and research links remain
-under `bench/`; they have not been deleted.
+`make check` runs the measurement-tool tests in `bench/`; that directory
+is required for full validation. codecbench is not a build dependency.
+`make bench` and `make plot` direct general benchmark orchestration to it.
 
 The codec-specific ratio and throughput regression gates remain here:
 `make gate`, `make ratio-floor` and `make corpus-floor` use

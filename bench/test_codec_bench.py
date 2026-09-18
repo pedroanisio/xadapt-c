@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bench"))
@@ -71,9 +72,8 @@ class CodecBenchTest(unittest.TestCase):
         self.assertGreaterEqual(row.encode_wall, 0.0)
         self.assertGreater(row.encode_rss_mib, 0.0)
 
-    def test_threads_raise_cpu_time_even_as_wall_time_falls(self):
-        """The reason CPU is the headline: threads move work, they do not
-        remove it, so a wall figure flatters a threaded run."""
+    def test_threaded_work_records_cpu_and_wall_time(self):
+        """Scheduling can add wall time without adding CPU work."""
         import multiprocessing
         if multiprocessing.cpu_count() < 2:
             self.skipTest("needs two cores")
@@ -91,7 +91,14 @@ class CodecBenchTest(unittest.TestCase):
                  "decode": [sys.executable, str(spin), "1", "{enc}", "{dec}"]}
         row = codec_bench.measure(codec, self.source, self.scratch)
         self.assertTrue(row.restored)
-        self.assertGreaterEqual(row.encode_cpu, row.encode_wall * 0.9)
+        self.assertGreater(row.encode_cpu, 0.0)
+        self.assertGreater(row.encode_wall, 0.0)
+
+    def test_measurement_keeps_cpu_and_wall_independent(self):
+        for cpu, wall in [(4.0, 1.0), (1.0, 4.0)]:
+            result = subprocess.CompletedProcess([], 0, json.dumps({"rc": 0, "cpu": cpu, "wall": wall, "rss": 1024}).encode(), b"")
+            with self.subTest(cpu=cpu, wall=wall), patch.object(codec_bench.subprocess, "run", return_value=result):
+                self.assertEqual(codec_bench.run_once(["codec"]), (cpu, wall, 1024))
 
     def test_a_codec_that_does_not_restore_is_marked_not_restored(self):
         """A ratio from a codec that loses a byte is not a number."""

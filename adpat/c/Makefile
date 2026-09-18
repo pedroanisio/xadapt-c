@@ -256,6 +256,7 @@ sanitize-cli:
 # Mutations go to a build-local corpus, never to the committed vectors.
 FUZZ_CC ?= clang
 FUZZ_RUNS ?= 1000
+FUZZ_ARTIFACT_DIR ?= /tmp/cadapt-fuzz
 FUZZ_CFLAGS ?= -std=c99 -O1 -g -DADAPT_NO_MULTIVERSION -fsanitize=fuzzer,address,undefined \
                -fno-sanitize-recover=all -Wall -Wextra -Wpedantic -Werror
 
@@ -283,19 +284,22 @@ $(BUILD)/archive_seeds: fuzz/archive_seeds.c adapt.h $(LIB)
 fuzz: $(BUILD)/fuzz_decode $(BUILD)/fuzz_header $(BUILD)/fuzz_archive
 
 fuzz-smoke: fuzz
+	mkdir -p "$(FUZZ_ARTIFACT_DIR)"
 	mkdir -p $(BUILD)/fuzz-corpus
 	cp tests/vectors/*.adpt $(BUILD)/fuzz-corpus/
-	$(BUILD)/fuzz_decode $(BUILD)/fuzz-corpus -runs=$(FUZZ_RUNS) -max_len=65536 -seed=1 -print_final_stats=1
+	$(BUILD)/fuzz_decode $(BUILD)/fuzz-corpus -runs=$(FUZZ_RUNS) -max_len=65536 -seed=1 -print_final_stats=1 -artifact_prefix="$(FUZZ_ARTIFACT_DIR)/"
 
 fuzz-header-smoke: $(BUILD)/fuzz_header
+	mkdir -p "$(FUZZ_ARTIFACT_DIR)"
 	mkdir -p $(BUILD)/fuzz-header-corpus
 	cp tests/vectors/*.adpt $(BUILD)/fuzz-header-corpus/
-	$(BUILD)/fuzz_header $(BUILD)/fuzz-header-corpus -runs=$(FUZZ_RUNS) -max_len=65536 -seed=1 -print_final_stats=1
+	$(BUILD)/fuzz_header $(BUILD)/fuzz-header-corpus -runs=$(FUZZ_RUNS) -max_len=65536 -seed=1 -print_final_stats=1 -artifact_prefix="$(FUZZ_ARTIFACT_DIR)/"
 
 fuzz-archive-smoke: $(BUILD)/fuzz_archive $(BUILD)/archive_seeds
+	mkdir -p "$(FUZZ_ARTIFACT_DIR)"
 	mkdir -p $(BUILD)/fuzz-archive-corpus
 	$(BUILD)/archive_seeds $(BUILD)/fuzz-archive-corpus
-	$(BUILD)/fuzz_archive $(BUILD)/fuzz-archive-corpus -runs=$(FUZZ_RUNS) -max_len=4096 -seed=1 -print_final_stats=1
+	$(BUILD)/fuzz_archive $(BUILD)/fuzz-archive-corpus -runs=$(FUZZ_RUNS) -max_len=4096 -seed=1 -print_final_stats=1 -artifact_prefix="$(FUZZ_ARTIFACT_DIR)/"
 
 # Installation: the command, its manual, the library and its header under
 # PREFIX (DESTDIR ahead of it for a package's staging root). Nothing else

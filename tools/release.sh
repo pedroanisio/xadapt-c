@@ -8,7 +8,7 @@
 #       CHANGELOG.md, sbom.spdx.json, build-manifest.json — the layout
 #       `make install` writes, relocatable under any prefix
 #   cadapt-<version>-src.tar.gz            the sources, tools and documents
-#       (the corpora stay out: tools/fetch_corpus.py fetches them)
+#       (includes pinned test fixtures and benchmark input manifests)
 #   sbom.spdx.json, build-manifest.json    the SPDX document of the sources
 #       and the record of the build that made the binary (toolchain,
 #       flags, host, the hash and size of every output)
@@ -22,8 +22,8 @@
 #
 # Defaults: REV = HEAD, DIR = dist/<version>/ (git-ignored). A tag named
 # v<version> must name the revision whose cadapt.c says <version>; any
-# other name is accepted. The C suites run on the export before anything
-# is packaged (--no-tests skips them, for a build whose gates ran already);
+# other name is accepted. The full check suite runs on the source export
+# (--no-tests skips it for a revision whose gates have already passed);
 # the packaged binary is then unpacked elsewhere and made to round-trip a
 # file, so the tarball is proven before it is published.
 #
@@ -53,8 +53,8 @@ case "$REV" in
     v[0-9]*) [ "$REV" = "v$VERSION" ] || { echo "tag $REV names a tree whose cadapt.c says $VERSION" >&2; exit 2; } ;;
 esac
 # the release notes are the published release's body: a revision without
-# them is not a release (the workflow once fell back to the changelog's
-# entry in silence — no install instructions, no compatibility notes)
+# them is not a release: installation and compatibility guidance must be
+# present in the published body.
 git cat-file -e "$FULL:docs/release-notes/$VERSION.md" 2>/dev/null \
     || { echo "$REV has no docs/release-notes/$VERSION.md: write the release notes before releasing $VERSION" >&2; exit 2; }
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -70,8 +70,7 @@ trap 'rm -rf "$WORK"' EXIT
 # 1. the sources of the revision, exported, and the source tarball
 SRC="$WORK/cadapt-$VERSION"
 mkdir -p "$SRC"
-git archive "$FULL" adpat/c tools docs Makefile LICENSE README.md CHANGELOG.md SUPPORT.md SECURITY.md LOCKS.md \
-    sbom.spdx.json | tar -x -C "$SRC"
+python3 -B tools/release_content.py export --rev "$FULL" --destination "$SRC"
 rm -rf "$SRC/adpat/c/build" "$SRC/tools/__pycache__"
 ( cd "$WORK" && tar -czf "$OUT/cadapt-$VERSION-src.tar.gz" "cadapt-$VERSION" )
 # the source tarball as a user gets it: built, installed under a prefix, used
@@ -86,7 +85,15 @@ tools/test_install.sh --source "$OUT/cadapt-$VERSION-src.tar.gz" > "$OUT/source-
 ( cd "$SRC" && python3 -B tools/render_floors.py check ) || { echo "the floors blocks are stale in $REV: run python3 tools/render_floors.py update and commit" >&2; exit 1; }
 ( cd "$SRC/adpat/c" && make -s all ) > "$OUT/build.log" 2>&1 || { cat "$OUT/build.log"; exit 1; }
 if [ "$TESTS" = 1 ]; then
-    ( cd "$SRC/adpat/c" && make -s test ) >> "$OUT/build.log" 2>&1 || { cat "$OUT/build.log"; exit 1; }
+    # GCC supplies the gcov branch gate. Clang runs the same source-export
+    # suites without that GCC-specific pass. check-parts also avoids the
+    # GNU timeout dependency on macOS; the CI job bounds total execution.
+    if ${CC:-cc} --version | grep -qi clang; then
+        CHECK_LOGS=$(mktemp -d "${TMPDIR:-/tmp}/cadapt-release-check.XXXXXX")
+        ( cd "$SRC" && make -s -j check-parts CHECK_CODEC_TARGET=check-suites CHECK_LOG_DIR="$CHECK_LOGS" ) >> "$OUT/build.log" 2>&1 || { cat "$OUT/build.log"; echo "suite logs: $CHECK_LOGS"; exit 1; }
+    else
+        ( cd "$SRC" && make -s check ) >> "$OUT/build.log" 2>&1 || { cat "$OUT/build.log"; exit 1; }
+    fi
 fi
 ( cd "$SRC" && python3 -B tools/provenance.py sbom --output "$OUT/sbom.spdx.json" ) > /dev/null
 ( cd "$SRC" && python3 -B tools/provenance.py manifest --build adpat/c/build --output "$OUT/build-manifest.json" ) > /dev/null
@@ -128,8 +135,10 @@ PY
 PKG="$WORK/$NAME"
 ( cd "$SRC/adpat/c" && make -s install DESTDIR="$PKG" PREFIX=/ ) >> "$OUT/build.log" 2>&1
 strip "$PKG/bin/cadapt" 2>/dev/null || true
-cp "$SRC/LICENSE" "$SRC/CHANGELOG.md" "$OUT/NOTICE" "$OUT/sbom.spdx.json" "$OUT/build-manifest.json" "$PKG/"
+cp "$SRC/LICENSE" "$SRC/CHANGELOG.md" "$SRC/SUPPORT.md" "$SRC/SECURITY.md" "$OUT/NOTICE" "$OUT/sbom.spdx.json" "$OUT/build-manifest.json" "$PKG/"
+( cd "$SRC" && python3 -B tools/release_content.py payload "$PKG" --revision "$FULL" )
 ( cd "$WORK" && tar -czf "$OUT/$NAME.tar.gz" "$NAME" )
+( cd "$SRC" && python3 -B tools/release_content.py archive "$OUT/cadapt-$VERSION-src.tar.gz" --kind source && python3 -B tools/release_content.py archive "$OUT/$NAME.tar.gz" --kind binary )
 
 # 5. the packaged binary, unpacked elsewhere, round-trips a file
 PROVE="$WORK/prove"

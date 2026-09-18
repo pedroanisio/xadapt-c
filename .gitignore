@@ -1,33 +1,17 @@
-.agent-tasks/
-static/corpus/enwik8
-/bench/results/
-/bench/plots/
 __pycache__/
-.repo/
-adpat/c/build-cov/
+.ruff_cache/
+.venv/
+adpat/c/build*/
+static/corpus/enwik8
 static/corpus/text8
-adpat/cadatp-hash
-adpat/cadatp-fc8d2
-# research/: the notes and source CSVs are tracked; the renderings `make ltcb`
-# builds are not. Nothing tracked may read one of these: a test or tool that
-# needs the numbers builds them from the tracked CSVs, so a fresh clone works
-# before `make ltcb` has ever run.
+static/corpus/mixed/*
+!static/corpus/mixed/manifest.json
+/build-manifest.json
+/build/
+/dist/
 research/ltcb-dashboard.*
 research/ltcb-phases.svg
 research/ltcb-phases.png
 research/ltcb-phases.csv
 research/ltcb-analysis.*
 research/ltcb-interactive.html
-_tmp/
-static/corpus/mixed/*
-!static/corpus/mixed/manifest.json
-docs/doc-hygiene-report-2026-09-15.md
-docs/doc-quarantine/doc-quarantine.sh
-docs/doc-quarantine/quarantine-manifest.json
-docs/doc-quarantine/quarantine-summaries.md
-# release assets built by tools/ltcb_release.sh
-dist/
-_study/
-of.txt
-proxmox_api.env
-/build-manifest.json

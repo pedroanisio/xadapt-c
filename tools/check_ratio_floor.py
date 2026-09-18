@@ -14,21 +14,12 @@ this works on any host and is what a CI runner should use. Otherwise throughput
 is printed and marked "not gated on this host"; size is still gated. `--verify`
 also decodes the container and compares byte for byte.
 
-Each floor names its measure: `cpu_seconds` is the CPU time the encode used
-(user and system, as the kernel accounts it to the child), `wall_seconds` the
-clock time it took. The coder is one thread of pure CPU: its CPU time is what
-a host with more runnable threads than CPUs adds runqueue wait to in wall time
-but not in CPU time, so the locked floors use it. It is not immune to a
-neighbour: another compressor's tables sharing the cache and the memory bus
-slow the coder itself — on the reference host (12 hardware threads) the same
-binary took 13.1 s alone and 15.3 s of both CPU and wall time beside two
-other encodes — which is why `--runs N` encodes N times and takes the median
-(one hiccup is not the verdict), why with `--baseline-binary` the two
-binaries take turns run by run (a neighbour that comes and goes weighs on
-both alike — the relative gate to use on a shared host), and why a floor is
-locked on a quiet host. Every run is held to the same bytes (RUN-5). Wall
-floors remain for floors locked that way and for a platform without child
-CPU accounting, where a CPU floor is compared against wall time and says so.
+Each floor names its timing measure: child CPU seconds or elapsed wall seconds.
+CPU time excludes runqueue wait but still reflects cache and memory contention.
+Use a quiet reference host for absolute floors. On a shared host,
+--baseline-binary alternates baseline and candidate runs; --runs N compares
+their medians. Every run must emit identical bytes (RUN-5). If child CPU
+accounting is unavailable, CPU floors use wall time and report that fallback.
 
 Exit status: 0 every requested floor holds; 1 a floor is broken or the round
 trip differs; 2 the check could not run (wrong input, bad floor file, timeout).
@@ -56,6 +47,7 @@ except ImportError:  # not a POSIX platform: no child CPU accounting
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "cadapt.ratio-floor.v1"
+STRUCTURED_SCHEMA = "cadapt.ratio-floor.v2"
 TOP_KEYS = {"schema", "locked_on", "host", "arguments", "throughput_tolerance", "floors"}
 FLOOR_KEYS = {"fixture", "input_bytes", "input_md5", "max_container_bytes", "min_bytes_per_second", "measured_with"}
 # a floor's seconds are in exactly one of these measures
@@ -63,7 +55,7 @@ MEASURE_KEYS = {"cpu_seconds": "cpu", "wall_seconds": "wall"}
 
 
 class FloorError(ValueError):
-    """The floor file is not a valid cadapt.ratio-floor.v1 document."""
+    """The floor file is not a supported ratio-floor document."""
 
 
 @dataclass(frozen=True)
@@ -107,7 +99,7 @@ def load_floor(path: Path) -> Locked:
         raise FloorError(f"{path}: {error}") from error
     if not isinstance(data, dict) or set(data) != TOP_KEYS:
         raise FloorError(f"{path}: expected exactly the keys {sorted(TOP_KEYS)}")
-    if data["schema"] != SCHEMA:
+    if data["schema"] not in (SCHEMA, STRUCTURED_SCHEMA):
         raise FloorError(f"{path}: schema {data['schema']!r} is not {SCHEMA}")
     if not isinstance(data["arguments"], list) or not data["arguments"] or data["arguments"][0] != "encode":
         raise FloorError(f"{path}: arguments must start with 'encode'")
@@ -117,14 +109,30 @@ def load_floor(path: Path) -> Locked:
     if not isinstance(data["floors"], list) or not data["floors"]:
         raise FloorError(f"{path}: floors must be a non-empty list")
     floors = []
+    structured = data["schema"] == STRUCTURED_SCHEMA
+    required = (FLOOR_KEYS - {"measured_with"}) | {"provenance"} if structured else FLOOR_KEYS
     for item in data["floors"]:
         measures = set(item) & set(MEASURE_KEYS) if isinstance(item, dict) else set()
-        if not isinstance(item, dict) or len(measures) != 1 or set(item) - measures != FLOOR_KEYS:
-            raise FloorError(f"{path}: each floor needs exactly the keys {sorted(FLOOR_KEYS)} "
+        if not isinstance(item, dict) or len(measures) != 1 or set(item) - measures != required:
+            raise FloorError(f"{path}: each floor needs exactly the keys {sorted(required)} "
                              f"and one of {sorted(MEASURE_KEYS)}")
         if not re.fullmatch(r"[0-9a-f]{32}", str(item["input_md5"])):
             raise FloorError(f"{path}: {item.get('fixture')}: input_md5 is not an MD5 digest")
         (seconds_key,) = measures
+        if structured:
+            provenance = item["provenance"]
+            keys = {"definition_revision", "timing_measure", "verification"}
+            if not isinstance(provenance, dict) or set(provenance) != keys:
+                raise FloorError(f"{path}: provenance needs exactly {sorted(keys)}")
+            if not re.fullmatch(r"[0-9a-f]{40}", str(provenance["definition_revision"])):
+                raise FloorError(f"{path}: provenance definition_revision must identify a commit")
+            if provenance["timing_measure"] != seconds_key:
+                raise FloorError(f"{path}: provenance timing_measure differs from the floor")
+            if not isinstance(provenance["verification"], str) or not provenance["verification"].strip():
+                raise FloorError(f"{path}: provenance verification must state the recorded check")
+            measured_with = json.dumps(provenance, sort_keys=True)
+        else:
+            measured_with = str(item["measured_with"])
         floors.append(Floor(
             fixture=str(item["fixture"]),
             input_bytes=_positive_int(item["input_bytes"], "input_bytes"),
@@ -133,7 +141,7 @@ def load_floor(path: Path) -> Locked:
             seconds=_positive_float(item[seconds_key], seconds_key),
             measure=MEASURE_KEYS[seconds_key],
             min_bytes_per_second=_positive_float(item["min_bytes_per_second"], "min_bytes_per_second"),
-            measured_with=str(item["measured_with"]),
+            measured_with=measured_with,
         ))
     if len({f.fixture for f in floors}) != len(floors):
         raise FloorError(f"{path}: duplicate fixture names")

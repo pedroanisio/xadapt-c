@@ -2,9 +2,9 @@
 # The assets of a Large Text Compression Benchmark entry, from a committed
 # revision: the decompressor as the benchmark counts it — a zip of the
 # stripped Linux binary with its licence and a note for the verifier (the
-# sources are not published, by the operator's decision of 2026-09-15) —
+# sources use the separate source-release package) —
 # the containers the locked command writes for the fixtures given, every
-# file's SHA-256, and a manifest the submission email quotes. Nothing here
+# file's SHA-256, and a manifest containing verifiable submission measurements. Nothing here
 # reads the working tree: the revision is exported with `git archive` into
 # the release directory and built there, so what is published is what is
 # committed (DLV-2); the exported sources are deleted after the build.
@@ -109,14 +109,17 @@ Inspect a container:
     ./cadapt info enwik9.adpt
 
 The decoder allocates the model the container's header names
-$MEMORY. Sizes, times and hashes are in manifest.json. The
-sources are not published; the binary is the entry, and anyone may run it
-on enwik8 and enwik9 to reproduce the sizes in the manifest.
+$MEMORY. This ZIP contains the executable, usage instructions and license.
+Benchmark submissions report complete container size plus this ZIP size.
+Run the commands above on the specified benchmark inputs to reproduce the
+containers; source packages are distributed separately.
 EOF
 
 #    the zip the benchmark counts: the decompressor and what it needs at run time — the binary alone
 #    runs; the licence names the terms and the note tells a verifier the commands
 ( cd "$OUT" && rm -f "cadapt-$VERSION-linux-x86_64.zip" && zip -9 -q "cadapt-$VERSION-linux-x86_64.zip" cadapt README-ltcb.txt LICENSE )
+
+python3 -B "$ROOT/tools/release_content.py" archive "$OUT/cadapt-$VERSION-linux-x86_64.zip" --kind ltcb
 
 # 5. hashes and the manifest
 ( cd "$OUT" && sha256sum cadapt "cadapt-$VERSION-linux-x86_64.zip" containers/* 2>/dev/null > SHA256SUMS || true )

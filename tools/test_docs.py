@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """The documents against the code they describe.
 
-Source: Claude Opus 5 via Claude Code, 2026-09-15 (a doc-hygiene audit of
-that day, not committed) and 2026-09-18 (docs/doc-hygiene-report-2026-09-18.md).
 Each test pins one thing a document hand-copies from a source of truth: the
 README's usage block against `cadapt --help`, the flags of the manual and the
 README against the binary, the container versions of adapt.h against the
@@ -32,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tools" / "ltcb"))
 import ltcb_goal  # noqa: E402
+import asset_inventory  # noqa: E402
 import render_floors as floors  # noqa: E402
 
 README = ROOT / "README.md"
@@ -45,8 +44,7 @@ FLAG = re.compile(r"--[a-z][a-z-]*")
 
 
 def tracked() -> list[str]:
-    out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
-    return out.split()
+    return asset_inventory.files(ROOT)
 
 
 def tracked_documents() -> list[str]:
@@ -55,15 +53,8 @@ def tracked_documents() -> list[str]:
 
 
 def dated_record(path: str) -> bool:
-    """A document that declares itself true of its date and not kept
-    current: the changelog, the lock log, the dated audits under docs/ and
-    every research note but the index and the CSV note (research/README.md)."""
-    name = path.rsplit("/", 1)[-1]
-    if path in ("CHANGELOG.md", "LOCKS.md"):
-        return True
-    if path.startswith("research/"):
-        return name not in ("README.md", "ltcb-tables.md")
-    return path.startswith("docs/") and re.search(r"-\d{4}-\d{2}-\d{2}\.md$", name) is not None
+    """Only release history may describe commands from an older version."""
+    return path == "CHANGELOG.md"
 
 
 def cadapt_version() -> str:
@@ -212,24 +203,23 @@ class FloorsTest(unittest.TestCase):
             floors.replace_block("no markers", floors.MARKDOWN_START, floors.MARKDOWN_END, "x", README)
 
 
-class GoalTest(unittest.TestCase):
-    """The enwik9 goal is the LTCB top-20 threshold, computed from the
-    snapshot by tools/ltcb/ltcb_goal.py; the documents that state it quote
-    the figures it prints, so a refreshed snapshot that moves the place
-    fails here until the documents follow."""
+class BenchmarkComparisonTest(unittest.TestCase):
+    """Published rank and memory comparisons match the benchmark snapshot.
+
+    A changed snapshot requires the corresponding documented figures to change.
+    Benchmark rank remains separate from the product acceptance contract.
+    """
 
     def figures(self) -> ltcb_goal.Goal:
         return ltcb_goal.compute()
 
-    def test_constraints_state_the_goal_from_the_snapshot(self) -> None:
-        g = self.figures()
-        text = (ROOT / "docs" / "CONSTRAINTS.md").read_text(encoding="utf-8")
+    def test_constraints_keep_benchmark_rank_separate_from_acceptance(self) -> None:
+        text = (ROOT / "docs" / "CONSTRAINTS.md").read_text()
         row = next(line for line in text.splitlines() if line.startswith("| `DLV-3`"))
-        for figure in (f"{g.target_enwik9:,} B", f"{g.threshold_total:,} B", f"{g.decompressor_bytes:,} B",
-                       f"top {g.place}", "tools/ltcb/ltcb_goal.py"):
-            self.assertIn(figure, row, f"DLV-3 does not state {figure!r}")
+        self.assertIn("mixed corpus", row)
+        self.assertNotIn("top 20", row)
 
-    def test_readme_states_the_goal_and_the_memory_claim(self) -> None:
+    def test_readme_states_the_comparison_and_the_memory_claim(self) -> None:
         g = self.figures()
         text = README.read_text(encoding="utf-8")
         section = text[text.index("## The Large Text Compression Benchmark"):]
@@ -266,9 +256,8 @@ class ChangelogTest(unittest.TestCase):
 class MakeTargetsTest(unittest.TestCase):
     def test_every_cited_make_target_exists_where_it_is_cited(self) -> None:
         """`make x` cited in backticks is a rule of the root Makefile, and
-        `make -C adpat/c x` one of the codec's. Dated records (the changelog,
-        the audits, the research notes) are history or proposals and are not
-        held; LOCKS.md is, since its locks are the policy in force."""
+        `make -C adpat/c x` one of the codec's. Changelog entries describe
+        historical releases; all current guidance must resolve to a target."""
         root, codec = make_targets(ROOT / "Makefile"), make_targets(ROOT / "adpat" / "c" / "Makefile")
         citation = re.compile(r"`make(?: (-C adpat/c))?(?: -j\d*)?(?: [A-Z_]+=\S+)* ([a-z][a-z-]*)[^`]*`")
         problems = []
@@ -288,7 +277,7 @@ class MakeTargetsTest(unittest.TestCase):
 class PathsTest(unittest.TestCase):
     # what a document may name that the tree does not hold: an install
     # layout, a build or release directory, a run's output, an absolute path
-    OUTPUT_PREFIXES = ("bin/", "lib/", "include/", "share/", "build", "dist/", "_tmp", "out/", "runs/", "plots/",
+    OUTPUT_PREFIXES = ("bin/", "lib/", "include/", "share/", "build", "dist/", "out/", "runs/", "plots/",
                        "containers/", "/", "adpat/c/build")
     SUFFIX = re.compile(r"\.(c|h|py|sh|json|md|1|yml|yaml|csv|txt|zip|svg|png|html)$")
 
@@ -298,9 +287,7 @@ class PathsTest(unittest.TestCase):
         bare name), a corpus file the corpus manifests name, or a file a
         tracked script writes (by its name or its stem: the scripts build
         `ltcb-phases.png` from `ltcb-phases.svg`, and the release's
-        `cadapt-<version>-…` from `$VERSION`). Dated records are true of
-        their date and are not held; CLAUDE.md names files that apply when
-        present and is policy, not a description of the tree."""
+        `cadapt-<version>-…` from `$VERSION`). Release history is checked against its own documented version."""
         files = tracked()
         paths = set(files)
         directories = {str(parent) for path in files for parent in Path(path).parents if str(parent) != "."}
@@ -311,7 +298,7 @@ class PathsTest(unittest.TestCase):
         version = cadapt_version()
         problems = []
         for doc in tracked_documents():
-            if dated_record(doc) or doc == "CLAUDE.md":
+            if dated_record(doc):
                 continue
             text = (ROOT / doc).read_text(encoding="utf-8")
             for token in sorted(set(re.findall(r"`([A-Za-z0-9_./-]+)`", text))):
@@ -333,7 +320,7 @@ class PathsTest(unittest.TestCase):
 class ResearchIndexTest(unittest.TestCase):
     def test_every_research_note_is_indexed(self) -> None:
         index = (RESEARCH / "README.md").read_text(encoding="utf-8")
-        for path in sorted(RESEARCH.glob("*.md")):
+        for path in (ROOT / name for name in tracked() if name.startswith("research/") and name.endswith(".md")):
             if path.name != "README.md":
                 self.assertTrue(f"({path.name})" in index, f"research/README.md does not link {path.name}")
 

@@ -1,7 +1,7 @@
-/* Experimental formats 19--24. Fixed integer rules, no corpus-derived data.
+/* Adaptive byte models. Fixed integer rules, no corpus-derived data.
  * All experts consume the same decoded prefix. Prediction precedes update;
  * a completed 4096-byte descriptor routes only subsequent predictions.
- * See research/causal-byte-implementation.md for arithmetic and accounting. */
+ * See docs/ADAPTIVE.md for arithmetic and accounting. */
 #ifndef ADAPT_ADAPTIVE_H
 #define ADAPT_ADAPTIVE_H
 

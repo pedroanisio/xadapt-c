@@ -1,5 +1,5 @@
 {
-  "schema": "cadapt.ratio-floor.v1",
+  "schema": "cadapt.ratio-floor.v2",
   "locked_on": "2026-09-17",
   "host": "AMD Ryzen 5 5600X 6-Core Processor",
   "arguments": [
@@ -14,7 +14,11 @@
       "max_container_bytes": 2108493,
       "wall_seconds": 7.59,
       "min_bytes_per_second": 1343610.6731369596,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 2,108,493 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/mozilla",
@@ -23,7 +27,11 @@
       "max_container_bytes": 12320902,
       "wall_seconds": 74.0,
       "min_bytes_per_second": 692179.5020984798,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 12,320,902 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/mr",
@@ -32,7 +40,11 @@
       "max_container_bytes": 2174744,
       "wall_seconds": 9.35,
       "min_bytes_per_second": 1065840.685152775,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-15: lowered to 2,174,744 B with the class-history width proved on the whole first block (an encoder policy, no format change), make corpus-floor on AMD Ryzen 5 5600X, quiet host, --verify, round trip verified; the throughput floor is unchanged"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/nci",
@@ -41,7 +53,11 @@
       "max_container_bytes": 1302255,
       "wall_seconds": 26.89,
       "min_bytes_per_second": 1247835.8404033638,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 1,302,255 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/ooffice",
@@ -50,7 +66,11 @@
       "max_container_bytes": 1776657,
       "wall_seconds": 7.71,
       "min_bytes_per_second": 798427.7181439284,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 1,776,657 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/osdb",
@@ -59,7 +79,11 @@
       "max_container_bytes": 2168623,
       "wall_seconds": 11.46,
       "min_bytes_per_second": 880150.7565619606,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 2,168,623 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/reymont",
@@ -68,7 +92,11 @@
       "max_container_bytes": 967209,
       "wall_seconds": 6.88,
       "min_bytes_per_second": 962719.5400386341,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 967,209 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/samba",
@@ -77,7 +105,11 @@
       "max_container_bytes": 2992508,
       "wall_seconds": 21.91,
       "min_bytes_per_second": 986332.9685491285,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 2,992,508 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/sao",
@@ -86,7 +118,11 @@
       "max_container_bytes": 4366075,
       "wall_seconds": 11.73,
       "min_bytes_per_second": 618184.1030599518,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 4,366,075 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/webster",
@@ -95,7 +131,11 @@
       "max_container_bytes": 5606811,
       "wall_seconds": 47.43,
       "min_bytes_per_second": 874115.7860512951,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 5,606,811 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/x-ray",
@@ -104,7 +144,11 @@
       "max_container_bytes": 3573449,
       "wall_seconds": 8.95,
       "min_bytes_per_second": 946393.2816532565,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 3,573,449 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "silesia/xml",
@@ -113,7 +157,11 @@
       "max_container_bytes": 323679,
       "wall_seconds": 4.94,
       "min_bytes_per_second": 1081208.6118001665,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 323,679 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/alice29.txt",
@@ -122,7 +170,11 @@
       "max_container_bytes": 36943,
       "wall_seconds": 0.7,
       "min_bytes_per_second": 218284.7747068721,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 36,943 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/asyoulik.txt",
@@ -131,7 +183,11 @@
       "max_container_bytes": 34132,
       "wall_seconds": 0.32,
       "min_bytes_per_second": 387863.75109722506,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 34,132 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/cp.html",
@@ -140,7 +196,11 @@
       "max_container_bytes": 6254,
       "wall_seconds": 0.18,
       "min_bytes_per_second": 136211.94835736905,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 6,254 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/fields.c",
@@ -149,7 +209,11 @@
       "max_container_bytes": 2417,
       "wall_seconds": 0.09,
       "min_bytes_per_second": 124255.66935758368,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/grammar.lsp",
@@ -158,7 +222,11 @@
       "max_container_bytes": 1051,
       "wall_seconds": 0.03,
       "min_bytes_per_second": 123395.00699229504,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 1,051 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/kennedy.xls",
@@ -167,7 +235,11 @@
       "max_container_bytes": 16245,
       "wall_seconds": 1.0,
       "min_bytes_per_second": 1032749.4775146205,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 16,245 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/lcet10.txt",
@@ -176,7 +248,11 @@
       "max_container_bytes": 88710,
       "wall_seconds": 1.17,
       "min_bytes_per_second": 364963.3086164851,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 88,710 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/plrabn12.txt",
@@ -185,7 +261,11 @@
       "max_container_bytes": 126232,
       "wall_seconds": 0.67,
       "min_bytes_per_second": 714847.7163179168,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 126,232 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/ptt5",
@@ -194,7 +274,11 @@
       "max_container_bytes": 43344,
       "wall_seconds": 0.55,
       "min_bytes_per_second": 940298.1591689535,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/sum",
@@ -203,7 +287,11 @@
       "max_container_bytes": 9404,
       "wall_seconds": 0.23,
       "min_bytes_per_second": 163824.76540729962,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 9,404 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     },
     {
       "fixture": "canterbury/xargs.1",
@@ -212,7 +300,11 @@
       "max_container_bytes": 1510,
       "wall_seconds": 0.03,
       "min_bytes_per_second": 132209.0321440546,
-      "measured_with": "cadapt at main 849269b, identical round trip, 2026-09-15, host shared with other agents' jobs | 2026-09-17: lowered on the keyed normal profile (version 84: the second, third and fourth arbiters keyed by the byte classes, the nesting state or recall, chosen per file on the first block; the classic keys kept where they win), make corpus-floor on AMD Ryzen 5 5600X, quiet host, round trip verified: lowered to 1,510 B"
+      "provenance": {
+        "definition_revision": "f3f2ff0ec5e36d4757cb0e26035364262d49dc2e",
+        "timing_measure": "wall_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
     }
   ]
 }

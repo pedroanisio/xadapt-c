@@ -4,8 +4,7 @@
  * and reports. Before this header each carried its own copy of the mixer,
  * the loader, the size parser and the failure path, which is three places
  * for one bug to hide. The hash functions here reproduce the ones the probes
- * used byte for byte, so every figure already recorded in research/ still
- * comes out of a run.
+ * used byte for byte to keep the measurement primitives consistent.
  *
  * Header-only, standard library only, no codec source or constant. Nothing
  * in the build, the library or the CLI loads it.

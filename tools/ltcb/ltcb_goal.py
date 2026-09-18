@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""The enwik9 goal, computed from the Large Text Compression Benchmark snapshot.
+"""Ranking comparisons computed from the Large Text Compression Benchmark snapshot.
 
-Source: Claude Opus 5 via Claude Code, 2026-09-16, from the operator's
-decision of that day: the goal on enwik9 is a place in the benchmark's top
-20, and the number that means is read from research/ltcb-main-table.csv,
-never typed — the table moves as entries are added, so the figure the
-documents quote is the one this tool prints, and tools/test_docs.py holds
-them to it.
+Computes a ranking threshold and memory comparison from the published snapshot.
+The selected place is a query parameter, not an encoder acceptance policy.
 
     python3 tools/ltcb/ltcb_goal.py            # the figures for cadapt 0.12.0, place 20
 
@@ -14,7 +10,7 @@ The threshold is the total (enwik9 plus the decompressor zip, the ranked
 quantity) of the entry holding the place; the enwik9 target is that total
 less the entry's own decompressor less one byte, since a tie does not
 overtake. The memory figure names the least memory of every entry ranked
-above, the goal being to stay below it.
+above; it is a comparison statistic, not a release requirement.
 """
 
 from __future__ import annotations

@@ -48,10 +48,20 @@ jobs:
           rev=${{ github.event.inputs.rev || github.ref_name }}
           mkdir -p reproduce && git archive "$rev" adpat/c tools Makefile | tar -x -C reproduce
           cd reproduce && python3 -B tools/provenance.py reproduce --manifest ../dist/release/build-manifest.json --build build-reproduce
+      - name: inspect exact release packages
+        run: |
+          python3 -B tools/release_content.py archive dist/release/cadapt-*-src.tar.gz --kind source
+          python3 -B tools/release_content.py archive dist/release/cadapt-*-$(uname -s | tr '[:upper:]' '[:lower:]')-*.tar.gz --kind binary
       - uses: actions/upload-artifact@v4
         with:
           name: cadapt-${{ matrix.os }}
-          path: dist/release/*
+          path: |
+            dist/release/*.tar.gz
+            dist/release/sbom.spdx.json
+            dist/release/build-manifest.json
+            dist/release/release-manifest.json
+            dist/release/NOTICE
+            dist/release/SHA256SUMS
           if-no-files-found: error
 
   publish:
@@ -64,18 +74,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: assets
-      - name: one SHA256SUMS over every platform's artifacts
-        run: |
-          mkdir -p release
-          for d in assets/*/; do
-            os=$(basename "$d" | sed 's/^cadapt-//')
-            cp "$d"/cadapt-*-*.tar.gz release/ 2>/dev/null || true
-            cp "$d"/sbom.spdx.json "release/sbom-$os.spdx.json"
-            cp "$d"/build-manifest.json "release/build-manifest-$os.json"
-            cp "$d"/release-manifest.json "release/release-manifest-$os.json"
-            cp "$d"/NOTICE release/NOTICE
-          done
-          cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: verify and assemble published filenames and hashes
+        run: python3 -B tools/release_content.py assemble assets --destination release
       - name: the release notes (docs/release-notes/<version>.md; tools/release.sh refused a revision without them)
         run: |
           version=${GITHUB_REF_NAME#v}

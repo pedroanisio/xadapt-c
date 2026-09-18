@@ -10,12 +10,9 @@
  * round trip, because a transform that does not invert is worth nothing
  * whatever it measures.
  *
- * Why it exists: bench/stream_census.c reports that a markup book could reach
- * 53.22 % of the Silesia `xml` row, 17.19 % of `webster` and 1.88 % of
- * enwik8. A census counts bytes a transform could remove; only an encode says
- * what removing them is worth, and the two differ whenever the model was
- * already predicting those bytes for nothing. The measurements this settled
- * are in research/front-end-census-2026-09-17.md.
+ * This instrument measures an invertible markup transform independently of
+ * the wire format. Removed source bytes do not imply smaller coded output:
+ * the predictor may already assign those bytes high probability.
  *
  * Both sides build one book the same way, so any disagreement between them
  * would be silent corruption rather than a failed decode. Every bound here —

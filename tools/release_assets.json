@@ -1,0 +1,754 @@
+{
+  "schema": "cadapt.release-assets.v1",
+  "source": {
+    ".gitattributes": {
+      "classification": "production"
+    },
+    ".github/workflows/ci.yml": {
+      "classification": "production"
+    },
+    ".github/workflows/release.yml": {
+      "classification": "production"
+    },
+    ".gitignore": {
+      "classification": "production"
+    },
+    "CHANGELOG.md": {
+      "classification": "documentation"
+    },
+    "LICENSE": {
+      "classification": "production"
+    },
+    "LOCKS.md": {
+      "classification": "documentation"
+    },
+    "Makefile": {
+      "classification": "production"
+    },
+    "README.md": {
+      "classification": "documentation"
+    },
+    "SECURITY.md": {
+      "classification": "documentation"
+    },
+    "SUPPORT.md": {
+      "classification": "documentation"
+    },
+    "adpat/c/.gitignore": {
+      "classification": "production"
+    },
+    "adpat/c/ARCHIVE.md": {
+      "classification": "documentation"
+    },
+    "adpat/c/Makefile": {
+      "classification": "production"
+    },
+    "adpat/c/adapt.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_adaptive.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_archive.c": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_blocks.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_bmp.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_coder.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_constants.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_crc32.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_decode.c": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_encode.c": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_model.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_model_bit.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_model_byte.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_model_new.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_model_state.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_states.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_tables.h": {
+      "classification": "production"
+    },
+    "adpat/c/adapt_text.h": {
+      "classification": "production"
+    },
+    "adpat/c/cadapt.1": {
+      "classification": "documentation"
+    },
+    "adpat/c/cadapt.c": {
+      "classification": "production"
+    },
+    "adpat/c/cadapt_folder.c": {
+      "classification": "production"
+    },
+    "adpat/c/cadapt_folder.h": {
+      "classification": "production"
+    },
+    "adpat/c/cadapt_fs.c": {
+      "classification": "production"
+    },
+    "adpat/c/cadapt_fs.h": {
+      "classification": "production"
+    },
+    "adpat/c/cadapt_platform.h": {
+      "classification": "production"
+    },
+    "adpat/c/check-gcov.py": {
+      "classification": "production"
+    },
+    "adpat/c/examples/contract.c": {
+      "classification": "production"
+    },
+    "adpat/c/examples/example.h": {
+      "classification": "production"
+    },
+    "adpat/c/examples/folder.c": {
+      "classification": "production"
+    },
+    "adpat/c/examples/roundtrip.c": {
+      "classification": "production"
+    },
+    "adpat/c/examples/stream.c": {
+      "classification": "production"
+    },
+    "adpat/c/fuzz/archive_seeds.c": {
+      "classification": "production"
+    },
+    "adpat/c/fuzz/fuzz_archive.c": {
+      "classification": "production"
+    },
+    "adpat/c/fuzz/fuzz_decode.c": {
+      "classification": "production"
+    },
+    "adpat/c/fuzz/fuzz_decode.h": {
+      "classification": "production"
+    },
+    "adpat/c/fuzz/fuzz_header.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/allocation_probe.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_adapt_adaptive.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_adapt_archive.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_adapt_decode.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_adapt_encode.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_adapt_text.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_allocation_probe.py": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_cadapt.py": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_cadapt_fs.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_cadapt_safety.py": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_check_gcov.py": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_decode_budget.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_fuzz_decode.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_model_dispatch.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_p1_compatibility.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_platform_header.py": {
+      "classification": "production"
+    },
+    "adpat/c/tests/test_profile_conversion.c": {
+      "classification": "production"
+    },
+    "adpat/c/tests/vectors/abc-fast.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "d6cce370ecde3eeb659bd84044f401986817623df29b2e45e1654f98ece7adf2"
+    },
+    "adpat/c/tests/vectors/abc-max.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "da6d7e522c5d1d479d5dd9e2031a78c9b95d6cbd59254c4cb0dc3a3b5dca6f86"
+    },
+    "adpat/c/tests/vectors/abc-max2.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "97f3fb573fd287e516640dfacdde0ed0f76afd1bd9e1c3579dfcfdac40a5ceb2"
+    },
+    "adpat/c/tests/vectors/abc-max3.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "73c00f7ab184b7dd39b0b90266733d4ebb247c371c9f0ca58881e489ff1eae9a"
+    },
+    "adpat/c/tests/vectors/abc.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "3a34a37bbe540212a13ae4bf02b17c1937ea9e019b7bc1877d90b44bf9e774d5"
+    },
+    "adpat/c/tests/vectors/abc.bin": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "b68f582fa63fb04d5b5bb821eaf7d13e5eedb3d9ac3bf9aade4a1ae2a13d7f42"
+    },
+    "adpat/c/tests/vectors/cjk-keyed.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "e44ccc84251efb481eed35c1686436ef30b777f2c11cb1c392f40cc3e8b090f8"
+    },
+    "adpat/c/tests/vectors/cjk.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "86988e0adebd72ecbf99d7d04dc865ce44dd4e6e5a78ef05c429c067c9b23c51"
+    },
+    "adpat/c/tests/vectors/cjk.bin": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "12a4844d484b0ee4f235568315802d2ca27545c9b5e12deff0d41bb77b6fc6eb"
+    },
+    "adpat/c/tests/vectors/cyrillic-keyed.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "c2272d38db710b509e46f257128824e44227d9b1cb98783f6727b500a426f5d2"
+    },
+    "adpat/c/tests/vectors/cyrillic.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "a2f8e837efd2cea57ec0adbfd78250d2212e632850edf6942e9664dc84811873"
+    },
+    "adpat/c/tests/vectors/cyrillic.bin": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "4af2526a2aa9f110e416155ba553dd2affa305a6212ef17a230522efb5a1f866"
+    },
+    "adpat/c/tests/vectors/empty.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "cf0319d83544caf8c223c28bee0e3c331fd26411f541be6de27702cbdc2a5b74"
+    },
+    "adpat/c/tests/vectors/empty.bin": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "adpat/c/tests/vectors/gradient-bmp-rates.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "22b6d018f3b00bd9ead047b5bcf005caf7446efe3ad3966058739b9422974968"
+    },
+    "adpat/c/tests/vectors/gradient-bmp-retained.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "f97d3897c8df4bf2b7597cf60e4971bdf41255e495b668f370722479c2a54de0"
+    },
+    "adpat/c/tests/vectors/gradient-bmp-sparse.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "23bc8ed15f7303fdde6e388c99011e2e7198f8553d9f078c9ac0212092fcf759"
+    },
+    "adpat/c/tests/vectors/gradient-bmp.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "37db4987438a4b1a45345544277d0e10a75db0b40d96a9f9cc24af633f9ec52f"
+    },
+    "adpat/c/tests/vectors/gradient-max-bmp-rates.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "c35c310173fc736d52fe048c53051c008862fe7786e767a0869dc7b558b5883d"
+    },
+    "adpat/c/tests/vectors/gradient-max-bmp-retained.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "b9670d41443b09aa2b54aba9652f5ea23910880d3c8652e9e2e4ca56717c1154"
+    },
+    "adpat/c/tests/vectors/gradient-max-bmp-sparse.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "3496bafd316db9f86207e22db4a6e66101631895c57ec5f06005713884c9fa3d"
+    },
+    "adpat/c/tests/vectors/gradient-max-bmp.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "f175ba990d2dc6d46f7f8f68be38423e0494c191af0373abe8601bd4db92400b"
+    },
+    "adpat/c/tests/vectors/gradient.bmp": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "c2059814578481065d699072a7dcdc91db325f500af91ddb426bb921bea6585d"
+    },
+    "adpat/c/tests/vectors/hello.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "4e16c13c5d68977ce369aa8c5216b9beb268f3258e8face971d0f3c0216f8224"
+    },
+    "adpat/c/tests/vectors/hello.bin": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "853ff93762a06ddbf722c4ebe9ddd66d8f63ddaea97f521c3ecc20da7c976020"
+    },
+    "adpat/c/tests/vectors/legacy-max2-always.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "52e630c1a69fcfced334e1b1ac63e893b618575e944b4c4fb48c829807bbd4cd"
+    },
+    "adpat/c/tests/vectors/legacy-max2-pressure.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "a1a5e47db8cf112b732a0d6cafee9e97d33314c35df232c423df5d474f152a5f"
+    },
+    "adpat/c/tests/vectors/legacy-text-max2-always.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "65a4a7e9d3192bbdecc5f914e81174b0ac95d5a35985f605c76050d0c98e7991"
+    },
+    "adpat/c/tests/vectors/legacy-text-max2-pressure.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "87e87f208a501c22b4f1fe871c40b7fe929e534e669584a5069106da8587e96b"
+    },
+    "adpat/c/tests/vectors/records-keyed.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "c93420dba61a2aa150a739f09859c8c0ef268dfed1c21c1c96eba01ff6713b80"
+    },
+    "adpat/c/tests/vectors/records.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "fde2fd2966187230e2fae6a6788e465939ade4e084beb7fd05f43333a4000c14"
+    },
+    "adpat/c/tests/vectors/records.bin": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "e851e1157c4e4e99b6f707d2568d3853052044ef5ec4b6562d3e798fa3406032"
+    },
+    "adpat/c/tests/vectors/segmented-keyed.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "5b917bb134e0e02f946fb1dd5f785b051b53e5e15a7f21ddc27b602cb5dbecfc"
+    },
+    "adpat/c/tests/vectors/segmented.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "b58b3d80b8c4f66175b725e0fe223f35799d582b67be8c071a22b5ed5955a6ea"
+    },
+    "adpat/c/tests/vectors/segmented.bin": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "e20f248e7946ab778d87c7e062175e050e2a8a490bc564a3a31b954bda93cd7b"
+    },
+    "adpat/c/tests/vectors/text-adaptive-rates.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "5a0f0be2745e1ea0b7bc04e8692dd8643aa0168736aa31c504d5dba821055aef"
+    },
+    "adpat/c/tests/vectors/text-adaptive-retained.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "375497456575e8990dff19263a642c64bfb1a465393f8ea9f9c26ef2de3739df"
+    },
+    "adpat/c/tests/vectors/text-adaptive-sparse.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "ef6a0d35a4f8016ed5cc75dfb281535f1243d23cdfcf052a532b180f38fe56f1"
+    },
+    "adpat/c/tests/vectors/text-compact.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "33c23c19b91895aae3b6ea67a07aca0982d76615ac2cd47d74f3503b37ee7aa5"
+    },
+    "adpat/c/tests/vectors/text-fast-words.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "245ff481c0450b635592502d27013e8e1770c1843acb698e0e6c877815f95877"
+    },
+    "adpat/c/tests/vectors/text-fast.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "649c9a1ad8c4f6ad5a33d649b1dfdf5997c6d6adef6ca36689751c9db7c64f47"
+    },
+    "adpat/c/tests/vectors/text-keyed.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "0624074e1f9016269ad467b3303cddce79a7ee13eeda63484e66b90833eac49e"
+    },
+    "adpat/c/tests/vectors/text-lean.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "df8ba164c7476ed50fd6aef6a6007e54866c9504d53b1e82954cfa81f49e7e6b"
+    },
+    "adpat/c/tests/vectors/text-max-rates.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "3d3a81680e70feabe99027a4240164a763c64259a88fb335e343fefcc63f9440"
+    },
+    "adpat/c/tests/vectors/text-max-retained.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "33d5a237318f79f6d68aa4981366d98f3c5cb9525f85adc3848bc82163854336"
+    },
+    "adpat/c/tests/vectors/text-max-sparse.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "ca231d2fcfdb45cf87b67c7cbe6acec6751be530db4040162de88116afdce870"
+    },
+    "adpat/c/tests/vectors/text-max-words.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "3c7a52473e9686d2c1eb4d3ef95f35912bc2bf4183828144f32d69d06e71014b"
+    },
+    "adpat/c/tests/vectors/text-max.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "b0ffa600b919c2afe02f91d0953aaea8b0b75b0759932195a46f2dc37ed17878"
+    },
+    "adpat/c/tests/vectors/text-max2.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "9d3c1312f3787d7316c36c7a33ef66d62c200985d324351dbf649f67d78f6053"
+    },
+    "adpat/c/tests/vectors/text-max3.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "0594133f8c468575700e4a49dc04a9766918a97b7828ae12c31054b0dd608907"
+    },
+    "adpat/c/tests/vectors/text-mid-words.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "7c1f1b2f5ad0ac88ffe2df1ec6bf672d6cd5d472282adc7b8e1350a494d43d1f"
+    },
+    "adpat/c/tests/vectors/text-mid.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "5bc5fff18442c5a68a1537ab093ea618fe774e7edca46228fbc065c9828c1def"
+    },
+    "adpat/c/tests/vectors/text-words.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "668c49f5fc6aa6da636a78dc857533411a4418037450bb31f18663871a240c05"
+    },
+    "adpat/c/tests/vectors/text.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "3b9ee425ed6632a6bc4622f91a95d41728c747e653020730259f10cce9dc675c"
+    },
+    "adpat/c/tests/vectors/text.bin": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "53667684b981247932509fb75b5f3a20de2e3c2ad6ab77f65233805103ec0491"
+    },
+    "adpat/c/tests/vectors/text6-max-lean-words.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "dccb07aeff90d0f38b42a357cec62ce8cb8cd5e6606dbf1065fa25eb52021d7d"
+    },
+    "bench/README.md": {
+      "classification": "documentation"
+    },
+    "bench/adaptive_experiment.py": {
+      "classification": "production"
+    },
+    "bench/codec_bench.py": {
+      "classification": "production"
+    },
+    "bench/fetch_scripts.py": {
+      "classification": "production"
+    },
+    "bench/markup_book_proto.c": {
+      "classification": "production"
+    },
+    "bench/plot_adaptive_results.py": {
+      "classification": "production"
+    },
+    "bench/plots.py": {
+      "classification": "production"
+    },
+    "bench/probe_util.h": {
+      "classification": "production"
+    },
+    "bench/redundancy_probe.c": {
+      "classification": "production"
+    },
+    "bench/requirements.txt": {
+      "classification": "production"
+    },
+    "bench/slot_price.py": {
+      "classification": "production"
+    },
+    "bench/stream_census.c": {
+      "classification": "production"
+    },
+    "bench/telemetry.py": {
+      "classification": "production"
+    },
+    "bench/test_codec_bench.py": {
+      "classification": "production"
+    },
+    "bench/test_markup_book_proto.py": {
+      "classification": "production"
+    },
+    "bench/test_plots.py": {
+      "classification": "production"
+    },
+    "bench/test_redundancy_probe.py": {
+      "classification": "production"
+    },
+    "bench/test_slot_price.py": {
+      "classification": "production"
+    },
+    "bench/test_stream_census.py": {
+      "classification": "production"
+    },
+    "bench/test_telemetry.py": {
+      "classification": "production"
+    },
+    "docs/ADAPTIVE.md": {
+      "classification": "documentation"
+    },
+    "docs/CONSTRAINTS.md": {
+      "classification": "documentation"
+    },
+    "docs/MODEL.md": {
+      "classification": "documentation"
+    },
+    "docs/ltcb-submission.md": {
+      "classification": "documentation"
+    },
+    "docs/release-notes/0.12.0.md": {
+      "classification": "documentation"
+    },
+    "docs/release-pipeline.md": {
+      "classification": "documentation"
+    },
+    "research/README.md": {
+      "classification": "documentation"
+    },
+    "research/ltcb-local-entries.csv": {
+      "classification": "production"
+    },
+    "research/ltcb-main-table.csv": {
+      "classification": "production"
+    },
+    "research/ltcb-tables.md": {
+      "classification": "documentation"
+    },
+    "research/ltcb-textdata-text8-fil9.csv": {
+      "classification": "production"
+    },
+    "sbom.spdx.json": {
+      "classification": "production"
+    },
+    "static/corpus/enwik8.zip": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "547994d9980ebed1288380d652999f38a14fe291a6247c157c3d33d4932534bc"
+    },
+    "static/corpus/mixed/manifest.json": {
+      "classification": "production"
+    },
+    "static/corpus/scripts/cjk-ja.zip": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "b2947d938cafcf39a81e47bb30cbc7df57179e7db9d6eefa6f29f2a4778dd803"
+    },
+    "static/corpus/scripts/cjk-zh.zip": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "01227076d7cfe575327363eb611e6b056bbbcdacbcb54dad4398a2eb81ec8406"
+    },
+    "static/corpus/scripts/cyrillic-ru.zip": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "0fddc510b84f98b9bb60d476778a47a0419c446d3118c1122a1e46c09ef7bebe"
+    },
+    "static/corpus/scripts/diacritics-cs.zip": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "e4c5a10888ec0b2d69fa27db5095f86e6ddfc87f0a2e46fc42ff909fa26456ca"
+    },
+    "static/corpus/scripts/diacritics-vi.zip": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "0754ec3f46fae94bbc7b7cbcf68f58832b203e25edfdfa38b54612bc09e4657e"
+    },
+    "static/corpus/scripts/latin-en.zip": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "06ea054d7a5e5473d5d96ff6fe6545f7580ea66f0cef39a9521d0c8020c42a53"
+    },
+    "static/corpus/scripts/manifest.json": {
+      "classification": "production"
+    },
+    "static/corpus/text8.zip": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "a6640522afe85d1963ad56c05b0ede0a0c000dddc9671758a6cc09b7a38e5232"
+    },
+    "tools/asset_inventory.py": {
+      "classification": "production"
+    },
+    "tools/check_memory.py": {
+      "classification": "production"
+    },
+    "tools/check_ratio_floor.py": {
+      "classification": "production"
+    },
+    "tools/corpus_floor_default.json": {
+      "classification": "production"
+    },
+    "tools/corpus_floor_max6.json": {
+      "classification": "production"
+    },
+    "tools/fetch_corpus.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/analyze_ltcb.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/build_ltcb_interactive.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/ltcb-interactive.template.html": {
+      "classification": "production"
+    },
+    "tools/ltcb/ltcb_goal.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/plot_ltcb_phases.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/plot_ltcb_tables.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/test_analyze_ltcb.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/test_build_ltcb_interactive.py": {
+      "classification": "production",
+      "exceptions": [
+        {
+          "rule": "PRIVATE_REFERENCE",
+          "line_sha256": "daab1e98fb7243218a2397eed3ca957b4e77ce6930ab0f128584c1a4ec9bc794",
+          "reason": "Negative assertion that rendered output contains no scratch references."
+        }
+      ]
+    },
+    "tools/ltcb/test_ltcb_goal.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/test_plot_ltcb_phases.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/test_plot_ltcb_tables.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/test_transcribe_ltcb_table.py": {
+      "classification": "production"
+    },
+    "tools/ltcb/transcribe_ltcb_table.py": {
+      "classification": "production"
+    },
+    "tools/ltcb_release.sh": {
+      "classification": "production"
+    },
+    "tools/profiles.py": {
+      "classification": "production"
+    },
+    "tools/provenance.py": {
+      "classification": "production"
+    },
+    "tools/ratio_floor.json": {
+      "classification": "production"
+    },
+    "tools/release.sh": {
+      "classification": "production"
+    },
+    "tools/release_assets.json": {
+      "classification": "production"
+    },
+    "tools/release_content.py": {
+      "classification": "production"
+    },
+    "tools/render_floors.py": {
+      "classification": "production"
+    },
+    "tools/test_check_memory.py": {
+      "classification": "production"
+    },
+    "tools/test_check_ratio_floor.py": {
+      "classification": "production"
+    },
+    "tools/test_docs.py": {
+      "classification": "production"
+    },
+    "tools/test_fetch_corpus.py": {
+      "classification": "production"
+    },
+    "tools/test_gates.py": {
+      "classification": "production"
+    },
+    "tools/test_install.sh": {
+      "classification": "production"
+    },
+    "tools/test_provenance.py": {
+      "classification": "production"
+    },
+    "tools/test_release_content.py": {
+      "classification": "production"
+    }
+  },
+  "binary": [
+    "bin/cadapt",
+    "lib/libadapt.a",
+    "include/adapt.h",
+    "share/man/man1/cadapt.1",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SUPPORT.md",
+    "SECURITY.md",
+    "NOTICE",
+    "sbom.spdx.json",
+    "build-manifest.json",
+    "payload-manifest.json"
+  ]
+}

@@ -366,9 +366,7 @@ extern "C" {
  * bits 0 and 1 the key policy (ADAPT_POLICY_KEYS_MASK; 0 is never
  * written, the classic keys keep 19, 22, 62 and 67), bit 2 the text
  * transform (ADAPT_POLICY_TEXT), the rest 0. The encoder chooses the
- * policy as for the max profile (choose_keys); measured on the mixed
- * corpus under the default command, webster -3.0 %, nci -4.8 %, xml
- * -3.0 %, the rest as LOCKS.md records. Never with `fast`, `mid`,
+ * policy as for the max profile (choose_keys). Never with `fast`, `mid`,
  * `adaptive` or `bmp`. */
 #define ADAPT_NORMAL_KEYS_VERSION 84u
 #define ADAPT_NORMAL_KEYS_METADATA_VERSION 85u
@@ -727,8 +725,7 @@ typedef struct adapt_sizes {
      * default, 0) by coding the first block under each candidate,
      * ADAPT_CONTEXTS_LEAN takes the lean set outright — set 3 (word and
      * field left out) and, under the max profile, `lean` (o8, word3,
-     * wordc) — the trade of about 0.1 % of bytes for about 12 % less
-     * encode time and 8 % less decode time measured on text (LOCKS.md);
+     * wordc), reducing the number of contexts evaluated per bit;
      * the class-history width is still chosen. Never with `fast`. The
      * header records the set the encoder took; a decoder leaves this 0. */
     uint8_t contexts;

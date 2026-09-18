@@ -76,7 +76,7 @@ Best effort, with no service level promised:
   of `cadapt info <file>` and, if you can share it, the file.
 - **Security problems:** not the issue tracker; see
   [SECURITY.md](SECURITY.md).
-- **Contributing:** the working rules are in [CLAUDE.md](CLAUDE.md); every
+- **Contributing:** the engineering contracts are in [LOCKS.md](LOCKS.md); every
   change passes `make check` (tests, coverage floors) and `make sanitize`.
 
 ## Commercial and enterprise support

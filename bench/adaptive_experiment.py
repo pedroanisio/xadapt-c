@@ -26,6 +26,9 @@ from pathlib import Path
 from typing import Any
 
 import telemetry
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+import provenance
 
 STAMP = (1_600_000_000_123_456_789, 1_600_000_001_987_654_321)
 PROFILES = ("baseline", "rates", "sparse", "retained", "auto")
@@ -361,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
         help="select fixture names, without changing their contents",
     )
     args = parser.parse_args(argv)
+    if args.output.resolve().is_relative_to(telemetry.ROOT):
+        parser.error("--output must be outside the source checkout")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     binary, baseline = output / "candidate-cadapt", output / "baseline-cadapt"
@@ -399,9 +404,7 @@ def main(argv: list[str] | None = None) -> int:
         "runner_sha256": sha256(Path(__file__)),
         "telemetry_sha256": sha256(Path(telemetry.__file__)),
         "baseline_revision": args.baseline_revision,
-        "candidate_git_head": subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=telemetry.ROOT, text=True
-        ).strip(),
+        "candidate_git_head": provenance.commit(),
         "expected_runs": sum(
             2 if args.search_only else (9 if source.suffix == ".bmp" else 5)
             for source in fixtures

@@ -1535,13 +1535,9 @@ static int encode_choose_sizes(encode_job *job) {
             (job->known_length, job->length, profile_memory, sizes, &error);
     }
     if (status == ADAPT_OK && options->context_first != ALLOCATION_WINDOW) {
-        /* ALLOCATION_AUTO takes the table first only where the window-first
-         * sizes starve it: an input longer than the window the budget
-         * allows, whose table then stays at its floor (enwik9 at -9: a
-         * 2^20-block table under a 512 MiB window, 165,865,476 bytes
-         * against 149,702,998 with the table first; on the mixed corpus at
-         * -6 the table wins every row it changes but one, by 56 bytes —
-         * LOCKS.md, 2026-09-17). A segmented input's target is a segment's. */
+        /* Automatic allocation selects table-first sizing when window-first
+         * sizing leaves the table below its target for the input unit.
+         * A threaded segmented input uses a segment as its sizing unit. */
         uint64_t unit = options->threads >= 2 && job->length > options->segment_bytes ? options->segment_bytes : job->length;
         int starved = job->known_length && sizes->table_log < adapt_table_log_for(unit);
         job->table_first = options->context_first == ALLOCATION_CONTEXT || starved;

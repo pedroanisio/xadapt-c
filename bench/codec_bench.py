@@ -1,11 +1,7 @@
 """Measure any codec on one footing: bytes, CPU and wall seconds, peak memory.
 
-Every cross-codec comparison in research/ before this one measured what a
-particular tool happened to report, on whatever host it ran on. This runs each
-codec the same way — one process per measurement so the peak RSS is its own,
-CPU and wall seconds around that process, and a byte-for-byte comparison of the
-restored file against the source, because a ratio from a codec that does not
-restore is not a number.
+Each codec runs in a separate process. Measurements include CPU and wall time,
+peak resident memory, complete output size and byte-exact restoration.
 
 CPU seconds are the figure to read. Threads move work between cores without
 removing any of it, so a wall figure credits a threaded run for parallelism it
@@ -13,7 +9,7 @@ spent rather than for work it saved.
 
     python3 -B bench/codec_bench.py --input static/corpus/enwik8
     python3 -B bench/codec_bench.py --input <f> --only cadapt-mid,xz-9e
-    python3 -B bench/codec_bench.py --input <f> --json bench/results/row.json
+    python3 -B bench/codec_bench.py --input <f> --json row.json
 
 Codecs are declared in CODECS below: a name, the encode argv, the decode argv
 and whether the tool is present. Nothing here is a codec path; it drives
@@ -29,6 +25,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
@@ -90,11 +87,11 @@ def cadapt(name: str, *flags: str, threads: int = 1) -> dict:
     }
 
 
-def CODECS() -> list[dict]:
+def CODECS(kanzi_binary: Path | None = None) -> list[dict]:
     """Declared late so a tool installed after import is still found."""
     xz = shutil.which("xz")
     zstd = shutil.which("zstd")
-    kanzi = ROOT / "_tmp/ref/kanzi-cpp-master/build/kanzi_static"
+    kanzi = kanzi_binary or (Path(shutil.which("kanzi")) if shutil.which("kanzi") else None)
     rows = [
         cadapt("cadapt-fast", "--fast"),
         cadapt("cadapt-mid", "--mid"),
@@ -124,7 +121,7 @@ def CODECS() -> list[dict]:
                      "encode": [zstd, "-19", "-T1", "-f", "-q", "-c", "{in}"],
                      "decode": [zstd, "-d", "-f", "-q", "-c", "{enc}"],
                      "stdout": True})
-    if kanzi.exists():
+    if kanzi is not None and kanzi.is_file():
         for level in ("7", "8", "9"):
             rows.append({"name": f"kanzi-l{level}", "tool": str(kanzi),
                          "encode": [str(kanzi), "-c", "-i", "{in}", "-o", "{enc}", "-l", level, "-j", "1", "-f"],
@@ -195,13 +192,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", default=None, help="comma-separated codec names")
     parser.add_argument("--json", type=Path, default=None)
     parser.add_argument("--scratch", type=Path, default=None,
-                        help="where the intermediate files go (default: beside the input)")
+                        help="external intermediate directory (default: temporary directory)")
+    parser.add_argument("--kanzi", type=Path, help="external Kanzi executable; otherwise discover it on PATH")
     args = parser.parse_args(argv)
 
     if not args.input.exists():
         raise BenchError(f"no input at {args.input}")
     wanted = set(args.only.split(",")) if args.only else None
-    codecs = [c for c in CODECS() if wanted is None or c["name"] in wanted]
+    codecs = [c for c in CODECS(args.kanzi) if wanted is None or c["name"] in wanted]
     if wanted:
         missing = wanted - {c["name"] for c in codecs}
         if missing:
@@ -209,15 +207,20 @@ def main(argv: list[str] | None = None) -> int:
     if not codecs:
         raise BenchError("no codec available to run")
 
-    scratch = args.scratch or args.input.parent
-    scratch.mkdir(parents=True, exist_ok=True)
-    rows: list[Row] = []
-    for codec in codecs:
-        row = measure(codec, args.input, scratch)
-        rows.append(row)
-        print(f"{row.codec}|{row.output_bytes}|cpu {row.encode_cpu}/{row.decode_cpu}|"
-              f"wall {row.encode_wall}/{row.decode_wall}|{row.encode_rss_mib}/{row.decode_rss_mib} MiB|"
-              f"{'ok' if row.restored else 'NOT RESTORED'}", flush=True)
+    if args.json and args.json.resolve().is_relative_to(ROOT):
+        raise BenchError("--json must be outside the source checkout")
+    if args.scratch and args.scratch.resolve().is_relative_to(ROOT):
+        raise BenchError("--scratch must be outside the source checkout")
+    with tempfile.TemporaryDirectory(prefix="cadapt-bench-") as temporary:
+        scratch = args.scratch or Path(temporary)
+        scratch.mkdir(parents=True, exist_ok=True)
+        rows: list[Row] = []
+        for codec in codecs:
+            row = measure(codec, args.input, scratch)
+            rows.append(row)
+            print(f"{row.codec}|{row.output_bytes}|cpu {row.encode_cpu}/{row.decode_cpu}|"
+                  f"wall {row.encode_wall}/{row.decode_wall}|{row.encode_rss_mib}/{row.decode_rss_mib} MiB|"
+                  f"{'ok' if row.restored else 'NOT RESTORED'}", flush=True)
 
     print()
     print(render(rows))

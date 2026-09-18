@@ -13,6 +13,11 @@ and announced as [SECURITY.md](SECURITY.md) describes.
 
 ### Fixed
 
+- Release packages use an explicit asset inventory, validate source dependencies
+  without Git metadata, and verify installed payloads after binary stripping.
+- Maintainer documentation and benchmark output handling describe supported
+  behavior independently of development records.
+
 - The manual and the README stated the max profile's smallest model as
   73,283,719 bytes (about 70 MiB); the binary's is 57,816,199 (about 55
   MiB) since the second max model halved its side tables. The manual also
@@ -95,11 +100,7 @@ and announced as [SECURITY.md](SECURITY.md) describes.
   the Makefile it is invoked in, every backticked path of a living
   document against the tree or the tool that writes it, and the research
   index against the notes.
-- The LTCB submission document carries the release build's assets and
-  update email; the two dated performance audits carry a status of
-  2026-09-18 under the dated-record rule; the throughput study of
-  2026-09-16 is tracked. The audit behind these is
-  `docs/doc-hygiene-report-2026-09-18.md`.
+- Release documentation describes supported artifacts and installation requirements.
 
 ## [0.12.0] — 2026-09-18
 
@@ -202,13 +203,13 @@ otherwise source-compatible with 0.11.0's declarations it kept.
 - `cadapt 0.12.0 --max --allocation context` is listed on the Large Text
   Compression Benchmark (mattmahoney.net/dc/text.html, 2026-09-15): enwik9
   150,063,628 B plus a 209,893 B decompressor, total 150,273,521 B, rank
-  30 of 226, 661 MB, note 114. The enwik9 goal is now the canonical
-  top-20 figure of that table (operator, 2026-09-16; `DLV-3`, LOCKS.md):
+  30 of 226, 661 MB, note 114. The comparison tool also computes the
+  top-20 threshold of that table (computed from the published benchmark snapshot):
   place 20's total 125,099,359 B less the 209,893 B decompressor less one
   byte — **enwik9 at most 124,889,465 B** — computed from the snapshot by
   `tools/ltcb/ltcb_goal.py`, which also states the memory claim (661 MB,
   the least of every entry ranked above; the least above is 1,542 MB);
-  `tools/test_docs.py` holds the README and `docs/CONSTRAINTS.md` to the
+  `tools/test_docs.py` holds the README comparison to the
   figures it prints. `tools/ltcb/transcribe_ltcb_table.py` transcribes
   the page's main table into `research/ltcb-main-table.csv` under the
   rules `research/ltcb-tables.md` records, checked by reproducing the 224
@@ -282,8 +283,7 @@ otherwise source-compatible with 0.11.0's declarations it kept.
   ranking counts; the sources are not published), the fixtures' containers
   written and decoded byte for byte by that binary or taken over from an
   earlier run, `SHA256SUMS` and a manifest. `docs/ltcb-submission.md` has
-  the rules, the 2026-09-15 release (enwik8 18,207,203 B, enwik9
-  150,063,628 B, zip 209,893 B) and the email to send.
+  the artifact preparation and measurement rules.
 - The documents are checked against the code by `make check`
   (`tools/test_docs.py`): the README's usage block and the flags of the
   manual against `cadapt --help`, the container versions of `adapt.h`
@@ -292,11 +292,7 @@ otherwise source-compatible with 0.11.0's declarations it kept.
   `tools/render_floors.py` renders from `tools/ratio_floor.json` into a
   marked block of the README and the manual — the prose no longer restates
   a number a re-lock would leave behind. `make ltcb` builds the LTCB
-  renderings `research/ltcb-tables.md` links; `research/README.md` indexes
-  the dated notes and the note once named `research/current-baseline.md`
-  is `research/baseline-2026-09-14.md`, marked as the record it is. The
-  audit of 2026-09-15 that found what these fix was not committed; the
-  one of 2026-09-18 is `docs/doc-hygiene-report-2026-09-18.md`.
+  renderings described by `research/ltcb-tables.md`.
 - The text transform, container versions 62 to 66 (67 to 71 with
   metadata), ahead of the normal, fast, max, compact and lean models: a
   word both sides have seen written out three times becomes, from then
@@ -538,8 +534,7 @@ otherwise source-compatible with 0.11.0's declarations it kept.
   bit's arbiter sets and estimation rows are prefetched — exactly, from the
   byte the encoder is coding, over the bits before they are needed. On
   enwik8 (100 MB, `--max --allocation context`) the container is byte for
-  byte the one before; the measurements are in
-  `docs/performance-audit-2026-09-14.md`. The x86-64-v3 pair is now chosen
+  byte the one before. The x86-64-v3 pair is now chosen
   once per block from a CPU test rather than through an ifunc, and
   `ADAPT_ISA=baseline` in the environment selects the portable pair, which
   the CLI tests use to hold the two to the same bytes.
@@ -720,7 +715,7 @@ otherwise source-compatible with 0.11.0's declarations it kept.
 - `FMT-8` measured: six corpus rows of about 2 MiB of Wikipedia text —
   English, Russian, Chinese, Japanese, Vietnamese, Czech — fetched
   reproducibly by `bench/fetch_scripts.py`, benchmarked in
-  `research/scripts-measurement.md`, with Cyrillic and CJK test vectors.
+  the per-script corpus manifest, with Cyrillic and CJK test vectors.
 - Memory presets `-0` … `-9` after xz's, `-9` (674 MiB) the default for
   encoding.
 - `make coverage` (the branch-coverage gate, 80 % library / 60 % CLI),

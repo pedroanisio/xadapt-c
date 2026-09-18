@@ -62,6 +62,27 @@ class FloorCheckTest(unittest.TestCase):
         self.floor = self.root / "floor.json"
         self.write_floor()
 
+    def test_structured_provenance_preserves_limits_and_rejects_mismatched_measure(self):
+        old = floor.load_floor(self.floor)
+        data = json.loads(self.floor.read_text())
+        data["schema"] = floor.STRUCTURED_SCHEMA
+        for item in data["floors"]:
+            item.pop("measured_with")
+            item["provenance"] = {"definition_revision": "a" * 40,
+                                  "timing_measure": "wall_seconds", "verification": "byte-exact round trip"}
+        self.floor.write_text(json.dumps(data))
+        updated = floor.load_floor(self.floor)
+        self.assertEqual(old.floors[0].max_container_bytes, updated.floors[0].max_container_bytes)
+        self.assertEqual(old.floors[0].seconds, updated.floors[0].seconds)
+        data["floors"][0]["provenance"]["timing_measure"] = "cpu_seconds"
+        self.floor.write_text(json.dumps(data))
+        with self.assertRaisesRegex(floor.FloorError, "timing_measure"):
+            floor.load_floor(self.floor)
+        data["floors"][0]["provenance"]["unrecognized"] = "value"
+        self.floor.write_text(json.dumps(data))
+        with self.assertRaisesRegex(floor.FloorError, "exactly"):
+            floor.load_floor(self.floor)
+
     def make_binary(self, name: str) -> Path:
         path = self.root / name
         path.write_text(FAKE)
@@ -308,7 +329,7 @@ class FloorCheckTest(unittest.TestCase):
         self.assertEqual(by_name["enwik9"].max_container_bytes, 145_784_134)
         self.assertEqual(by_name["enwik8"].input_md5, "a1fa5ffddb56f4953e226637dabbb36a")
         self.assertEqual(by_name["enwik9"].input_md5, "e206c3450ac99950df65bf70ef61a12d")
-        # the operator's baseline of 2026-09-16: the lean context set (LOCKS.md)
+        # The canonical comparison command explicitly selects the lean context set.
         self.assertEqual(locked.arguments, ["encode", "--max", "--allocation", "context", "--contexts", "lean"])
         # re-locked 2026-09-16 on that command, a quiet host: CPU seconds, the
         # median of three runs on the enwik8 rows; the sizes and enwik9's

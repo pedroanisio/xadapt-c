@@ -11,7 +11,8 @@ Two CSV snapshots of Matt Mahoney's Large Text Compression Benchmark (LTCB),
 transcribed from the published HTML so the numbers can be joined against this
 repository's own measurements. The values are the published ones, unmodified
 except for removing thousands separators. Nothing here was measured by this
-repository; see [baseline-2026-09-14.md](baseline-2026-09-14.md) for the local results of that day.
+repository. Additional codec measurements are identified separately in
+[ltcb-local-entries.csv](ltcb-local-entries.csv).
 
 | File | Source page | Page "Last update" | Rows |
 | --- | --- | --- | ---: |
@@ -43,8 +44,8 @@ The main table changes as entries are added; re-fetch before citing it as
 current:
 
 ```sh
-curl -s https://mattmahoney.net/dc/text.html -o _tmp/text.html
-python3 -B tools/ltcb/transcribe_ltcb_table.py --html _tmp/text.html --output research/ltcb-main-table.csv
+curl -s https://mattmahoney.net/dc/text.html -o build/text.html
+python3 -B tools/ltcb/transcribe_ltcb_table.py --html build/text.html --output research/ltcb-main-table.csv
 ```
 
 ## How the tables were transcribed
@@ -260,6 +261,5 @@ python3 -B tools/ltcb/plot_ltcb_tables.py --local research/ltcb-local-entries.cs
 `static/corpus/enwik8` and `static/corpus/text8` match the checksums the
 textdata page publishes (enwik8 MD5 `a1fa5ffddb56f4953e226637dabbb36a`,
 text8 MD5 `3bea1919949baf155f99411df5fada7e`), so `enwik8_bytes` in either
-CSV is directly comparable with a local full-enwik8 container size. LTCB
-ranks by enwik9 plus decompressor size, which this repository has not
-measured; an enwik8 comparison places a codec only on that one column.
+CSV is directly comparable with a local full-enwik8 container size. LTCB ranks by enwik9 plus decompressor size. A row lacking enwik9 can
+be compared only on columns for which it has measurements.
