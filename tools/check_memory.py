@@ -19,11 +19,12 @@ resident set is not a timing; a slower machine measures the same bytes.
     python3 tools/check_memory.py --binary adpat/c/build/cadapt --fixture NAME=PATH ...
         [--command="..."]... [--slack BYTES] [--output-dir DIR]
 
-Without --command the commands are the default profile, --fast, --mid,
---max and --max -6, each without --verify (a proof holds two models and
-says so in its own bound); a command's flags begin with a dash, so they
-are given as --command="--max -6", not as a separate word. Exit 0 when every measurement holds, 1 when
-one exceeds, 2 when the check could not run.
+Without --command the commands are what tools/profiles.py names — every
+profile of `cadapt --help`, the locked command of tools/ratio_floor.json
+and --max -6 — each without --verify (a proof holds two models and says so
+in its own bound); a command's flags begin with a dash, so they are given
+as --command="--max -6", not as a separate word. Exit 0 when every
+measurement holds, 1 when one exceeds, 2 when the check could not run.
 
 Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-17,
 with Claude Opus 5 (Claude Code).
@@ -40,8 +41,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import profiles  # noqa: E402  (the commands come from the binary, never a typed list)
+
 SLACK = 16 << 20
-DEFAULT_COMMANDS = ["", "--fast", "--mid", "--max", "--max -6"]
 NEED = re.compile(rb"need (\d+) bytes")
 
 
@@ -122,7 +125,11 @@ def main(argv: list[str]) -> int:
     if not os.access(args.binary, os.X_OK):
         print(f"{args.binary}: not executable", file=sys.stderr)
         return 2
-    commands = DEFAULT_COMMANDS if args.command is None else args.command
+    try:
+        commands = profiles.commands(args.binary) if args.command is None else args.command
+    except profiles.ProfilesError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     try:
         if args.output_dir:
             out = Path(args.output_dir)

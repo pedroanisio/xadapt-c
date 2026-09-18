@@ -23,6 +23,21 @@ Part of [adapt](../README.md).
 benches, the workflows, the documents)
 **Commit / ref**: `dfc66c5` (main; the tag `v0.12.0` is its parent 9109c3f)
 
+> **Status, 2026-09-18 (later that day).** The five CRITICAL couplings are
+> closed, each with a regression test that was red on its defect first
+> (`tools/test_gates.py`, under `make check`; `TiersTest` in
+> `tools/test_docs.py`): the gates' command lists come from the binary
+> (`tools/profiles.py`); the clang and macOS columns run `make check-suites`
+> and `make sanitize-cli`, and the parts of `make check` are held to
+> `check-suites` (the allocation-probe suite now runs on every column); the
+> tier ladder is printed from `PRESET_MIB` and the README's and manual's
+> figures are held to `--help` — which found the max profile's smallest
+> model stated as 70 MiB where the binary says 55, and the manual's "-0 to
+> -3" where the ladder gives -0 to -2; the C suites are the files under
+> `tests/` (a suite with no rule of its own builds and runs by pattern);
+> the root build manifest is untracked and not exported. The inventory
+> below is the state the audit found.
+
 ## Executive Summary
 
 28 couplings found: **5 CRITICAL, 5 HIGH, 6 MODERATE, 12 LOW**.

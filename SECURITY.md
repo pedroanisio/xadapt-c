@@ -78,5 +78,5 @@ fix is released or **90 days** have passed, whichever comes first;
 coordinated disclosure with the reporter is the default.
 
 Security fixes are announced in [CHANGELOG.md](CHANGELOG.md) under
-**Security**, and the release's [build manifest](build-manifest.json) and
+**Security**, and the release's build manifest and
 [SBOM](sbom.spdx.json) are regenerated with it.

@@ -72,7 +72,7 @@ refuses versions 10–18. The header of
 | [research/](research/README.md) | Dated research notes — the literature, the byte-only strategy, the adaptive experiments, the LTCB tables — indexed with their dates |
 | [static/corpus/](static/corpus/scripts/manifest.json) | The benchmark's fixtures: enwik8, text8, and the six per-script rows with their manifest |
 | [tools/](tools/provenance.py) | The provenance tool (the SPDX SBOM, the build manifest, and the rebuild that confirms it), the floor gate [check_ratio_floor.py](tools/check_ratio_floor.py) with its [ratio_floor.json](tools/ratio_floor.json) and [render_floors.py](tools/render_floors.py), and the [LTCB tooling](tools/ltcb/) |
-| [sbom.spdx.json](sbom.spdx.json), [build-manifest.json](build-manifest.json) | What the codec is made of, and the build it reproduces |
+| [sbom.spdx.json](sbom.spdx.json) | What the codec is made of: the SPDX document of its sources and dependencies |
 | [LICENSE](LICENSE), [SECURITY.md](SECURITY.md), [SUPPORT.md](SUPPORT.md), [CHANGELOG.md](CHANGELOG.md) | The terms, the security policy, what support exists, and what changed |
 | [CLAUDE.md](CLAUDE.md) | Working rules for contributors and agents |
 | [Makefile](Makefile) | The root targets: build, `test`, `check`, `sanitize`, `coverage`, `gate`, `corpus-floor`, `memory-gate`, `ratio-floor`, `release`, `test-install`, `sbom`, `manifest`, `reproduce`, `ltcb` |
@@ -105,8 +105,9 @@ From a checkout or the source tarball, `make install PREFIX=/usr/local`
 (`DESTDIR=` for a staging root; `make uninstall` removes exactly what it
 placed). Nothing but a C99 compiler and `make` is needed.
 
-Three more targets, `make coverage` (the branch-coverage gate on its own),
-`make sanitize` (the C suites under the sanitizers) and `make check-long`
+Four more targets, `make coverage` (the branch-coverage gate on its own),
+`make sanitize` (the C suites under the sanitizers), `make check-suites`
+(every part of `make check` but the coverage pass) and `make check-long`
 (the CLI suite's long cases), are described under *Tests and gates*.
 
 The root `Makefile` forwards all of these to [adpat/c/Makefile](adpat/c/Makefile),
@@ -150,7 +151,7 @@ and reserved headroom. The memory tier `-0` … `-9` is what xz takes to
 compress at the same preset — 3, 9, 17, 32, 48, 94, 94, 186, 370 and
 674 MiB — and `-10` and `-11` are 1 and 2 GiB, the two tiers above xz's
 ladder; `-9` is the default, the last tier given wins, and a tier below the
-profile's smallest model (`--help` prints the two: about 27 and 70 MiB) is
+profile's smallest model (`--help` prints the two: about 27 and 55 MiB) is
 raised to it, never refused. The tier is encode's only memory setting: it
 bounds the model, window and workspace, and the file records the model it
 produced, so **the tier a file is written at is the memory every decoder of
@@ -508,9 +509,15 @@ What is promised, and for how long, is in [SUPPORT.md](SUPPORT.md)
   (`tests/test_check_gcov.py`), the allocation SDK probe
   (`tests/test_allocation_probe.py`) and the four library examples
   (`examples/`, built against the header and the library alone) — then
-  runs the coverage gate. The root
-  check also tests provenance and codec-owned ratio floors under `tools/`.
-  No build or correctness test imports `bench/` or the standalone benchmark.
+  runs the coverage gate. `make check-suites` is every part of it but the
+  coverage pass, plus the CLI suite on the plain build: what a compiler
+  without gcov, or another platform, runs — the workflows' clang and macOS
+  columns call it and nothing inline. The root check also tests
+  provenance, the codec-owned ratio floors under `tools/`, and the gates
+  against what they enumerate (`tools/test_gates.py`: the profiles from
+  the binary, every suite under `tests/` built and run, `check-suites`
+  against `make check`'s parts). No build or correctness test imports
+  `bench/` or the standalone benchmark.
 - **Branch coverage** is gated by `check-gcov.py` at 80 % for the library
   and 60 % for the CLI; `make coverage` builds every unit with GCC's
   instrumentation into `build-cov/` (one instantiation of the per-bit path,
@@ -519,7 +526,8 @@ What is promised, and for how long, is in [SUPPORT.md](SUPPORT.md)
   feeds gcov's JSON to the gate.
 - **Sanitizers**: `make sanitize` builds the C suites with clang under
   AddressSanitizer and UndefinedBehaviorSanitizer (leak detection included,
-  every fault fatal) into `build-sanitize/` and runs them.
+  every fault fatal) into `build-sanitize/` and runs them; `make sanitize-cli`
+  runs the CLI suite against that build with the same flags.
 
 - **Fuzzing**: [fuzz/fuzz_decode.c](adpat/c/fuzz/fuzz_decode.c) feeds
   arbitrary bytes to both decoders under libFuzzer and aborts if they
@@ -563,18 +571,21 @@ Every release carries its provenance (`DLV-2` in
 [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)): an SPDX 2.3 SBOM,
 [sbom.spdx.json](sbom.spdx.json), naming the package, every source by hash
 and each dependency with its licence; and a build manifest,
-[build-manifest.json](build-manifest.json), recording the sources' hashes,
-the compiler and flags, and the hash of every output. Both come from
+`build-manifest.json`, recording the sources' hashes, the compiler and
+flags, the commit and the hash of every output. Both come from
 [tools/provenance.py](tools/provenance.py):
 
 ```sh
 make sbom        # regenerate sbom.spdx.json for the tree as it is
-make manifest    # record the build in adpat/c/build
+make manifest    # record the build in adpat/c/build (build-manifest.json, not tracked)
 make reproduce   # rebuild in a scratch directory; identical bytes, or the reason
+make reproduce MANIFEST=dist/0.12.0/build-manifest.json   # a release's manifest
 ```
 
 `make check` fails when the committed SBOM is stale, so a source change
-carries its SBOM with it; `make reproduce` against the committed manifest
+carries its SBOM with it. The manifest is not tracked: it records the
+commit and the host it was made on, so a committed one is stale by the
+next commit; each release ships its own, and `make reproduce` against it
 confirms that the toolchain it names rebuilds the same bytes.
 
 The release itself — the binary tarball in the layout `make install`

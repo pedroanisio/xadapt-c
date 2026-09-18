@@ -41,7 +41,15 @@ TEST_THREADS = $(if $(findstring -DADAPT_THREADS,$(CFLAGS)),1,0)
 
 LIB   = $(BUILD)/libadapt.a
 BIN   = $(BUILD)/cadapt
-TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode $(BUILD)/test_adapt_text $(BUILD)/test_model_dispatch $(BUILD)/test_profile_conversion $(BUILD)/test_p1_compatibility $(BUILD)/test_cadapt_fs
+# Every suite under tests/ is built and run: the lists come from the files,
+# never from a typed list (a suite left off one ran nowhere, and nothing
+# said so). A suite with dependencies of its own has its rule below; any
+# other builds by the pattern rule against the header and the library, and
+# runs with the arguments ARGS_<suite> names, none by default. The two
+# large suites run as shards (see their mains) and are the exceptions.
+SUITES = $(patsubst tests/%.c,%,$(wildcard tests/test_*.c))
+TESTS = $(addprefix $(BUILD)/,$(SUITES))
+SHARDED = test_adapt_decode test_adapt_encode
 
 all: $(LIB) $(BIN)
 
@@ -117,6 +125,10 @@ $(BUILD)/test_p1_compatibility: tests/test_p1_compatibility.c adapt.h $(LIB)
 $(BUILD)/test_cadapt_fs: tests/test_cadapt_fs.c cadapt_fs.h cadapt_platform.h $(BUILD)/cadapt_fs.o $(LIB)
 	$(CC) $(CFLAGS) -o $@ tests/test_cadapt_fs.c $(BUILD)/cadapt_fs.o $(LIB) $(LDFLAGS)
 
+# a suite with no rule of its own: the source against the header and the library
+$(BUILD)/test_%: tests/test_%.c adapt.h $(LIB) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) $(LDFLAGS)
+
 # The two large C suites run as shards, k/n (see their mains).
 ENCODE_SHARDS = 0 1 2 3
 DECODE_SHARDS = 0 1 2
@@ -129,18 +141,15 @@ test: $(TESTS)
 	rm -f $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r) $(BUILD)/runs/$(r).log) && mkdir -p $(BUILD)/runs
 	$(MAKE) -j $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r))
 	@for r in $(TESTRUNS); do tail -1 $(BUILD)/runs/$$r.log; done
-TESTRUNS = adaptive $(foreach k,$(DECODE_SHARDS),decode-$(k)) $(foreach k,$(ENCODE_SHARDS),encode-$(k)) archive budget fuzz text dispatch profile compatibility fs
-$(BUILD)/runs/adaptive: ; @$(BUILD)/test_adapt_adaptive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+TESTRUNS = $(filter-out $(SHARDED),$(SUITES)) $(foreach k,$(DECODE_SHARDS),decode-$(k)) $(foreach k,$(ENCODE_SHARDS),encode-$(k))
+# the arguments a suite takes: the vectors, for the four that read them
+ARGS_test_decode_budget = tests/vectors
+ARGS_test_fuzz_decode = tests/vectors
+ARGS_test_adapt_text = tests/vectors
+ARGS_test_p1_compatibility = tests/vectors
+$(BUILD)/runs/test_%: ; @$(BUILD)/test_$* $(ARGS_test_$*) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/decode-%: ; @$(BUILD)/test_adapt_decode tests/vectors $*/$(words $(DECODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/encode-%: ; @$(BUILD)/test_adapt_encode tests/vectors $*/$(words $(ENCODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(BUILD)/runs/archive: ; @$(BUILD)/test_adapt_archive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(BUILD)/runs/budget: ; @$(BUILD)/test_decode_budget tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(BUILD)/runs/fuzz: ; @$(BUILD)/test_fuzz_decode tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(BUILD)/runs/text: ; @$(BUILD)/test_adapt_text tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(BUILD)/runs/dispatch: ; @$(BUILD)/test_model_dispatch > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(BUILD)/runs/compatibility: ; @$(BUILD)/test_p1_compatibility tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(BUILD)/runs/profile: ; @$(BUILD)/test_profile_conversion > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(BUILD)/runs/fs: ; @$(BUILD)/test_cadapt_fs > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
 # The plain suites and the coverage pass run at once: they build into
 # different directories and share nothing.
@@ -148,6 +157,14 @@ check: all
 	$(MAKE) -j check-parts
 check-parts: test coverage $(BUILD)/runs/gcov-tests $(BUILD)/runs/safety $(BUILD)/runs/probe $(BUILD)/runs/platform \
              $(BUILD)/runs/examples
+# Every part of `make check` but the coverage pass, plus the CLI suite on
+# the plain build (under `make check` it runs inside the coverage pass):
+# what a compiler without gcov, or another platform, runs. The workflows
+# call this and nothing inline, so a part added above is gated everywhere
+# (tools/test_gates.py holds the two lists to each other).
+check-suites: all
+	$(MAKE) -j test $(BUILD)/runs/safety $(BUILD)/runs/probe $(BUILD)/runs/platform $(BUILD)/runs/examples $(BUILD)/runs/cli
+$(BUILD)/runs/cli: all | $(BUILD)/runs ; @ADAPT_TEST_THREADS=$(TEST_THREADS) $(PYTHON) -B tests/test_cadapt.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 # This explicit rule is phony: an old success marker must never skip the gate's tests.
 $(BUILD)/runs/gcov-tests: | $(BUILD)/runs ; @$(PYTHON) -B tests/test_check_gcov.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/safety: all | $(BUILD)/runs ; @ADAPT_TEST_THREADS=$(TEST_THREADS) $(PYTHON) -B tests/test_cadapt_safety.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
@@ -236,6 +253,12 @@ sanitize:
 	rm -rf $(SANITIZE_BUILD)
 	$(MAKE) BUILD=$(SANITIZE_BUILD) CC=$(SANITIZER_CC) CFLAGS="$(SANITIZE_CFLAGS)" test
 
+# The CLI suite against a sanitized binary, leak detection on: the flags
+# are SANITIZE_CFLAGS, never restated by a caller.
+sanitize-cli:
+	$(MAKE) BUILD=$(SANITIZE_BUILD) CC=$(SANITIZER_CC) CFLAGS="$(SANITIZE_CFLAGS)" all
+	ASAN_OPTIONS=detect_leaks=1 ADAPT_TEST_THREADS=$(TEST_THREADS) $(PYTHON) -B tests/test_cadapt.py "$(SANITIZE_BUILD)/cadapt"
+
 # Mutations go to a build-local corpus, never to the committed vectors.
 FUZZ_CC ?= clang
 FUZZ_RUNS ?= 1000
@@ -303,5 +326,5 @@ uninstall:
 clean:
 	rm -rf $(BUILD) $(COV) $(SANITIZE_BUILD)
 
-.PHONY: all test coverage sanitize fuzz fuzz-smoke fuzz-header-smoke fuzz-archive-smoke examples install uninstall check check-parts check-long clean
+.PHONY: all test coverage sanitize sanitize-cli fuzz fuzz-smoke fuzz-header-smoke fuzz-archive-smoke examples install uninstall check check-parts check-suites check-long clean
 .PHONY: $(BUILD)/runs/gcov-tests

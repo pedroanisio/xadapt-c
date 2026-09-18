@@ -30,3 +30,4 @@ dist/
 _study/
 of.txt
 proxmox_api.env
+/build-manifest.json

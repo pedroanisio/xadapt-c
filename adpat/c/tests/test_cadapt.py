@@ -1393,7 +1393,7 @@ class PresetTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(payload_stream(out.read_bytes()), payload_stream(nine.read_bytes()))
         help_run = self.run_codec("--help")
-        self.assertIn(b"-10 and -11 are\n1 and 2 GiB", help_run.stdout + help_run.stderr)
+        self.assertIn(b"-10 and -11 are 1 and 2 GiB", help_run.stdout + help_run.stderr)
 
     @LONG
     def test_tiers_above_xz_grow_a_pipes_model(self) -> None:

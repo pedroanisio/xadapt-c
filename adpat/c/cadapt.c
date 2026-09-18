@@ -133,14 +133,64 @@ static int wait_stream(int fd, short events) {
 }
 #endif
 
+/* The encode presets -0 to -9: xz's compression-side memory, in MiB, at the
+ * same numbers, so that a user of xz reads them as before; -10 and -11
+ * are 1 and 2 GiB, the tiers above xz's ladder that the max profile's
+ * largest tables and a 1 GB input's window need. The preset is encode's
+ * only memory setting. */
+#define PRESETS 12
+static const uint64_t PRESET_MIB[PRESETS] = {3, 9, 17, 32, 48, 94, 94, 186, 370, 674, 1024, 2048};
+static const char *const PRESET_FLAGS[PRESETS] = {"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9", "-10", "-11"};
+
+/* `first, second and third`: the items joined as prose. */
+static void join_prose(char *buf, size_t len, const char *const *items, int count) {
+    int i;
+    size_t at = 0;
+    buf[0] = '\0';
+    for (i = 0; i < count && at < len; i++) {
+        at += (size_t)snprintf(buf + at, len - at, "%s%s", i == 0 ? "" : i == count - 1 ? " and " : ", ", items[i]);
+    }
+}
+
+/* The tier ladder as --help states it, from the table itself: the MiB
+ * presets, then the GiB ones — "3, 9, …, 370 and 674 MiB" and "-10 and
+ * -11 are 1 and 2 GiB" — so the text can never say what the table does
+ * not (the README and the manual are held to this text by a test). */
+static void preset_ladder(char *mib, size_t mib_len, char *gib, size_t gib_len) {
+    char numbers[PRESETS][24];
+    const char *items[PRESETS], *flags[PRESETS];
+    int p, n_mib = 0, n_gib = 0;
+    for (p = 0; p < PRESETS; p++) {
+        if (PRESET_MIB[p] < 1024) {
+            snprintf(numbers[p], sizeof(numbers[p]), "%llu", (unsigned long long)PRESET_MIB[p]);
+            items[n_mib++] = numbers[p];
+        } else {
+            snprintf(numbers[p], sizeof(numbers[p]), "%llu", (unsigned long long)(PRESET_MIB[p] >> 10));
+            flags[n_gib++] = PRESET_FLAGS[p];
+        }
+    }
+    join_prose(mib, mib_len, items, n_mib);
+    for (p = 0; p < n_gib; p++) items[p] = numbers[PRESETS - n_gib + p];
+    join_prose(gib, gib_len, flags, n_gib);
+    if (gib_len > strlen(gib) + 5) {
+        size_t at = strlen(gib);
+        memcpy(gib + at, " are ", 6);
+        join_prose(gib + at + 5, gib_len - at - 5, items, n_gib);
+        at = strlen(gib);
+        if (gib_len > at + 4) memcpy(gib + at, " GiB", 5);
+    }
+}
+
 /* Format numbers and memory defaults come from the codec constants.
  * Verification is opt-in; segments go on threads when the budget holds
  * their workers. */
 static void print_usage(FILE *stream) {
     adapt_sizes minimum_sizes;
     adapt_error minimum_error, minimum_max_error;
+    char ladder[128], above[96];
     (void)adapt_sizes_for_input(1, 0, 0, &minimum_sizes, &minimum_error);
     (void)adapt_sizes_for_input_max(1, 0, 0, &minimum_sizes, &minimum_max_error);
+    preset_ladder(ladder, sizeof(ladder), above, sizeof(above));
     fprintf(stream,
             "cadapt — the adapt self-adaptive lossless codec, in C\n"
             "\n"
@@ -195,8 +245,8 @@ static void print_usage(FILE *stream) {
             "block: on text about 12 %% less encode time and 8 %% less decode time for about\n"
             "0.1 %% more bytes; auto, the default, chooses. Not with --fast.\n"
             "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
-            "preset: 3, 9, 17, 32, 48, 94, 94, 186, 370 and 674 MiB; -10 and -11 are\n"
-            "1 and 2 GiB, above xz's ladder. A preset below the smallest model of the\n"
+            "preset: %s MiB;\n"
+            "%s, above xz's ladder. A preset below the smallest model of the\n"
             "profile is raised to it; -9 is the default. The preset is the only memory\n"
             "setting of encode: it bounds the model, window and workspace, and decode\n"
             "takes the model's memory as the header names it, so the preset a file was\n"
@@ -223,7 +273,7 @@ static void print_usage(FILE *stream) {
             "workspace for, and never more than the CPUs online (the sizes stay fitted\n"
             "to n, so the bytes are the same on every machine); decode --threads <n>\n"
             "decodes a file's segments the same way. The report says how many threads ran.\n",
-            (unsigned long long)minimum_error.detail, (unsigned long long)minimum_max_error.detail,
+            ladder, above, (unsigned long long)minimum_error.detail, (unsigned long long)minimum_max_error.detail,
             (unsigned long long)ADAPT_SEGMENT_BYTES, (unsigned long long)ADAPT_BLOCK_BYTES);
 }
 
@@ -320,15 +370,6 @@ static const char *value_of(const args *a, const char *name) {
     }
     return last;
 }
-
-/* The encode presets -0 to -9: xz's compression-side memory, in MiB, at the
- * same numbers, so that a user of xz reads them as before; -10 and -11
- * are 1 and 2 GiB, the tiers above xz's ladder that the max profile's
- * largest tables and a 1 GB input's window need. The preset is encode's
- * only memory setting. */
-#define PRESETS 12
-static const uint64_t PRESET_MIB[PRESETS] = {3, 9, 17, 32, 48, 94, 94, 186, 370, 674, 1024, 2048};
-static const char *const PRESET_FLAGS[PRESETS] = {"-0", "-1", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9", "-10", "-11"};
 
 /* The budget a preset names: the last preset given, or -9; a preset below
  * the smallest model of the profile in force is raised to it. 0 when no

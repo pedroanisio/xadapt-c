@@ -8,12 +8,12 @@ BUILD ?= build
 CODEC_BUILD = $(if $(filter /%,$(BUILD)),$(BUILD),adpat/c/$(BUILD))
 GATE_ARGS ?=
 FLOOR_ARGS ?=
-.PHONY: all test check check-parts clean install uninstall sanitize coverage check-long bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor memory-gate release test-install ltcb ltcb-release
+.PHONY: all test check check-parts clean install uninstall sanitize sanitize-cli coverage check-suites check-long bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor memory-gate release test-install ltcb ltcb-release
 
 # Forwarded to the codec's Makefile as written: SUPPORT.md and SECURITY.md
 # say `make sanitize`, and the documents' tests hold every cited target to
 # the Makefile it is invoked in.
-all test clean install uninstall sanitize coverage check-long:
+all test clean install uninstall sanitize sanitize-cli coverage check-suites check-long:
 	$(MAKE) -C adpat/c $@
 
 # The gate is held to CHECK_SECONDS of wall time (LOCKS.md, 2026-09-15):
@@ -39,7 +39,7 @@ check:
 	    echo "make check exceeded $(CHECK_SECONDS) s or failed after $$(( $$(date +%s) - start )) s at load average$$(uptime | sed 's/.*load average//') (see _tmp/check/*.log)"; exit 1; \
 	fi
 	@for p in codec provenance floor-tool fetch-corpus docs bench ltcb; do grep -hE "^ok |^OK$$|checks passed$$" _tmp/check/$$p.log | tail -3; done
-check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus _tmp/check/docs _tmp/check/bench _tmp/check/ltcb
+check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus _tmp/check/docs _tmp/check/bench _tmp/check/ltcb _tmp/check/gates
 _tmp/check/codec: ; @$(MAKE) -C adpat/c check > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/provenance: ; @$(PYTHON) -B tools/test_provenance.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/floor-tool: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_check_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
@@ -52,6 +52,8 @@ _tmp/check/fetch-corpus: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_
 _tmp/check/bench: _tmp/check/codec ; @$(PYTHON) -B -m unittest discover -s bench -p 'test_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/ltcb: ; @$(PYTHON) -B -m unittest discover -s tools/ltcb -p 'test_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 # the documents against the code: tools/test_docs.py needs the built codec, which the codec part builds first
+# the gates against what they enumerate (tools/test_gates.py needs the built codec for the profiles)
+_tmp/check/gates: _tmp/check/codec ; @$(PYTHON) -B tools/test_gates.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/docs: _tmp/check/codec ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_docs.py' > $@.log 2>&1 && $(PYTHON) -B tools/render_floors.py check >> $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
 # Locked floors (LOCKS.md, 2026-09-14). gate: the CI proxy, the first 8 MiB of
@@ -86,9 +88,10 @@ corpus-floor: all
 # The memory promise (RUN-1, RUN-2): the peak resident set of an encode
 # and of a decode never exceeds what the container declares decoding
 # needs (`cadapt decode --max-memory 1` names the figure) plus 16 MiB for
-# the process itself. Measured on the gate's proxy under the default
-# profile, --fast, --mid, --max and --max -6; a resident set is bytes,
-# not a timing, so this gate holds on any host.
+# the process itself. Measured on the gate's proxy under every profile
+# `cadapt --help` names, the locked command and --max -6 (tools/profiles.py
+# lists them from the binary); a resident set is bytes, not a timing, so
+# this gate holds on any host.
 memory-gate: all
 	unzip -p static/corpus/enwik8.zip enwik8 | head -c 8388608 > "$(CODEC_BUILD)/enwik8-8MiB"
 	$(PYTHON) -B tools/check_memory.py --binary "$(abspath $(CODEC_BUILD))/cadapt" \
@@ -116,8 +119,13 @@ sbom:
 manifest: all
 	$(PYTHON) -B tools/provenance.py manifest --build "$(CODEC_BUILD)"
 
+# against a release's manifest (dist/<version>/build-manifest.json) or the
+# one `make manifest` wrote; the manifest is not tracked (it records the
+# commit and the host it was made on, so a committed one is stale by the
+# next commit)
+MANIFEST ?= build-manifest.json
 reproduce:
-	$(PYTHON) -B tools/provenance.py reproduce
+	$(PYTHON) -B tools/provenance.py reproduce --manifest "$(MANIFEST)"
 
 # The assets of a Large Text Compression Benchmark entry from the committed
 # HEAD (docs/ltcb-submission.md): the decompressor zip (the binary alone —

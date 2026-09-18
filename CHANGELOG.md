@@ -11,7 +11,39 @@ and announced as [SECURITY.md](SECURITY.md) describes.
 
 ## [Unreleased]
 
+### Fixed
+
+- The manual and the README stated the max profile's smallest model as
+  73,283,719 bytes (about 70 MiB); the binary's is 57,816,199 (about 55
+  MiB) since the second max model halved its side tables. The manual also
+  said `-0` to `-3` all mean the normal profile's 27 MiB floor; `-3` is
+  32 MiB and is not raised, so it is `-0` to `-2`. `--help` prints the
+  tier ladder from the encoder's table now, and a test holds the README
+  and the manual to `--help`'s ladder and floors.
+- The clang and macOS CI columns restated the parts of `make check` by
+  hand and never ran the allocation-probe suite; they run
+  `make check-suites` and `make sanitize-cli` now, two targets of
+  `adpat/c/Makefile` that a test holds to `make check`'s parts and to
+  `SANITIZE_CFLAGS`.
+
 ### Changed
+
+- The memory gate and the identical-bytes job take their command lists
+  from the binary (`tools/profiles.py`: every profile `cadapt --help`
+  names, the locked command of `tools/ratio_floor.json`, and `--max -6`)
+  instead of a typed list in each; a usage without the profile group is
+  refused.
+- The C suites are the files under `adpat/c/tests/`: `TESTS` and
+  `TESTRUNS` come from `$(wildcard tests/test_*.c)`, a suite with no rule
+  of its own builds by a pattern rule against the header and the library,
+  and its run log is named after it (`build/runs/test_adapt_text.log`,
+  not `runs/text.log`).
+- `build-manifest.json` is no longer tracked or exported into the source
+  tarball: it names the commit and the host it was made on, so a committed
+  one was stale by the next commit (`make reproduce` refused it). Each
+  release ships its own; `make reproduce MANIFEST=…` checks against it,
+  and `make manifest` writes a local, git-ignored one.
+- `tools/test_gates.py`, under `make check`, holds the five above.
 
 - The root `Makefile` forwards `sanitize`, `coverage` and `check-long`
   to `adpat/c/Makefile`, as the documents that cite `make sanitize`

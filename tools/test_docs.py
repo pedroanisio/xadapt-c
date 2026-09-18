@@ -166,6 +166,36 @@ class VersionTest(unittest.TestCase):
                          {19, 24, 53, 56, 30, 52, 55})
 
 
+class TiersTest(unittest.TestCase):
+    def test_the_tier_ladder_and_the_smallest_models_are_the_help_texts(self) -> None:
+        """--help prints the memory tiers from the encoder's table and the two
+        smallest models from the sizer; the README's prose and the manual's
+        tier table and floors restate them and are held to the text."""
+        text = help_text()
+        ladder = re.search(r"preset: (.+?) MiB;\n(.+?), above xz's ladder", text)
+        minima = re.search(r"smallest budget the normal profile\s+runs in is (\d+) bytes, the max profile's (\d+)", text)
+        self.assertIsNotNone(ladder, "--help states no tier ladder")
+        self.assertIsNotNone(minima, "--help states no smallest models")
+        mib, gib = ladder.group(1), ladder.group(2)                       # "3, 9, …, 370 and 674", "-10 and -11 are 1 and 2 GiB"
+        normal, largest = int(minima.group(1)), int(minima.group(2))
+        about = f"about {round(normal / 2**20)} and {round(largest / 2**20)} MiB"
+        readme = " ".join(README.read_text(encoding="utf-8").split()).replace("`", "")
+        self.assertTrue(f"preset — {mib} MiB — and {gib}" in readme, f"README.md: the tier ladder is not --help's ({mib} MiB; {gib})")
+        self.assertTrue(f"--help prints the two: {about}" in readme, f"README.md: the smallest models are not --help's ({about})")
+        manual = MANUAL.read_text(encoding="utf-8")
+        rows = [int(n) for line in manual.split("\n") if line.startswith("MiB\t") for n in line.split("\t")[1:]]
+        tiers = [int(n) for n in re.findall(r"\d+", mib)] + [int(n) * 1024 for n in re.findall(r"\d+", gib.split(" are ")[1])]
+        self.assertEqual(rows, tiers, "cadapt.1: the tier table is not --help's ladder")
+        floors = " ".join(manual.split())
+        wanted = f"takes {normal:,} bytes (about {round(normal / 2**20)} MiB), the max profile's {largest:,} (about {round(largest / 2**20)} MiB)"
+        self.assertTrue(wanted in floors, f"cadapt.1: the smallest models are not --help's ({wanted})")
+        # "-0 to -k all mean the N MiB floor": every preset below the model is raised to it
+        for floor, phrase in ((normal, "floor"), (largest, "one")):
+            k = sum(1 for t in rows if t * 2**20 < floor) - 1
+            self.assertTrue(f'-0 " to " \\-{k}' in manual and f"all mean the {round(floor / 2**20)} MiB {phrase}" in floors,
+                            f"cadapt.1: the presets below the {round(floor / 2**20)} MiB model are -0 to -{k}")
+
+
 class FloorsTest(unittest.TestCase):
     def test_rendered_blocks_are_current(self) -> None:
         data = floors.load()

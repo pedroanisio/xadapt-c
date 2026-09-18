@@ -265,6 +265,10 @@ def manifest(build: Path) -> dict:
 
 
 def reproduce(manifest_path: Path, build_name: str) -> int:
+    if not manifest_path.exists():
+        print(f"{manifest_path}: no manifest — run `make manifest` for this build, or pass the release's "
+              f"(--manifest dist/<version>/build-manifest.json); the manifest is not tracked in git")
+        return 2
     record = json.loads(manifest_path.read_text(encoding="utf-8"))
     problems = []
     for rel, sha in record["sources"].items():

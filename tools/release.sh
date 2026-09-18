@@ -66,7 +66,7 @@ trap 'rm -rf "$WORK"' EXIT
 SRC="$WORK/cadapt-$VERSION"
 mkdir -p "$SRC"
 git archive "$FULL" adpat/c tools docs Makefile LICENSE README.md CHANGELOG.md SUPPORT.md SECURITY.md LOCKS.md \
-    sbom.spdx.json build-manifest.json | tar -x -C "$SRC"
+    sbom.spdx.json | tar -x -C "$SRC"
 rm -rf "$SRC/adpat/c/build" "$SRC/tools/__pycache__"
 ( cd "$WORK" && tar -czf "$OUT/cadapt-$VERSION-src.tar.gz" "cadapt-$VERSION" )
 

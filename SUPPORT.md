@@ -89,8 +89,9 @@ implied by the MIT licence, which provides the software as is.
 ## Provenance
 
 Every release carries an SPDX SBOM ([sbom.spdx.json](sbom.spdx.json)), a
-build manifest ([build-manifest.json](build-manifest.json)) that
-`make reproduce` rebuilds and checks byte for byte, a `NOTICE` generated
+build manifest (`build-manifest.json`, in the release; it names its
+commit and host, so it is not tracked) that `make reproduce
+MANIFEST=…` rebuilds and checks byte for byte, a `NOTICE` generated
 from the SBOM, `SHA256SUMS` over every artifact, a release manifest, and a
 [CHANGELOG.md](CHANGELOG.md); `make release` makes them from an export of
 the tagged revision ([docs/release-pipeline.md](docs/release-pipeline.md)).

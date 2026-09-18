@@ -47,27 +47,18 @@ jobs:
       - name: make check (tests, coverage gate, examples, provenance, docs)
         if: matrix.cc == 'gcc'
         run: make check CC=${{ matrix.cc }} CHECK_SECONDS=$CHECK_SECONDS
-      # the coverage gate needs GCC's gcov; the clang columns run the suites
-      # without it and the sanitizers with it
-      - name: make test (the C suites), the examples, the safety suite, the platform header
+      # the coverage gate needs GCC's gcov; the clang columns run every other
+      # part of make check through one target, so a part added there is run
+      # here too (tools/test_gates.py holds the two to each other)
+      - name: make check-suites (the C suites, the examples, the safety, probe, platform and CLI suites)
         if: matrix.cc != 'gcc'
-        run: |
-          make -C adpat/c all test CC=${{ matrix.cc }}
-          make -C adpat/c examples CC=${{ matrix.cc }} && for e in adpat/c/build/example-*; do $e > /dev/null; done
-          python3 -B adpat/c/tests/test_cadapt_safety.py adpat/c/build/cadapt
-          python3 -B adpat/c/tests/test_platform_header.py
-      - name: the CLI suite
-        if: matrix.cc != 'gcc'
-        run: python3 -B adpat/c/tests/test_cadapt.py adpat/c/build/cadapt
+        run: make -C adpat/c check-suites CC=${{ matrix.cc }}
       - name: make sanitize (AddressSanitizer and UndefinedBehaviorSanitizer, every fault fatal)
         if: matrix.cc == 'clang'
         run: make -C adpat/c sanitize SANITIZER_CC=clang
-      - name: the CLI suite under the sanitizers
+      - name: make sanitize-cli (the CLI suite under the sanitizers, leak detection on)
         if: matrix.cc == 'clang' && matrix.os == 'ubuntu-24.04'
-        run: |
-          make -C adpat/c BUILD=build-sanitize CC=clang \
-            CFLAGS="-std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra -Wpedantic -Werror -DADAPT_THREADS -pthread" all
-          ASAN_OPTIONS=detect_leaks=1 python3 -B adpat/c/tests/test_cadapt.py adpat/c/build-sanitize/cadapt
+        run: make -C adpat/c sanitize-cli SANITIZER_CC=clang
 
   identical-bytes:
     # RUN-5: gcc and clang, the AVX2 and the baseline per-bit paths, write
@@ -91,7 +82,10 @@ jobs:
           # access time in the future is left alone by every atime policy
           touch -a -d '2100-01-01T00:00:00Z' proxy
           failed=0
-          for flags in "" "--fast" "--mid" "--max --allocation context --contexts lean" "--max --allocation context -6"; do
+          # every profile --help names, the locked command and --max -6, from
+          # the binary (tools/profiles.py): a new profile is gated the day it appears
+          python3 -B tools/profiles.py --binary adpat/c/build-gcc/cadapt > flag-sets
+          while IFS= read -r flags; do
             # the four combinations: compiler x instruction-set path, every pair held to the same bytes
             adpat/c/build-gcc/cadapt encode proxy $flags --force --no-verify -o gcc-v3.adpt
             ADAPT_ISA=baseline adpat/c/build-gcc/cadapt encode proxy $flags --force --no-verify -o gcc-base.adpt
@@ -104,7 +98,7 @@ jobs:
             adpat/c/build-gcc/cadapt decode clang-base.adpt --force -o b.out && cmp b.out proxy
             echo "cadapt encode $flags: $(stat -c %s gcc-v3.adpt) bytes"
             if [ $failed = 1 ]; then mkdir -p differing && cp gcc-v3.adpt gcc-base.adpt clang-v3.adpt clang-base.adpt differing/ && break; fi
-          done
+          done < flag-sets
           sha256sum adpat/c/build-gcc/cadapt adpat/c/build-clang/cadapt
           exit $failed
       - uses: actions/upload-artifact@v4
