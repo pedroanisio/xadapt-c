@@ -1,7 +1,8 @@
 /*
- * adapt.h — the adapt codec, format versions 19 through 75, in C99 with
- * nothing beyond the C standard library (and POSIX threads for the
- * encoder's proof, when built with ADAPT_THREADS).
+ * adapt.h — the adapt codec, every container version ADAPT_VERSIONS names
+ * (19 through 85), in C99 with nothing beyond the C standard library (and
+ * POSIX threads for the encoder's proof and the segment workers, when
+ * built with ADAPT_THREADS).
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
@@ -47,6 +48,81 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ---- The contract ---------------------------------------------------------
+ * What every declaration below is held to; the examples in examples/ and
+ * tests/test_adapt_decode.c (test_published_versions, test_contract) are
+ * the executable form.
+ *
+ * Ownership. A buffer the caller passes stays the caller's: `file`,
+ * `data`, `header`, the callbacks' buffers and every struct argument are
+ * read during the call and no pointer to them is kept. What a function
+ * returns through `uint8_t **out` — adapt_decode(), adapt_encode(),
+ * adapt_encode_verified() — is malloc'd and the caller's to release with
+ * adapt_free(), which accepts NULL; on any status but ADAPT_OK they
+ * leave `*out` NULL and `*out_len` 0, so adapt_free(*out) is always
+ * safe. An adapt_archive_unpacker is the
+ * caller's from adapt_archive_unpacker_new() to
+ * adapt_archive_unpacker_free() (NULL accepted); the sink struct is
+ * copied, its `context` handed back to every callback.
+ *
+ * Lifetimes. A pointer a callback receives — the buffer a reader fills,
+ * the bytes a writer takes, an archive entry's path, target, attribute
+ * name and value, a file's data — is valid for that call only; a sink
+ * that needs it later copies it. adapt_sizes, adapt_limits, adapt_stats
+ * and adapt_error are plain values with nothing allocated behind them.
+ *
+ * Threads. The library keeps no global state; any number of calls may
+ * run at once on different threads, each with its own arguments. A
+ * caller's callbacks are invoked only on the thread that made the call
+ * — never on a worker adapt_encode_stream_threads() or
+ * adapt_decode_threads() starts, never after the call returns, and never
+ * two at once for one call. Nothing here is async-signal-safe.
+ *
+ * Errors. A function that can fail returns an adapt_status and, when
+ * `error` is not NULL, writes it whole: ADAPT_OK with every number 0 on
+ * success, so `error->status` alone may be tested; otherwise the status
+ * and the numbers its message needs, which adapt_error_message() renders.
+ * A required pointer that is NULL is ADAPT_ERROR_INVALID_ARGUMENT;
+ * `error` and `stats` are never required; `data` may be NULL only with
+ * `data_len` 0 (an empty input codes to ADAPT_HEADER_BYTES +
+ * ADAPT_TRAILER_BYTES bytes). A status is final for the call: nothing
+ * is retried and nothing partial is published — adapt_decode() holds its
+ * result until the checksum matched, adapt_encode_verified() until the
+ * proof held; a stream sink may have taken bytes before a failure was
+ * found, and they are not to be trusted. `stats` is meaningful only on
+ * ADAPT_OK.
+ *
+ * Limits. adapt_limits caps what a decode may take — `max_memory`
+ * against adapt_decode_memory_bound(), `max_output` against the declared
+ * length — refusing before anything is allocated, with the numbers in
+ * `error` (RUN-4); adapt_default_limits() names the defaults. The sizes
+ * the format allows, which adapt_sizes_valid() tests: table_log 10..26,
+ * match_log 10..24, window_log 16..30, class_code 0..2, set_code 0..7,
+ * period 0 or 1..ADAPT_PERIOD_MAX, table_frac 0..ADAPT_SIZING_FRAC_MAX.
+ * A segment is a whole number of ADAPT_BLOCK_BYTES, one block to 2^32 - 1
+ * bytes (adapt_segment_bytes_valid()); at most ADAPT_WORKERS_MAX workers
+ * run; a thread count beyond what the budget holds is refused as the
+ * budget's — the memory bounds saturate, they never wrap. An archive
+ * path or link target is at most ADAPT_ARCHIVE_PATH_MAX bytes, an
+ * attribute name ADAPT_ARCHIVE_ATTRIBUTE_NAME_MAX, a value
+ * ADAPT_ARCHIVE_ATTRIBUTE_VALUE_MAX, a sparse file
+ * ADAPT_ARCHIVE_EXTENTS_MAX extents, and the unpacker's memory is
+ * bounded by those, never by the archive's length.
+ *
+ * Compatibility. The interface is these C99 declarations, compiled and
+ * linked statically (libadapt.a); it is source-stable within a major
+ * version of the release `cadapt --version` reports (CHANGELOG.md):
+ * a function keeps its name, arguments and meaning, a constant its
+ * value, an enum member its number. Caller-allocated structs —
+ * adapt_sizes, adapt_stats, adapt_version_info — may gain fields at
+ * their end in a minor release; code compiled against an older header
+ * is rebuilt, never binary-patched. Every container version in
+ * ADAPT_VERSIONS decodes forever (DLV-1, docs/CONSTRAINTS.md), and the
+ * decoder suite holds a vector for each one an encoder ever wrote.
+ * Anything in adapt_model.h and the section headers it includes is
+ * internal (SUPPORT.md).
+ * ----------------------------------------------------------------------- */
 
 /* The container version this reader implements: the normal profile.
  * Versions 10 to 12, the crate's, and 13 to 18, this port's before the

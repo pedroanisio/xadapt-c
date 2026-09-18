@@ -140,11 +140,21 @@ $(BUILD)/runs/profile: ; @$(BUILD)/test_profile_conversion > $@.log 2>&1 && touc
 # different directories and share nothing.
 check: all
 	$(MAKE) -j check-parts
-check-parts: test coverage $(BUILD)/runs/gcov-tests $(BUILD)/runs/safety $(BUILD)/runs/probe $(BUILD)/runs/platform
+check-parts: test coverage $(BUILD)/runs/gcov-tests $(BUILD)/runs/safety $(BUILD)/runs/probe $(BUILD)/runs/platform \
+             $(BUILD)/runs/examples
 # This explicit rule is phony: an old success marker must never skip the gate's tests.
 $(BUILD)/runs/gcov-tests: | $(BUILD)/runs ; @$(PYTHON) -B tests/test_check_gcov.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/safety: all | $(BUILD)/runs ; @ADAPT_TEST_THREADS=$(TEST_THREADS) $(PYTHON) -B tests/test_cadapt_safety.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/probe: all | $(BUILD)/runs ; @$(PYTHON) -B tests/test_allocation_probe.py "$(BIN)" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+# The examples in examples/ are the interface's executable form: each is a
+# program a user copies, built against the header and the library alone,
+# and each exits 1 where the interface departs from what adapt.h says.
+EXAMPLES = roundtrip stream folder contract
+EXAMPLE_BINS = $(foreach e,$(EXAMPLES),$(BUILD)/example-$(e))
+$(BUILD)/example-%: examples/%.c examples/example.h adapt.h $(LIB) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ examples/$*.c $(LIB) $(LDFLAGS)
+examples: $(EXAMPLE_BINS)
+$(BUILD)/runs/examples: $(EXAMPLE_BINS) | $(BUILD)/runs ; @for e in $(EXAMPLE_BINS); do $$e > $@.log 2>&1 || { cat $@.log; exit 1; }; done && touch $@
 # The feature macros against the system headers: a compile, not a run, so it
 # does not need the binary.
 $(BUILD)/runs/platform: | $(BUILD)/runs ; @$(PYTHON) -B tests/test_platform_header.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
@@ -267,5 +277,5 @@ fuzz-archive-smoke: $(BUILD)/fuzz_archive $(BUILD)/archive_seeds
 clean:
 	rm -rf $(BUILD) $(COV) $(SANITIZE_BUILD)
 
-.PHONY: all test coverage sanitize fuzz fuzz-smoke fuzz-header-smoke fuzz-archive-smoke check check-parts check-long clean
+.PHONY: all test coverage sanitize fuzz fuzz-smoke fuzz-header-smoke fuzz-archive-smoke examples check check-parts check-long clean
 .PHONY: $(BUILD)/runs/gcov-tests

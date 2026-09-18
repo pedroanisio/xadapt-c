@@ -316,6 +316,140 @@ static void test_normal_keys_versions(void) {
     CHECK(!adapt_sizes_valid(sizes));
 }
 
+/* DLV-1 as a test: every container version the table names is either a
+ * stream version with a pinned vector here — a file an encoder of its day
+ * wrote, decoded to its source — or the metadata form of one, which is
+ * that vector with a record added through adapt_header_add_metadata() and
+ * must decode to the same bytes and read the record back. Two numbers
+ * have no vector: 65 and 70, the text transform over the compact max
+ * profile without the lean set, which the encoder that carried the family
+ * (e72f3e8, 2026-09-15) refused with "invalid header field" for every
+ * budget that would have chosen the shape, and which a0732c1 retired the
+ * same day — no file of theirs was ever written; the rows stay so the
+ * numbers are recognized, never reused. */
+typedef struct published_version {
+    uint8_t version;
+    const char *vector;
+    const char *source;
+    unsigned repeat; /* the source, this many times over: a longer input from the same bytes */
+} published_version;
+
+static const published_version PUBLISHED[] = {
+    {19, "text.adpt", "text.bin", 1},
+    {20, "text-fast.adpt", "text.bin", 1},
+    {21, "text-max.adpt", "text.bin", 1},
+    {25, "text-adaptive-rates.adpt", "text.bin", 1},
+    {26, "text-adaptive-sparse.adpt", "text.bin", 1},
+    {27, "text-adaptive-retained.adpt", "text.bin", 1},
+    {31, "gradient-bmp.adpt", "gradient.bmp", 1},
+    {32, "gradient-bmp-rates.adpt", "gradient.bmp", 1},
+    {33, "gradient-bmp-sparse.adpt", "gradient.bmp", 1},
+    {34, "gradient-bmp-retained.adpt", "gradient.bmp", 1},
+    {39, "text-max-rates.adpt", "text.bin", 1},
+    {40, "text-max-sparse.adpt", "text.bin", 1},
+    {41, "text-max-retained.adpt", "text.bin", 1},
+    {45, "gradient-max-bmp.adpt", "gradient.bmp", 1},
+    {46, "gradient-max-bmp-rates.adpt", "gradient.bmp", 1},
+    {47, "gradient-max-bmp-sparse.adpt", "gradient.bmp", 1},
+    {48, "gradient-max-bmp-retained.adpt", "gradient.bmp", 1},
+    {53, "text-compact.adpt", "text.bin", 1},
+    {54, "text-lean.adpt", "text.bin", 1},
+    {58, "legacy-max2-always.adpt", "text.bin", 1},
+    {62, "text-words.adpt", "text.bin", 1},
+    {63, "text-fast-words.adpt", "text.bin", 1},
+    {64, "text-max-words.adpt", "text.bin", 1},
+    {66, "text6-max-lean-words.adpt", "text.bin", 6},
+    {72, "text-max2.adpt", "text.bin", 1},
+    {76, "text-mid.adpt", "text.bin", 1},
+    {77, "text-mid-words.adpt", "text.bin", 1},
+    {80, "text-max3.adpt", "text.bin", 1},
+    {81, "abc-max3.adpt", "abc.bin", 1},
+    {84, "text-keyed.adpt", "text.bin", 1},
+};
+static const uint8_t NEVER_WRITTEN[] = {65, 70};
+
+static const published_version *published(uint8_t version) {
+    size_t i;
+    for (i = 0; i < sizeof(PUBLISHED) / sizeof(PUBLISHED[0]); i++) {
+        if (PUBLISHED[i].version == version) return &PUBLISHED[i];
+    }
+    return NULL;
+}
+
+static int never_written(uint8_t version) {
+    size_t i;
+    for (i = 0; i < sizeof(NEVER_WRITTEN); i++) {
+        if (NEVER_WRITTEN[i] == version) return 1;
+    }
+    return 0;
+}
+
+static void test_published_versions(void) {
+    size_t i;
+    for (i = 0; i < ADAPT_VERSION_COUNT; i++) {
+        const adapt_version_info *row = &ADAPT_VERSIONS[i];
+        const published_version *p = published(row->stream);
+        uint8_t *file, *want, *source;
+        size_t file_len, source_len, want_len, out_len, r;
+        uint8_t *out = NULL;
+        adapt_error error;
+        adapt_sizes sizes;
+        if (p == NULL) {
+            CHECK(never_written(row->version));
+            continue;
+        }
+        CHECK(!never_written(row->version));
+        file = read_file(p->vector, &file_len);
+        source = read_file(p->source, &source_len);
+        want_len = source_len * p->repeat;
+        want = malloc(want_len + 1);
+        for (r = 0; r < p->repeat; r++) memcpy(want + r * source_len, source, source_len);
+        if (row->metadata) {
+            /* the metadata form: the stream's vector with a record added */
+            adapt_metadata record, back;
+            uint8_t header[ADAPT_HEADER_MAX_BYTES];
+            size_t head = adapt_header_len(file), full;
+            uint8_t *with = malloc(file_len + ADAPT_METADATA_HEADER_BYTES);
+            memset(&record, 0, sizeof(record));
+            record.mode = 0644;
+            record.atime_seconds = 1700000000;
+            record.atime_nanoseconds = 123456789;
+            record.mtime_seconds = -86400;
+            record.mtime_nanoseconds = 5;
+            CHECK(head <= file_len);
+            full = adapt_header_add_metadata(file, head, &record, header, sizeof(header));
+            CHECK(full == head + ADAPT_METADATA_HEADER_BYTES);
+            CHECK(header[4] == row->version);
+            memcpy(with, header, full);
+            memcpy(with + full, file + head, file_len - head);
+            CHECK(adapt_header_has_metadata(with) == 1 && adapt_header_len(with) == full);
+            CHECK_STATUS(adapt_read_header(with, full, &sizes, &error), ADAPT_OK);
+            CHECK_STATUS(adapt_read_metadata(with, full, &back, &error), ADAPT_OK);
+            CHECK(back.mode == record.mode && back.atime_seconds == record.atime_seconds &&
+                  back.atime_nanoseconds == record.atime_nanoseconds && back.mtime_seconds == record.mtime_seconds &&
+                  back.mtime_nanoseconds == record.mtime_nanoseconds);
+            CHECK_STATUS(adapt_decode(with, file_len - head + full, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+            CHECK(out_len == want_len && memcmp(out, want, want_len) == 0);
+            adapt_free(out);
+            free(with);
+        } else {
+            CHECK(file[4] == row->version);
+            CHECK_STATUS(adapt_read_header(file, file_len, &sizes, &error), ADAPT_OK);
+            CHECK_STATUS(adapt_decode(file, file_len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+            CHECK(out_len == want_len && memcmp(out, want, want_len) == 0);
+            adapt_free(out);
+        }
+        free(want);
+        free(source);
+        free(file);
+    }
+    /* and nothing in the list names a version the table does not */
+    for (i = 0; i < sizeof(PUBLISHED) / sizeof(PUBLISHED[0]); i++) {
+        const adapt_version_info *row = adapt_version_lookup(PUBLISHED[i].version);
+        CHECK(row != NULL && !row->metadata);
+    }
+}
+
 static void test_vector(const char *name, const char *source) {
     size_t file_len, want_len, out_len;
     uint8_t *file = read_file(name, &file_len);
@@ -1830,6 +1964,7 @@ int main(int argc, char **argv) {
     SHARD(test_keys_versions());
     SHARD(test_normal_keys_versions());
     SHARD(test_version_table());
+    SHARD(test_published_versions());
     SHARD(test_vector("text-keyed.adpt", "text.bin"));
     SHARD(test_vector("records-keyed.adpt", "records.bin"));
     SHARD(test_vector("cyrillic-keyed.adpt", "cyrillic.bin"));

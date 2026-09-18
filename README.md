@@ -7,9 +7,15 @@ matches, and run memories, arbitrated by small online mixers. The container
 frames the input in 256 KiB blocks, each modelled, stored-and-observed, or
 stored-and-skipped, and ends with the original length and its CRC-32. The
 implementation is C99 with nothing beyond the C standard library (POSIX
-threads for the encoder's optional proof). Byte streams use format versions
-19 (normal), 20 (fast) and 21 (max); named files and folders use versions
-22, 23 and 24 respectively to carry filesystem metadata. Experimental
+threads for the encoder's optional proof). The encoder writes one live
+version per profile and variant — the normal profile 84 (85 for a named
+file or folder, which carries filesystem metadata; 19 and 22 when the
+classic arbiter keys win the first block), the fast profile 20 (23), the
+mid profile 76 to 79, the max profile 72 to 83 — and the decoder reads
+every version ever published, 19 to 85, as the table `ADAPT_VERSIONS` in
+`adapt.h` names them. The history: byte streams first used versions 19
+(normal), 20 (fast) and 21 (max), named files and folders 22, 23 and 24
+with filesystem metadata; experimental
 profiles also use versions 25–52 for
 causal adaptive predictors and a reversible BMP24 transform; the max
 profile with compact side tables uses 53 and 56, with its lean context
@@ -56,6 +62,7 @@ refuses versions 10–18. The header of
 |---|---|
 | [adpat/c/](adpat/c/) | The codec: `adapt.h` (public interface), `adapt_model.h` (the predictor, coder and framing, shared by both units: an umbrella over `adapt_constants.h`, `adapt_states.h`, `adapt_coder.h`, `adapt_tables.h`, `adapt_model_state.h`, `adapt_model_byte.h`, `adapt_model_bit.h`, `adapt_model_new.h`, `adapt_blocks.h` and `adapt_crc32.h`, included in that order), `adapt_text.h` (the text transform), `adapt_bmp.h` and `adapt_adaptive.h` (the BMP transform and the adaptive predictors), `adapt_decode.c`, `adapt_encode.c`, `adapt_archive.c` (the folder archive stream), `cadapt.c` (the command line: its commands, arguments, streams and staged file) with `cadapt_folder.c`/`cadapt_folder.h` (the folder side: a directory walked into an archive stream, an archive stream restored into a staged directory), `cadapt_fs.c`/`cadapt_fs.h` (the extended attributes, sparse maps and metadata calls it preserves a file with) and `cadapt_platform.h` (the feature macros and the calls whose names differ off POSIX), its manual `cadapt.1`, `Makefile` |
 | [adpat/c/tests/](adpat/c/tests/) | C unit tests for both units, the CLI's Python tests, the coverage gate's tests, and the committed vectors |
+| [adpat/c/examples/](adpat/c/examples/) | The library's executable examples — round trip, streams, a folder, the contract — built and run by `make check` |
 | [adpat/c/fuzz/](adpat/c/fuzz/) | libFuzzer harnesses: the two decoders, the same with the header checksum made good, the archive unpacker with its seeds |
 | [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |
 | [bench/](bench/README.md) | Retained historical benchmark scripts, measurements and plots |
@@ -399,6 +406,23 @@ Exit codes: 0 success, 1 a codec or I/O failure, 2 a usage error.
 
 Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
 
+The contract behind every declaration — who owns what, how long a
+callback's pointers live, what a failure leaves behind, which thread a
+callback runs on, and the limits with their numbers — is stated at the
+top of `adapt.h` and exercised by the four programs in
+[adpat/c/examples/](adpat/c/examples/), which `make check` builds
+against the header and the library alone and runs:
+
+| Example | Shows |
+|---|---|
+| [roundtrip.c](adpat/c/examples/roundtrip.c) | encode, prove and decode in memory; a refusal with its numbers; damage found, never passed through |
+| [stream.c](adpat/c/examples/stream.c) | reader and writer callbacks, sizes from a length and a budget, the stats, a source that ends early |
+| [folder.c](adpat/c/examples/folder.c) | a folder written with the archive writers, coded as one container, restored through an unpacker's sink; a malformed archive refused at its byte |
+| [contract.c](adpat/c/examples/contract.c) | NULL arguments, `*out` after a failure, the error on success, limits, callbacks on the calling thread only, two calls at once |
+
+What is promised, and for how long, is in [SUPPORT.md](SUPPORT.md)
+("Compatibility").
+
 ## Tests and gates
 
 - `make test` runs the C suites — `tests/test_adapt_decode.c` and
@@ -455,8 +479,10 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   version map against `adapt.h`, the floors block, the layout table, every
   link), the CLI command by command
   (`tests/test_cadapt.py`), the coverage gate's own tests
-  (`tests/test_check_gcov.py`), and the allocation SDK probe
-  (`tests/test_allocation_probe.py`) — then runs the coverage gate. The root
+  (`tests/test_check_gcov.py`), the allocation SDK probe
+  (`tests/test_allocation_probe.py`) and the four library examples
+  (`examples/`, built against the header and the library alone) — then
+  runs the coverage gate. The root
   check also tests provenance and codec-owned ratio floors under `tools/`.
   No build or correctness test imports `bench/` or the standalone benchmark.
 - **Branch coverage** is gated by `check-gcov.py` at 80 % for the library

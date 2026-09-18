@@ -45,6 +45,8 @@ cadapt \- compress and decompress files and folders with the adapt context-mixin
 .I file
 .br
 .B cadapt \-\-version
+.br
+.B cadapt \-\-help
 .SH DESCRIPTION
 .B cadapt
 is a lossless compressor of the context-mixing kind: every bit of the input
@@ -125,7 +127,11 @@ sizes (table, recall table, window, class history, contexts, profile), the
 transforms it carries, what it holds and the memory decoding it takes.
 .TP
 .B \-\-version
-Print the version and exit.
+Print the release and the span of container versions the decoder reads
+(\fBcadapt 0.12.0 (format versions 19 to 85)\fR) and exit.
+.TP
+.B \-\-help
+Print the usage text and exit.
 .SH PROFILE OPTIONS
 .TP
 .B \-\-fast

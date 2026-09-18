@@ -15,6 +15,37 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Added
 
+- The interface's contract, stated and executable. `adapt.h` opens with
+  what every declaration is held to — ownership (a caller's buffers stay
+  the caller's; `*out` is malloc'd and released with `adapt_free()`, and
+  left NULL with `*out_len` 0 on any failure), lifetimes (a callback's
+  pointers live for that call), threads (no global state; callbacks only
+  on the calling thread, never on a worker, never two at once), errors
+  (`adapt_error` written whole on every return, zero on success; a NULL
+  required pointer is `ADAPT_ERROR_INVALID_ARGUMENT`; `data` may be NULL
+  only with length 0) and limits (the ranges `adapt_sizes_valid()`
+  tests, the segment and worker bounds, the archive maxima). Four
+  programs in `adpat/c/examples/` — `roundtrip.c`, `stream.c`,
+  `folder.c`, `contract.c` — are built against the header and the library
+  alone and run by `make check`, each exiting 1 where the interface
+  departs from the header. `SUPPORT.md` gains a "Compatibility" section
+  stating what a release promises the next: containers and archives
+  forever, the C interface source-stable within a major release with
+  caller-allocated structs allowed to grow, the command line's commands,
+  options, exit codes and report line stable, an option never removed or
+  given another meaning within a major release.
+- Every published container version has a pinned vector
+  (`tests/test_adapt_decode.c`, `test_published_versions`): 17 new files
+  for the adaptive predictors (25–27, 39–41), the BMP transform (31–34,
+  45–48, with `gradient.bmp` as their source), the text transform over
+  the fast and mid profiles (63, 77) and, written by the encoder of
+  `e72f3e8` that carried them, over the max profile (64) and its compact
+  lean form (66); the 23 metadata forms are derived from their stream's
+  vector through `adapt_header_add_metadata()` and must decode to the same
+  bytes and read the record back. Versions 65 and 70 have no vector:
+  that encoder refused the shape ("invalid header field") at every
+  budget that would have chosen it, and `a0732c1` retired the family the
+  same day — no file of theirs was ever written, and the test says so.
 - Two libFuzzer harnesses beside `fuzz_decode`: `fuzz_header` (the same
   oracle on bytes whose header checksum is made good first, so the fields
   a CRC-32 shielded from mutation are reached) and `fuzz_archive` (the
@@ -143,6 +174,22 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Changed
 
+- **Breaking, with migration:** `cadapt --version` prints
+  `cadapt 0.12.0 (format versions 19 to 85)` — the span of container
+  versions the decoder reads, from the version table — where it printed
+  `(format version 19)`, the normal profile's stream version, which
+  stopped describing what the encoder writes when the keyed normal
+  profile (84/85) landed. A script that parsed the parenthetical should
+  take the release from the second word (`cadapt <release>`); the
+  parenthetical is informational and may change again. `-V` is the same.
+  `--help` and `-h` are in the manual.
+- `adapt.h`'s first line names every version the table holds (19 to 85),
+  not "19 through 75".
+- `adapt_stats` gained `class_code`, `set_code`, `keys`, `lean`, `period`,
+  `trials` and `trial_bytes` earlier in this release (`--explain`): a
+  source-compatible change that grows a caller-allocated struct — code
+  compiled against the previous header is rebuilt, as the compatibility
+  policy now states.
 - `--allocation auto`, the new default, grows the context table before the
   recall window only where the window-first sizes would leave the table
   below its target for the input — an input longer than the window the

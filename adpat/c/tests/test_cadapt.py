@@ -1430,7 +1430,8 @@ class SurfaceTest(unittest.TestCase):
         for args in (("--version",), ("-V",)):
             r = self.run_codec(*args)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertIn(b"format version", r.stdout)
+            # the release, and the span of container versions the decoder reads
+            self.assertRegex(r.stdout, rb"^cadapt \d+\.\d+\.\d+ \(format versions %d to %d\)\n$" % (min(VERSIONS), max(VERSIONS)))
         self.assertEqual(self.run_codec().returncode, 2)
         r = self.run_codec("frobnicate")
         self.assertEqual(r.returncode, 2)

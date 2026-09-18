@@ -22,6 +22,45 @@ it might be.
   what the tests hold to; anything in `adapt_model.h` and the section
   headers it includes is internal.
 
+## Compatibility
+
+What a release promises to the release after it, stated as the tests hold
+it:
+
+- **Containers.** Every container version once on `main` decodes forever
+  (`DLV-1`): the decoder reads versions 19 to 85, `adapt.h`'s
+  `ADAPT_VERSIONS` names each one, and `tests/test_adapt_decode.c`
+  (`test_published_versions`) decodes a pinned file of every version an
+  encoder ever wrote — the metadata forms derived from their stream's
+  vector through the public `adapt_header_add_metadata()`. Two numbers, 65
+  and 70, have no file: the encoder that carried them refused the shape
+  and the family was retired the same day; the rows stay so the numbers
+  are recognized and never reused. Unused numbers (10–18, 55, 59, 60, 73,
+  74) are refused. A change of layout or model is a new number; the
+  encoder writes one live version per profile and variant.
+- **Archives.** Archive versions 1 to 4 (`ADPTARC1` to `ADPTARC4`) are
+  read forever; the command line writes version 4.
+- **The C interface.** The declarations in `adapt.h`, linked statically,
+  are source-stable within a major release (`cadapt --version`,
+  semantic versioning in `CHANGELOG.md`): a function keeps its name,
+  arguments and meaning, a constant its value, an enum member its number.
+  Caller-allocated structs (`adapt_sizes`, `adapt_stats`,
+  `adapt_version_info`) may gain fields at their end in a minor release —
+  code compiled against an older header is rebuilt. The contract at the
+  top of `adapt.h` (ownership, lifetimes, threads, errors, limits) is held
+  by `adpat/c/examples/contract.c`, which `make check` runs.
+- **The command line.** `cadapt encode | decode | info`, their options,
+  the exit codes 0 / 1 / 2 (`RUN-4`), `-` for standard input and output,
+  and the report's first line (`<in> bytes -> <out> bytes (<ratio>), …`)
+  are stable within a major release; an option is added, never removed
+  or given another meaning, within one. `--version` prints
+  `cadapt <release> (format versions <first> to <last>)`; the release is
+  the stable part, the parenthetical is informational. `--explain` and
+  the lines after the report's first are diagnostics, free to change.
+- **Bytes.** A given release, profile, tier and input produce the same
+  container on every machine (`RUN-5`); a later release may produce a
+  smaller one, never a different layout under the same version number.
+
 ## Community support
 
 Best effort, with no service level promised:

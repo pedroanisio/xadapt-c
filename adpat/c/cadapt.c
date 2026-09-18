@@ -1955,7 +1955,9 @@ static int run_command(int argc, char **argv) {
         return info_command(argc - 2, argv + 2);
     }
     if (strcmp(cmd, "--version") == 0 || strcmp(cmd, "-V") == 0) {
-        printf("cadapt %s (format version %u)\n", CADAPT_VERSION, ADAPT_FORMAT_VERSION);
+        /* the versions the decoder reads, from the table's first and last rows */
+        printf("cadapt %s (format versions %u to %u)\n", CADAPT_VERSION, ADAPT_VERSIONS[0].version,
+               ADAPT_VERSIONS[ADAPT_VERSION_COUNT - 1].version);
         return 0;
     }
     if (strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0 || strcmp(cmd, "help") == 0) {
