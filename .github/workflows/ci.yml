@@ -57,11 +57,7 @@ jobs:
           python3 -B adpat/c/tests/test_cadapt_safety.py adpat/c/build/cadapt
           python3 -B adpat/c/tests/test_platform_header.py
       - name: the CLI suite
-        if: matrix.cc != 'gcc' && matrix.os != 'macos-14'
-        run: python3 -B adpat/c/tests/test_cadapt.py adpat/c/build/cadapt
-      - name: the CLI suite on macOS (two known failures, listed in the release notes; not gated until fixed)
-        if: matrix.os == 'macos-14'
-        continue-on-error: true
+        if: matrix.cc != 'gcc'
         run: python3 -B adpat/c/tests/test_cadapt.py adpat/c/build/cadapt
       - name: make sanitize (AddressSanitizer and UndefinedBehaviorSanitizer, every fault fatal)
         if: matrix.cc == 'clang'

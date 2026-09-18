@@ -13,16 +13,12 @@ it might be.
   [adpat/c/Makefile](adpat/c/Makefile); the tests, the sanitizer and
   coverage gates, the fuzz harness and the benchmark run there, and the
   release pipeline ([docs/release-pipeline.md](docs/release-pipeline.md))
-  builds, tests and packages on both on every push and tag. On macOS the
-  library suites, the examples, the safety suite and the install flow
-  gate a release; the command-line suite runs there but does not gate
-  yet, because two of its cases fail on macOS 14 and are open: a
-  directory restored from a folder archive gets mode 0755 where 0777 was
-  packed, and `encode FILE -o -` with standard output on a pipe fails
-  with "i/o error: Invalid argument" (both listed in the release notes).
-  Windows builds are provided for and named in the code and compile in
-  an informational job that gates nothing; they have not been validated.
-  See the README's portability rules.
+  builds, tests and packages on both on every push and tag: on macOS 14
+  the library suites, the examples, the safety suite, the command-line
+  suite, the sanitizers and the install flow. Windows builds are provided
+  for and named in the code and compile under MinGW in an informational
+  job that gates nothing; they have not been validated. See the README's
+  portability rules.
 - **Versions.** The latest release on the main branch. The container
   format is versioned and every published version keeps decoding, so a
   file made by an older release is not stranded by an upgrade.
