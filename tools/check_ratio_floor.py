@@ -269,7 +269,12 @@ def check(locked: Locked, floor: Floor, binary: Path, fixture: Path, out_dir: Pa
     lines = []
     if not fixture.is_file():
         raise SetupError(f"{floor.fixture}: fixture {fixture} is not a file")
-    size, digest = fixture.stat().st_size, _md5(fixture)
+    # the hash reads the fixture, which on a relatime mount moves the access
+    # time a named file's container records: put it back, so every encode
+    # sees the fixture as it was given (see _encode)
+    stamp = fixture.stat()
+    size, digest = stamp.st_size, _md5(fixture)
+    os.utime(fixture, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
     if size != floor.input_bytes or digest != floor.input_md5:
         raise SetupError(f"{floor.fixture}: {fixture} ({size:,} B, md5 {digest}) does not match the "
                          f"locked input ({floor.input_bytes:,} B, md5 {floor.input_md5})")

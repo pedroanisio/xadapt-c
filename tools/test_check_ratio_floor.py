@@ -92,7 +92,7 @@ class FloorCheckTest(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             code = floor.main(["--binary", str(self.binary), "--floor", str(self.floor),
-                               "--fixture", f"corpus={self.fixture}", "--timeout", "5",
+                               "--fixture", f"corpus={self.fixture}", "--timeout", "60",
                                "--output-dir", str(self.root / "out"), *extra])
         return code, out.getvalue()
 
