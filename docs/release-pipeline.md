@@ -35,7 +35,9 @@ A self-hosted GitHub Actions runner on the host `tools/ratio_floor.json`
 names (AMD Ryzen 5 5600X, quiet — no other encodes beside it, as
 [LOCKS.md](../LOCKS.md) requires of a lock), registered with the labels
 `self-hosted`, `linux`, `x64`, `reference`, with GCC, Clang, Python 3,
-`unzip` and network access to fetch the corpus once. A floor is re-locked
+`unzip` and network access to fetch the corpus once; the repository
+variable `REFERENCE_RUNNER` set to `true` turns the job on (until then it
+is skipped, so no run waits on a runner that is not there). A floor is re-locked
 only from this host (`make gate GATE_ARGS="--runs 3"`, `make corpus-floor`),
 never from a hosted runner.
 

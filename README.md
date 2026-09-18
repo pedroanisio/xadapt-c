@@ -66,7 +66,7 @@ refuses versions 10–18. The header of
 | [adpat/c/fuzz/](adpat/c/fuzz/) | libFuzzer harnesses: the two decoders, the same with the header checksum made good, the archive unpacker with its seeds |
 | [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |
 | [bench/](bench/README.md) | Retained historical benchmark scripts, measurements and plots |
-| [docs/](docs/CONSTRAINTS.md) | What the codec is held to ([CONSTRAINTS.md](docs/CONSTRAINTS.md)), the release pipeline ([release-pipeline.md](docs/release-pipeline.md)) and the dated performance audits |
+| [docs/](docs/CONSTRAINTS.md) | What the codec is held to ([CONSTRAINTS.md](docs/CONSTRAINTS.md)), the release pipeline ([release-pipeline.md](docs/release-pipeline.md)), the release notes ([release-notes/](docs/release-notes/)) and the dated performance audits |
 | [.github/workflows/](.github/workflows/) | `ci.yml`, the gates on every push and pull request; `release.yml`, the artifacts and the GitHub release on a tag |
 | [LOCKS.md](LOCKS.md) | The decisions that are settled, each with the measurements that settled it |
 | [research/](research/README.md) | Dated research notes — the literature, the byte-only strategy, the adaptive experiments, the LTCB tables — indexed with their dates |
@@ -85,6 +85,25 @@ make test       # the C unit tests on the committed vectors
 make check      # build, the C tests, the Python tests, then the coverage gate
 make clean
 ```
+
+### Install
+
+A release ([docs/release-notes/](docs/release-notes/)) is a tarball in
+the layout `make install` writes — `bin/cadapt`, `lib/libadapt.a`,
+`include/adapt.h`, `share/man/man1/cadapt.1`, with `LICENSE`, `NOTICE`,
+`CHANGELOG.md`, `sbom.spdx.json` and `build-manifest.json` — relocatable
+under any prefix; its `SHA256SUMS` names every file:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing    # macOS: shasum -a 256 -c …
+tar -xzf cadapt-<version>-linux-x86_64.tar.gz
+sudo cp -r cadapt-<version>-linux-x86_64/{bin,lib,include,share} /usr/local/
+cadapt --version
+```
+
+From a checkout or the source tarball, `make install PREFIX=/usr/local`
+(`DESTDIR=` for a staging root; `make uninstall` removes exactly what it
+placed). Nothing but a C99 compiler and `make` is needed.
 
 Two more targets live in [adpat/c/Makefile](adpat/c/Makefile): `make coverage`
 (the branch-coverage gate on its own) and `make sanitize` (the C suites under
@@ -157,11 +176,13 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
   profile (version 76, 78 with metadata; 77 and 79 under the text
   transform): the normal profile's tables and estimation stages with seven
   fixed hashed contexts (orders 2, 3, 4 and 6, word, record, the class
-  history) and its first arbiter alone — measured against the normal
-  profile, 1.4 % more bytes on enwik8 (18,761,302 against 18,500,473)
-  in 29 % less encode time and 24 % less decode time, 2.4 % more on
-  enwik9 in 28 % and 26 % less; 2.1 to 2.4 times faster than `--max`
-  for 4.8 % (enwik8) to 17.5 % (enwik9) more bytes. `--max`
+  history) and its first arbiter alone — measured at its landing
+  (2026-09-16) against that day's normal profile, 1.4 % more bytes on
+  enwik8 (18,761,302 against 18,500,473) in 29 % less encode time and
+  24 % less decode time, 2.4 % more on enwik9 in 28 % and 26 % less; the
+  normal profile has since gained the keyed arbiters and the table-first
+  allocation (enwik8 18,249,169, enwik9 149,702,998), so the gap is
+  wider now; 2.1 to 2.4 times faster than `--max`. `--max`
   writes the max profile (versions 72, 80 or 81; 75, 82 or 83 with
   metadata; the normal profile takes the same key policies as version
   84, 85 with metadata, its policy byte also carrying the text

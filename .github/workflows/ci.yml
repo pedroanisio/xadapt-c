@@ -124,10 +124,13 @@ jobs:
   throughput-floors:
     # The absolute throughput floors, on the reference host the floors were
     # locked on (tools/ratio_floor.json names it): a self-hosted runner
-    # labelled `reference`. The job runs only where that runner exists;
-    # a fork or a pull request from one has none and skips it.
+    # labelled `reference`. The job runs only where that runner is
+    # registered and the repository variable REFERENCE_RUNNER says so
+    # (a job that waits for a runner nobody registered would hold every
+    # run, and the release behind it, in the queue); a fork or a pull
+    # request from one has none and skips it.
     name: throughput floors on the reference host
-    if: github.repository == 'pedroanisio/xadapt-c' && github.event_name != 'pull_request'
+    if: github.repository == 'pedroanisio/xadapt-c' && github.event_name != 'pull_request' && vars.REFERENCE_RUNNER == 'true'
     runs-on: [self-hosted, linux, x64, reference]
     steps:
       - uses: actions/checkout@v4
