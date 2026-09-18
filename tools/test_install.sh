@@ -61,11 +61,14 @@ use_installation() {
     diff -r "$scratch/folder" "$scratch/folder.back" > /dev/null || fail "folder round trip"
     # the manual renders, where a renderer exists: mandoc, groff's nroff, or
     # GNU man's -l — judged by their output, since a minimized system's `man`
-    # is a stub that exits 0 with a notice instead of a page
-    local page="$prefix/share/man/man1/cadapt.1" rendered=0
+    # is a stub that exits 0 with a notice instead of a page; the output is
+    # read whole (a `grep -q` that exits at the first match closes the pipe
+    # under the renderer, and with pipefail that counts as a failure)
+    local page="$prefix/share/man/man1/cadapt.1" rendered=0 text
     for render in "mandoc" "nroff -man" "man -l"; do
         if command -v "${render%% *}" > /dev/null 2>&1; then
-            if $render "$page" 2>/dev/null | grep -q 'cadapt'; then rendered=1; break; fi
+            text=$($render "$page" 2>/dev/null) || text=""
+            case "$text" in *cadapt*) rendered=1; break ;; esac
         fi
     done
     if [ "$rendered" = 0 ] && { command -v mandoc > /dev/null 2>&1 || command -v nroff > /dev/null 2>&1; }; then

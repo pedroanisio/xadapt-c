@@ -63,6 +63,16 @@ typedef off_t cadapt_off;
 #include <sys/xattr.h>
 #define CADAPT_XATTR 1
 #endif
+/* A symbolic link's own mode: Darwin and the BSDs set it (lchmod, or
+ * fchmodat with AT_SYMLINK_NOFOLLOW) and their umask decides it at
+ * creation, so a restored link gets the recorded mode and is checked
+ * against it. Linux fixes every link at 0777 and refuses to change it,
+ * so there a link's mode is the platform's and only its times are held. */
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#define CADAPT_LINK_MODE 1
+#else
+#define CADAPT_LINK_MODE 0
+#endif
 #endif
 
 /* The feature macros above decide what the system headers declare, so they

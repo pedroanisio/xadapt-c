@@ -480,6 +480,20 @@ otherwise source-compatible with 0.11.0's declarations it kept.
 
 ### Fixed
 
+- On macOS, a named file with a timestamp before 1970 could not be
+  encoded ("standard output: i/o error: Invalid argument" with `-o -`):
+  Darwin reports such a time with a negative nanosecond fraction, which
+  the metadata record refuses. The fraction is read as the same instant
+  in [0, 1e9), on reading and on the check after a restore
+  (`metadata_from_stat`, `tests/test_cadapt_fs.c`).
+- On macOS, a folder archive with a symbolic link failed to restore
+  ("link: cannot restore metadata"): the platform keeps a mode on the
+  link itself, set by the umask at creation, and the recorded mode was
+  checked but never applied. Where the platform keeps link modes
+  (`CADAPT_LINK_MODE`: macOS, the BSDs) the recorded mode is now set with
+  `fchmodat(AT_SYMLINK_NOFOLLOW)` and checked; on Linux, where every link
+  is 0777, the link's mode is the platform's and only its times are
+  checked — so an archive made on macOS restores on Linux.
 - `tools/ltcb_release.sh` exported a fixed list of sources that stopped
   at the split of `adapt_model.h` and `cadapt.c`: its build failed with
   "No rule to make target 'adapt_constants.h'". It exports the codec

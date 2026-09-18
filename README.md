@@ -311,8 +311,12 @@ metadata; this CLI bookkeeping is outside the codec's working-memory bound.
 - Named files and folders carry permission bits and access/modification
   timestamps in the container, including the folder root, empty directories
   and symbolic links. On POSIX, timestamps retain nanoseconds and signed Unix
-  seconds; symlink timestamps are set without following the link. Directory
-  metadata is applied after restoring its children. Reading the source can
+  seconds (a time before 1970 that macOS reports as a negative fraction is
+  read as the same instant); symlink timestamps are set without following
+  the link. A symbolic link's own mode is restored and checked where the
+  platform keeps one (macOS, the BSDs); on Linux every link is 0777 and the
+  recorded mode is not checked. Directory metadata is applied after
+  restoring its children. Reading the source can
   advance its access time, so identical containers require identical source
   bytes **and metadata** at the start of each encode.
 - Metadata is checked after application and before publication. A filesystem

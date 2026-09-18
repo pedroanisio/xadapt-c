@@ -545,6 +545,10 @@ int renameat2(int a, const char *b, int c, const char *d, unsigned int flags) {
                         path.chmod(0o700)
                     self.assertEqual((target / "nested/file").read_bytes(), b"first")
                     self.assertEqual((target / "second").read_bytes(), b"second")
+                    if legacy and os.chmod in os.supports_follow_symlinks:
+                        # a legacy link's mode is the umask's, and a platform
+                        # that keeps link modes (macOS) refuses readlink at 000
+                        os.chmod(target / "link", 0o700, follow_symlinks=False)
                     self.assertEqual(os.readlink(target / "link"), "nested/file")
                     if not legacy:
                         self.assertEqual((target / "alias").stat().st_ino, (target / "nested/file").stat().st_ino)

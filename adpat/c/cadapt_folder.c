@@ -837,12 +837,17 @@ static int restore_apply_metadata(restorer *r, const char *path, int symlink_ent
     if (parent < 0) {
         rc = errno;
     } else if (symlink_entry) {
+        /* the link's own times, and its mode where the platform keeps one
+         * (CADAPT_LINK_MODE); elsewhere the mode is the platform's */
         struct timespec times[2];
         struct stat st;
         rc = metadata_times(m, times);
-        if (rc == 0 && (utimensat(parent, leaf, times, AT_SYMLINK_NOFOLLOW) != 0 ||
-                        fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) != 0)) rc = errno;
-        if (rc == 0) rc = metadata_check_stat(&st, m);
+        if (rc == 0 && utimensat(parent, leaf, times, AT_SYMLINK_NOFOLLOW) != 0) rc = errno;
+#if CADAPT_LINK_MODE
+        if (rc == 0 && fchmodat(parent, leaf, (mode_t)m->mode, AT_SYMLINK_NOFOLLOW) != 0) rc = errno;
+#endif
+        if (rc == 0 && fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) != 0) rc = errno;
+        if (rc == 0) rc = metadata_check_stat(&st, m, CADAPT_LINK_MODE);
     } else {
         int fd = openat(parent, leaf, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
         uint32_t i;

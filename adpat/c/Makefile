@@ -41,7 +41,7 @@ TEST_THREADS = $(if $(findstring -DADAPT_THREADS,$(CFLAGS)),1,0)
 
 LIB   = $(BUILD)/libadapt.a
 BIN   = $(BUILD)/cadapt
-TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode $(BUILD)/test_adapt_text $(BUILD)/test_model_dispatch $(BUILD)/test_profile_conversion $(BUILD)/test_p1_compatibility
+TESTS = $(BUILD)/test_adapt_adaptive $(BUILD)/test_adapt_decode $(BUILD)/test_adapt_encode $(BUILD)/test_adapt_archive $(BUILD)/test_decode_budget $(BUILD)/test_fuzz_decode $(BUILD)/test_adapt_text $(BUILD)/test_model_dispatch $(BUILD)/test_profile_conversion $(BUILD)/test_p1_compatibility $(BUILD)/test_cadapt_fs
 
 all: $(LIB) $(BIN)
 
@@ -114,6 +114,9 @@ $(BUILD)/test_profile_conversion: tests/test_profile_conversion.c adapt.h $(LIB)
 $(BUILD)/test_p1_compatibility: tests/test_p1_compatibility.c adapt.h $(LIB)
 	$(CC) $(CFLAGS) -o $@ tests/test_p1_compatibility.c $(LIB) $(LDFLAGS)
 
+$(BUILD)/test_cadapt_fs: tests/test_cadapt_fs.c cadapt_fs.h cadapt_platform.h $(BUILD)/cadapt_fs.o $(LIB)
+	$(CC) $(CFLAGS) -o $@ tests/test_cadapt_fs.c $(BUILD)/cadapt_fs.o $(LIB) $(LDFLAGS)
+
 # The two large C suites run as shards, k/n (see their mains).
 ENCODE_SHARDS = 0 1 2 3
 DECODE_SHARDS = 0 1 2
@@ -126,7 +129,7 @@ test: $(TESTS)
 	rm -f $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r) $(BUILD)/runs/$(r).log) && mkdir -p $(BUILD)/runs
 	$(MAKE) -j $(foreach r,$(TESTRUNS),$(BUILD)/runs/$(r))
 	@for r in $(TESTRUNS); do tail -1 $(BUILD)/runs/$$r.log; done
-TESTRUNS = adaptive $(foreach k,$(DECODE_SHARDS),decode-$(k)) $(foreach k,$(ENCODE_SHARDS),encode-$(k)) archive budget fuzz text dispatch profile compatibility
+TESTRUNS = adaptive $(foreach k,$(DECODE_SHARDS),decode-$(k)) $(foreach k,$(ENCODE_SHARDS),encode-$(k)) archive budget fuzz text dispatch profile compatibility fs
 $(BUILD)/runs/adaptive: ; @$(BUILD)/test_adapt_adaptive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/decode-%: ; @$(BUILD)/test_adapt_decode tests/vectors $*/$(words $(DECODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/encode-%: ; @$(BUILD)/test_adapt_encode tests/vectors $*/$(words $(ENCODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
@@ -137,6 +140,7 @@ $(BUILD)/runs/text: ; @$(BUILD)/test_adapt_text tests/vectors > $@.log 2>&1 && t
 $(BUILD)/runs/dispatch: ; @$(BUILD)/test_model_dispatch > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/compatibility: ; @$(BUILD)/test_p1_compatibility tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(BUILD)/runs/profile: ; @$(BUILD)/test_profile_conversion > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(BUILD)/runs/fs: ; @$(BUILD)/test_cadapt_fs > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
 # The plain suites and the coverage pass run at once: they build into
 # different directories and share nothing.

@@ -67,7 +67,13 @@ int metadata_read_path(const char *path, int nofollow, adapt_metadata *m);
 #ifdef _WIN32
 int metadata_apply(const char *path, int symlink_entry, const adapt_metadata *m);
 #else
-int metadata_check_stat(const struct stat *st, const adapt_metadata *m);
+/* The record a stat holds: the mode's permission bits and the two times,
+ * each with its fraction in [0, 1e9) — a platform that reports a time
+ * before 1970 as a negative fraction (Darwin) is read as the same instant. */
+void metadata_from_stat(const struct stat *st, adapt_metadata *m);
+/* 0 where the stat holds the record, ENOTSUP where it does not; with_mode 0
+ * leaves the mode to the platform (a link's, where it cannot be set). */
+int metadata_check_stat(const struct stat *st, const adapt_metadata *m, int with_mode);
 int metadata_times(const adapt_metadata *m, struct timespec times[2]);
 int metadata_apply_fd(int fd, const adapt_metadata *m);
 int clear_inherited_acl(int fd);

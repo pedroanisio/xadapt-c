@@ -312,26 +312,42 @@ int metadata_read_path(const char *path, int nofollow, adapt_metadata *m) {
     m->atime_seconds = st.st_atime;
     m->mtime_seconds = st.st_mtime;
     m->atime_nanoseconds = m->mtime_nanoseconds = 0;
+    m->mode = (uint32_t)st.st_mode & 07777u;
 #else
     struct stat st;
     if ((nofollow ? lstat(path, &st) : stat(path, &st)) != 0) {
         return errno != 0 ? errno : EIO;
     }
-#ifdef __APPLE__
-    m->atime_seconds = st.st_atimespec.tv_sec;
-    m->atime_nanoseconds = (uint32_t)st.st_atimespec.tv_nsec;
-    m->mtime_seconds = st.st_mtimespec.tv_sec;
-    m->mtime_nanoseconds = (uint32_t)st.st_mtimespec.tv_nsec;
-#else
-    m->atime_seconds = st.st_atim.tv_sec;
-    m->atime_nanoseconds = (uint32_t)st.st_atim.tv_nsec;
-    m->mtime_seconds = st.st_mtim.tv_sec;
-    m->mtime_nanoseconds = (uint32_t)st.st_mtim.tv_nsec;
+    metadata_from_stat(&st, m);
 #endif
-#endif
-    m->mode = (uint32_t)st.st_mode & 07777u;
     return 0;
 }
+
+#ifndef _WIN32
+/* The instant a stat's timespec names, with the fraction in [0, 1e9):
+ * Darwin reports a time before 1970 with tv_sec truncated toward zero and
+ * tv_nsec negative, and the metadata record refuses that fraction. */
+static void stat_time(struct timespec t, int64_t *seconds, uint32_t *nanoseconds) {
+    int64_t sec = t.tv_sec, nsec = t.tv_nsec;
+    if (nsec < 0) {
+        sec -= 1;
+        nsec += 1000000000;
+    }
+    *seconds = sec;
+    *nanoseconds = (uint32_t)nsec;
+}
+
+void metadata_from_stat(const struct stat *st, adapt_metadata *m) {
+#ifdef __APPLE__
+    stat_time(st->st_atimespec, &m->atime_seconds, &m->atime_nanoseconds);
+    stat_time(st->st_mtimespec, &m->mtime_seconds, &m->mtime_nanoseconds);
+#else
+    stat_time(st->st_atim, &m->atime_seconds, &m->atime_nanoseconds);
+    stat_time(st->st_mtim, &m->mtime_seconds, &m->mtime_nanoseconds);
+#endif
+    m->mode = (uint32_t)st->st_mode & 07777u;
+}
+#endif
 
 #ifdef _WIN32
 int metadata_apply(const char *path, int symlink_entry, const adapt_metadata *m) {
@@ -365,15 +381,12 @@ int metadata_apply(const char *path, int symlink_entry, const adapt_metadata *m)
 #ifndef _WIN32
 /* A directory handle keeps metadata tied to the restored inode even when
  * someone can rename entries in the output's parent directory. */
-int metadata_check_stat(const struct stat *st, const adapt_metadata *m) {
-#ifdef __APPLE__
-    struct timespec atime = st->st_atimespec, mtime = st->st_mtimespec;
-#else
-    struct timespec atime = st->st_atim, mtime = st->st_mtim;
-#endif
-    return ((uint32_t)st->st_mode & 07777u) == m->mode && atime.tv_sec == m->atime_seconds &&
-                   (uint32_t)atime.tv_nsec == m->atime_nanoseconds && mtime.tv_sec == m->mtime_seconds &&
-                   (uint32_t)mtime.tv_nsec == m->mtime_nanoseconds
+int metadata_check_stat(const struct stat *st, const adapt_metadata *m, int with_mode) {
+    adapt_metadata held;
+    metadata_from_stat(st, &held);
+    return (!with_mode || held.mode == m->mode) && held.atime_seconds == m->atime_seconds &&
+                   held.atime_nanoseconds == m->atime_nanoseconds && held.mtime_seconds == m->mtime_seconds &&
+                   held.mtime_nanoseconds == m->mtime_nanoseconds
                ? 0 : ENOTSUP;
 }
 
@@ -391,7 +404,7 @@ int metadata_apply_fd(int fd, const adapt_metadata *m) {
     int rc = metadata_times(m, times);
     if (rc != 0) return rc;
     if (futimens(fd, times) != 0 || fchmod(fd, (mode_t)m->mode) != 0 || fstat(fd, &st) != 0) return errno;
-    return metadata_check_stat(&st, m);
+    return metadata_check_stat(&st, m, 1);
 }
 
 /* chmod changes an ACL's mask, not its named entries. Remove inherited

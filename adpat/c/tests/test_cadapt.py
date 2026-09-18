@@ -770,10 +770,13 @@ class MetadataTest(CodecTest):
         (folder / "nested" / "data").write_bytes(SOURCE)
         os.symlink("data", folder / "nested" / "link")
         expected = {}
+        # a link's mode is the platform's: 0777 on Linux, the umask's on macOS
         for index, (rel, mode) in enumerate((("nested/empty", 0o500), ("nested/data", 0o640),
-                                             ("nested/link", 0o777), ("nested", 0o550), ("", 0o750))):
+                                             ("nested/link", None), ("nested", 0o550), ("", 0o750))):
             path = folder / rel
-            if not path.is_symlink():
+            if mode is None:
+                mode = stat.S_IMODE(path.lstat().st_mode)
+            else:
                 path.chmod(mode)
             times = (1_400_000_000_123_456_789 + index, 1_450_000_000_987_654_321 + index)
             os.utime(path, ns=times, follow_symlinks=False)
