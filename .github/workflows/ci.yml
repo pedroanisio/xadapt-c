@@ -73,18 +73,27 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: the host, for the record
+        run: lscpu | grep -E 'Model name|Flags' | cut -c1-200; gcc --version | head -1; clang --version | head -1
       - run: |
           make -C adpat/c BUILD=build-gcc CC=gcc all
           make -C adpat/c BUILD=build-clang CC=clang all
           unzip -p static/corpus/enwik8.zip enwik8 | head -c 8388608 > proxy
+          failed=0
           for flags in "" "--fast" "--mid" "--max --allocation context --contexts lean" "--max --allocation context -6"; do
-            adpat/c/build-gcc/cadapt encode proxy $flags --force --no-verify -o a.adpt
-            ADAPT_ISA=baseline adpat/c/build-clang/cadapt encode proxy $flags --force --no-verify -o b.adpt
-            cmp a.adpt b.adpt
-            ADAPT_ISA=baseline adpat/c/build-clang/cadapt decode a.adpt --force -o a.out && cmp a.out proxy
-            adpat/c/build-gcc/cadapt decode b.adpt --force -o b.out && cmp b.out proxy
-            echo "identical: cadapt encode $flags ($(stat -c %s a.adpt) bytes)"
+            # the four combinations: compiler x instruction-set path, every pair held to the same bytes
+            adpat/c/build-gcc/cadapt encode proxy $flags --force --no-verify -o gcc-v3.adpt
+            ADAPT_ISA=baseline adpat/c/build-gcc/cadapt encode proxy $flags --force --no-verify -o gcc-base.adpt
+            adpat/c/build-clang/cadapt encode proxy $flags --force --no-verify -o clang-v3.adpt
+            ADAPT_ISA=baseline adpat/c/build-clang/cadapt encode proxy $flags --force --no-verify -o clang-base.adpt
+            for f in gcc-base clang-v3 clang-base; do
+              if cmp gcc-v3.adpt $f.adpt; then :; else echo "DIFFER: gcc-v3 vs $f under 'cadapt encode $flags'"; cmp -l gcc-v3.adpt $f.adpt | head -5; failed=1; fi
+            done
+            ADAPT_ISA=baseline adpat/c/build-clang/cadapt decode gcc-v3.adpt --force -o a.out && cmp a.out proxy
+            adpat/c/build-gcc/cadapt decode clang-base.adpt --force -o b.out && cmp b.out proxy
+            echo "cadapt encode $flags: $(stat -c %s gcc-v3.adpt) bytes"
           done
+          exit $failed
 
   size-and-memory-floors:
     # DLV-3: every corpus row against its locked size floor under both gate

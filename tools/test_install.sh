@@ -59,11 +59,19 @@ use_installation() {
     "$prefix/bin/cadapt" encode "$scratch/folder" -o "$scratch/folder.adpt" > /dev/null 2>&1 || fail "folder encode"
     "$prefix/bin/cadapt" decode "$scratch/folder.adpt" -o "$scratch/folder.back" > /dev/null 2>&1 || fail "folder decode"
     diff -r "$scratch/folder" "$scratch/folder.back" > /dev/null || fail "folder round trip"
-    # the manual renders, where a renderer exists (GNU man's -l, or mandoc/nroff)
-    local page="$prefix/share/man/man1/cadapt.1"
-    if man -l "$page" > /dev/null 2>&1 || mandoc "$page" > /dev/null 2>&1 || nroff -man "$page" > /dev/null 2>&1; then
-        { man -l "$page" 2>/dev/null || mandoc "$page" 2>/dev/null || nroff -man "$page" 2>/dev/null; } | grep -q 'cadapt' || fail "manual"
+    # the manual renders, where a renderer exists: mandoc, groff's nroff, or
+    # GNU man's -l — judged by their output, since a minimized system's `man`
+    # is a stub that exits 0 with a notice instead of a page
+    local page="$prefix/share/man/man1/cadapt.1" rendered=0
+    for render in "mandoc" "nroff -man" "man -l"; do
+        if command -v "${render%% *}" > /dev/null 2>&1; then
+            if $render "$page" 2>/dev/null | grep -q 'cadapt'; then rendered=1; break; fi
+        fi
+    done
+    if [ "$rendered" = 0 ] && { command -v mandoc > /dev/null 2>&1 || command -v nroff > /dev/null 2>&1; }; then
+        fail "manual: a renderer is installed but did not render the page"
     fi
+    [ "$rendered" = 1 ] || echo "test_install: no manual renderer here, the page's rendering is not checked
     # a program against the installed header and library, and run
     ${CC:-cc} -std=c99 -Wall -Wextra -I"$prefix/include" -o "$scratch/roundtrip" "$examples/roundtrip.c" \
         "$prefix/lib/libadapt.a" -pthread || fail "compile against the installation"

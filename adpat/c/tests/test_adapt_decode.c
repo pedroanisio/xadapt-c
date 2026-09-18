@@ -1874,8 +1874,11 @@ static void test_text_stream(void) {
     CHECK_STATUS(decode_threads(file, len, limits, 2, &s, &stats, &error), ADAPT_OK);
     CHECK(s.len == 15 && memcmp(buf, original, 15) == 0 && stats.input_bytes == 15 && stats.text_bytes == sizeof(body) &&
           stats.text_words == 1);
-    CHECK_STATUS(adapt_declared_len(file, len, &out_len, &error), ADAPT_OK);
-    CHECK(out_len == 15);
+    {
+        uint64_t declared = 0; /* a uint64_t, not a size_t: the two differ on macOS */
+        CHECK_STATUS(adapt_declared_len(file, len, &declared, &error), ADAPT_OK);
+        CHECK(declared == 15);
+    }
     /* the trailer names the original: a length or checksum of the
      * transform's bytes is a checksum error */
     len = text_file(file, ADAPT_TEXT_VERSION, body, sizeof(body), sizeof(body), adapt_crc32(body, sizeof(body)));
