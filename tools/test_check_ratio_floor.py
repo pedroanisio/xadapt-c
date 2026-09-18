@@ -32,6 +32,12 @@ if args[0] == "encode":
     shutil.copy(src, out + ".src")
     with open(out, "wb") as f:
         f.write((os.urandom(1) if cfg.get("vary") else b"x") * cfg["bytes"])
+        if cfg.get("atime"):
+            # a named file's metadata record: the access time as read, then
+            # the read moves it, as a relatime mount does the first time
+            st = os.stat(src)
+            f.write(st.st_atime_ns.to_bytes(8, "little"))
+            os.utime(src, ns=(st.st_atime_ns + 1000000000, st.st_mtime_ns))
 elif args[0] == "decode":
     src, out = args[1], args[-1]
     shutil.copy(src + ".src", out)
@@ -162,6 +168,14 @@ class FloorCheckTest(unittest.TestCase):
         self.assertEqual(code, 0, text)
         self.assertIn("median of 3 runs", text)
         self.assertRegex(text, r"runs: [0-9.]+, [0-9.]+, [0-9.]+ s")
+        # a codec that records the fixture's access time, on a mount that
+        # moves it at the first read: the check puts the times back after
+        # every run, so the runs agree
+        self.configure(self.binary, bytes=1, atime=True)
+        before = self.fixture.stat().st_atime_ns
+        code, text = self.run_check("--runs", "3")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.fixture.stat().st_atime_ns, before)
         # RUN-5: the same command writes the same bytes every run, or the check fails
         self.configure(self.binary, bytes=1, vary=True)
         code, text = self.run_check("--runs", "3")

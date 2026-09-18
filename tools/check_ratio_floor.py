@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import statistics
 import subprocess
@@ -242,10 +243,19 @@ def _encode(binaries: list[tuple[Path, Path]], arguments: list[str], fixture: Pa
     kept as its container; its later runs must match it byte for byte."""
     times = [[] for _ in binaries]
     consistent = [True] * len(binaries)
+    # A named file's container carries its access and modification times
+    # (the metadata record), and a filesystem mounted relatime moves the
+    # access time when a freshly written file is first read — the first
+    # encode then records one time and every later one another, and the
+    # containers differ in the record while the coded bytes are the same.
+    # The fixture's times are put back after every run, so each run sees
+    # what the first saw; a noatime mount never moved them.
+    stamp = fixture.stat()
     for run in range(runs):
         for k, (binary, container) in enumerate(binaries):
             out = container if run == 0 else container.with_name(f"{container.name}.run{run + 1}")
             times[k].append(_run([str(binary), *arguments, str(fixture), "-o", str(out)], timeout))
+            os.utime(fixture, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
             if run > 0:
                 consistent[k] &= _same_bytes(container, out)
                 out.unlink()

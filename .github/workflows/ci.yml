@@ -81,6 +81,11 @@ jobs:
           make -C adpat/c BUILD=build-gcc CC=gcc all
           make -C adpat/c BUILD=build-clang CC=clang all
           unzip -p static/corpus/enwik8.zip enwik8 | head -c 8388608 > proxy
+          # a named file's container carries its access time, and a relatime
+          # mount moves that at the first read of a freshly written file — so
+          # the first encode would record one time and the rest another; an
+          # access time set past the modification time is left alone
+          touch -a proxy
           failed=0
           for flags in "" "--fast" "--mid" "--max --allocation context --contexts lean" "--max --allocation context -6"; do
             # the four combinations: compiler x instruction-set path, every pair held to the same bytes
