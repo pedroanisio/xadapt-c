@@ -42,7 +42,9 @@ class MakeVariablesTest(unittest.TestCase):
         """Recursive make exports its directory logging flag into child probes."""
         with patch.dict(os.environ, {"MAKEFLAGS": "w", "MAKELEVEL": "1"}):
             variables = provenance.make_variables()
-        self.assertEqual(variables["CC"], "cc")
+        # CC ?= cc: a `make check CC=gcc` exports CC into this process, and
+        # the probe must report that compiler, not the default
+        self.assertEqual(variables["CC"], os.environ.get("CC", "cc"))
         self.assertIn("-std=c99", variables["CFLAGS"])
         self.assertEqual(variables["LDFLAGS"], "")
 

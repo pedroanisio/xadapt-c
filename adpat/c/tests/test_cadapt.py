@@ -51,6 +51,27 @@ NORMAL_NAMED = tuple(v for v, r in VERSIONS.items() if r["metadata"] and r["stre
 assert MAX_STREAM == (72, 80, 81) and MAX_NAMED == (75, 82, 83) and NORMAL_STREAM == (19, 62, 84) and NORMAL_NAMED == (22, 67, 85)
 
 
+def hole_report(path) -> str:
+    """What the filesystem says about a file's holes: its blocks against its
+    size and, where lseek knows holes, the first hole and the first data."""
+    st = os.stat(path)
+    report = f"{os.path.basename(path)}: {st.st_size} bytes in {st.st_blocks} blocks of 512"
+    if hasattr(os, "SEEK_HOLE"):
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            hole = os.lseek(fd, 0, os.SEEK_HOLE)
+            try:
+                data = os.lseek(fd, 0, os.SEEK_DATA)
+            except OSError as e:
+                data = f"none ({e.strerror})"
+            report += f", first hole at {hole}, first data at {data}"
+        except OSError as e:
+            report += f", lseek(SEEK_HOLE): {e.strerror}"
+        finally:
+            os.close(fd)
+    return report
+
+
 def signed_ns(value):
     """A stat's nanosecond time as the signed value it names. CPython folds a
     negative tv_nsec — how Darwin reports a time before 1970 — into an
@@ -1131,11 +1152,26 @@ class FolderTest(unittest.TestCase):
         a, again, third = (restored / "a.txt").stat(), (restored / "sub" / "a-again.txt").stat(), (restored / "a-third.txt").stat()
         self.assertEqual((again.st_ino, third.st_ino), (a.st_ino, a.st_ino))
         self.assertEqual(a.st_nlink, 3)
-        # holes: the apparent length, the bytes, and far fewer blocks than bytes
+        # holes: the apparent length, the bytes, and far fewer blocks than
+        # bytes — where the filesystem kept the source's holes to begin with
+        # (a dense source has none to preserve; the restore is dense too)
         for name in ("holes.bin", "allhole.bin"):
-            st = (restored / "sub" / name).stat()
-            self.assertEqual(st.st_size, (folder / "sub" / name).stat().st_size)
-            self.assertLess(st.st_blocks * 512, st.st_size // 4, name)
+            source, st = (folder / "sub" / name).stat(), (restored / "sub" / name).stat()
+            self.assertEqual(st.st_size, source.st_size)
+            if source.st_blocks * 512 < source.st_size // 4:
+                if st.st_blocks * 512 >= st.st_size // 4:
+                    # the same sequence the restore uses, made here: does the
+                    # filesystem keep it sparse at all?
+                    replica = self.root / f"replica-{name}"
+                    with open(replica, "wb") as f:
+                        f.truncate(source.st_size)
+                        f.seek(source.st_size // 3)
+                        f.write(b"middle")
+                    self.fail(f"restored dense: source {hole_report(folder / 'sub' / name)}; "
+                              f"restored {hole_report(restored / 'sub' / name)}; "
+                              f"a truncate-and-seek replica {hole_report(replica)}")
+            else:
+                print(f"{name}: this filesystem stores the source dense ({source.st_blocks} blocks); holes are not checked")
         self.assertEqual((restored / "sub" / "holes.bin").read_bytes(), sparse.read_bytes())
         if xattrs:
             self.assertEqual(sorted(os.listxattr(restored / "a.txt")), sorted(os.listxattr(folder / "a.txt")))

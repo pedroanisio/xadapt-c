@@ -29,13 +29,13 @@ while time.process_time() < end:
     pass
 if args[0] == "encode":
     src, out = args[-3], args[-1]
+    st = os.stat(src)  # captured before the read, as the codec does
     shutil.copy(src, out + ".src")
     with open(out, "wb") as f:
         f.write((os.urandom(1) if cfg.get("vary") else b"x") * cfg["bytes"])
         if cfg.get("atime"):
-            # a named file's metadata record: the access time as read, then
-            # the read moves it, as a relatime mount does the first time
-            st = os.stat(src)
+            # a named file's metadata record: the access time as captured,
+            # and the read moved it, as a relatime mount does the first time
             f.write(st.st_atime_ns.to_bytes(8, "little"))
             os.utime(src, ns=(st.st_atime_ns + 1000000000, st.st_mtime_ns))
 elif args[0] == "decode":

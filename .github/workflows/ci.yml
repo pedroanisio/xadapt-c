@@ -20,8 +20,9 @@ permissions:
 
 env:
   # a hosted runner is slower and shared: the wall budget make check holds
-  # itself to on the reference host (120 s) is raised, not the gate
-  CHECK_SECONDS: 1200
+  # itself to on the reference host (120 s) is raised, not the gate — the
+  # first runs took over 1,200 s on four vCPUs at a load of 13
+  CHECK_SECONDS: 3600
 
 jobs:
   check:
