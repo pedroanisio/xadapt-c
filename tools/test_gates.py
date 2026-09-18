@@ -20,6 +20,9 @@ docs/drift-risk-map-2026-09-18.md, each held so it cannot reopen.
 8. A revision without its release notes is refused by tools/release.sh, and
    the workflow has no fallback body.
 9. The constants LOCKS.md states as policy are the ones in force.
+15. The source tarball — the export list of tools/release.sh, as a user gets
+    it — builds, installs under a prefix, runs and uninstalls from its own
+    contents (tools/test_install.sh --source).
 
     python3 -B tools/test_gates.py
 
@@ -278,6 +281,36 @@ class LocksTest(unittest.TestCase):
             data = json.loads(floor_file.read_text(encoding="utf-8"))
             self.assertEqual(round(data["throughput_tolerance"] * 100), int(corpus.group(1)), floor_file.name)
             self.assertTrue(all("wall_seconds" in f for f in data["floors"]), f"{floor_file.name}: not in wall seconds as locked")
+
+
+class SourceTarballTest(unittest.TestCase):
+    @staticmethod
+    def export_list() -> list[str]:
+        """The paths tools/release.sh exports into the source tarball."""
+        release = (ROOT / "tools" / "release.sh").read_text(encoding="utf-8")
+        line = re.search(r'git archive "\$FULL" ([^|]*)\|', release, flags=re.S).group(1)
+        return line.replace("\\\n", " ").split()
+
+    def test_the_export_list_builds_installs_and_uninstalls_as_a_source_tarball(self) -> None:
+        """What a user of cadapt-<version>-src.tar.gz gets is the export list;
+        the tarball of HEAD's export is put through tools/test_install.sh
+        --source, as tools/release.sh does for every release."""
+        paths = self.export_list()
+        self.assertIn("adpat/c", paths)
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch) / "cadapt-probe"
+            root.mkdir()
+            archive = subprocess.run(["git", "archive", "HEAD", *paths], cwd=ROOT, capture_output=True, check=True).stdout
+            subprocess.run(["tar", "-x", "-C", str(root)], input=archive, check=True)
+            tarball = Path(scratch) / "cadapt-probe-src.tar.gz"
+            subprocess.run(["tar", "-czf", str(tarball), "-C", scratch, "cadapt-probe"], check=True)
+            run = subprocess.run(["tools/test_install.sh", "--source", str(tarball)], cwd=ROOT, capture_output=True, text=True, timeout=600)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("builds with cc and make alone", run.stdout)
+
+    def test_release_sh_proves_the_source_tarball(self) -> None:
+        release = (ROOT / "tools" / "release.sh").read_text(encoding="utf-8")
+        self.assertIn('tools/test_install.sh --source "$OUT/cadapt-$VERSION-src.tar.gz"', release)
 
 
 class ManifestTest(unittest.TestCase):

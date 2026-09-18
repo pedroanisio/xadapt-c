@@ -46,7 +46,17 @@ benches, the workflows, the documents)
 > and `check-gcov.py` groups them by name, and the coverage pass runs
 > every suite and every CLI class from the files — which found that
 > `test_model_dispatch`, `test_cadapt_fs` and a new CLI class were never
-> run under coverage. The inventory below is the state the audit found.
+> run under coverage. The six MODERATE couplings are closed too: the
+> gates table of `docs/release-pipeline.md` is held to `ci.yml`'s jobs both
+> ways; the safety suite's hand-built containers are held to `adapt.h`'s
+> constants and the empty one is decoded by the binary; the install layout
+> the README and the notes state is held to `make install`'s recipe; every
+> environment variable the code reads is documented (`ADAPT_CLASS_CODE`
+> and `ADAPT_TEST_THREADS` were not); the source tarball is built,
+> installed, used and uninstalled from its own contents by
+> `tools/test_install.sh --source`, in `tools/release.sh` and in a test of
+> the export list; the current release notes and changelog entry are held
+> to `--version`'s range. The inventory below is the state the audit found.
 
 ## Executive Summary
 

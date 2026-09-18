@@ -58,8 +58,23 @@ and announced as [SECURITY.md](SECURITY.md) describes.
   every test file under `tools/`, `bench/` and `adpat/c/tests/` against
   the `make check` parts that run it; the corpus floor files against the
   corpus manifest (every file, at its size); the release-notes refusal;
-  and the constants `LOCKS.md` states as policy — the 120 s check budget
-  and the floor files' tolerances — against the Makefile and the files.
+  the constants `LOCKS.md` states as policy — the 120 s check budget
+  and the floor files' tolerances — against the Makefile and the files;
+  and the source tarball's export list, put through
+  `tools/test_install.sh --source`.
+- `tools/test_install.sh --source` unpacks a source tarball, builds it
+  with cc and make alone, installs it under a prefix, uses it and
+  uninstalls it; `tools/release.sh` proves every release's source tarball
+  that way before packaging it.
+- The documents' tests also hold the gates table of
+  `docs/release-pipeline.md` to `ci.yml`'s jobs, the install layout the
+  README and the release notes state to `make install`'s recipe, every
+  environment variable the code reads to a document (`ADAPT_CLASS_CODE`
+  and `ADAPT_TEST_THREADS` had none; the README names the development
+  and test variables now), and the current release notes and changelog
+  entry to the container-version range `--version` prints. The safety
+  suite holds its hand-built containers to `adapt.h`'s constants and
+  decodes the empty one with the binary.
 
 - The root `Makefile` forwards `sanitize`, `coverage` and `check-long`
   to `adpat/c/Makefile`, as the documents that cite `make sanitize`

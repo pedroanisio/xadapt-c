@@ -6,6 +6,7 @@ including its filesystem sink and refusal cleanup, without a model encoder.
 
 import os
 import random
+import re
 import select
 import signal
 import struct
@@ -927,6 +928,51 @@ int renameat2(int a, const char *b, int c, const char *d, unsigned int flags) {
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual((destination / "b").stat().st_size, length)
         self.assertEqual((self.root / "0/b").read_bytes(), bytes(1018) + b"xyz")
+
+
+def header_constant(name: str) -> int:
+    """A numeric constant of adapt.h, as written."""
+    text = (Path(__file__).resolve().parent.parent / "adapt.h").read_text(encoding="utf-8")
+    match = re.search(rf"^#define {name}\s+\(?(0x[0-9a-fA-F]+|\d+)u?", text, flags=re.M)
+    if match is None:
+        raise AssertionError(f"adapt.h defines no {name}")
+    return int(match.group(1), 0)
+
+
+def header_string(name: str) -> bytes:
+    text = (Path(__file__).resolve().parent.parent / "adapt.h").read_text(encoding="utf-8")
+    match = re.search(rf'^#define {name}\s+"([^"]+)"', text, flags=re.M)
+    if match is None:
+        raise AssertionError(f"adapt.h defines no {name}")
+    return match.group(1).encode()
+
+
+class FixtureFormatTest(unittest.TestCase):
+    """The containers this suite builds by hand model the wire format of
+    adapt.h: the fixed header, the trailer, the metadata record and the
+    archive magic are the header's constants, and the hand-built empty
+    container is one the binary decodes. A format change that leaves these
+    fixtures behind fails here, not in silence."""
+
+    def test_the_fixture_sizes_are_the_headers_constants(self):
+        self.assertEqual(len(HEADER), header_constant("ADAPT_HEADER_BYTES"))
+        self.assertEqual(struct.calcsize("<BQI"), header_constant("ADAPT_TRAILER_BYTES"))          # the trailer archive() writes
+        self.assertEqual(struct.calcsize("<IqIqI"), header_constant("ADAPT_METADATA_BYTES"))       # an entry's mode and times
+        self.assertEqual(struct.calcsize("<IqIqI") + 4, 32)  # the record and its CRC, as metadata_base() in test_cadapt.py counts them
+        self.assertEqual(b"ADPTARC1", header_string("ADAPT_ARCHIVE_MAGIC"))
+        self.assertEqual(b"ADPTARC3", header_string("ADAPT_ARCHIVE_FULL_MAGIC"))
+        self.assertEqual(len(b"ADPTARC3"), header_constant("ADAPT_ARCHIVE_MAGIC_BYTES"))
+        self.assertEqual(HEADER[5] | 128, HEADER[5] | header_constant("ADAPT_PERIOD_FLAG"))        # the flag archive() sets
+
+    def test_the_hand_built_empty_container_is_one_the_binary_decodes(self):
+        empty = HEADER + struct.pack("<BQI", 3, 0, zlib.crc32(b""))
+        self.assertEqual(len(empty), header_constant("ADAPT_HEADER_BYTES") + header_constant("ADAPT_TRAILER_BYTES"))
+        run = subprocess.run([str(CADAPT), "decode", "-", "-o", "-"], input=empty, capture_output=True, timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, b"")
+        info = subprocess.run([str(CADAPT), "info", "-"], input=empty, capture_output=True, timeout=30)
+        self.assertEqual(info.returncode, 0, info.stderr)
+        self.assertIn(b"version 19", info.stdout)
 
 
 if __name__ == "__main__":

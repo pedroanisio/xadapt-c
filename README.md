@@ -125,6 +125,16 @@ strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
   bytes, which the CLI tests hold them to).
   `-DADAPT_NO_HUGEPAGES` likewise takes the `calloc` path for the model's
   tables instead of an anonymous mapping advised `MADV_HUGEPAGE`.
+- `-DADAPT_SIZES_OVERRIDE` builds a development codec that reads three
+  environment variables for pressure and ablation experiments, none of
+  them in a release build: `ADAPT_SIZES` (`table:window:recall:compact:lean`
+  logs, past the tier), `ADAPT_CLASS_CODE` (pins the class-history width
+  the first block would otherwise choose) and `ADAPT_DROP_MASK` (a bit per
+  context kind to leave out; [bench/README.md](bench/README.md)). A
+  container written under any of them decodes only under the same.
+  The tests read `ADAPT_TEST_THREADS=0` to skip the threaded cases of a
+  `THREADS=` build (the Makefile sets it from `CFLAGS`), `ADAPT_LONG_TESTS=1`
+  for the CLI suite's megabyte cases, and `CADAPT` to name the binary.
 
 ## Command line
 

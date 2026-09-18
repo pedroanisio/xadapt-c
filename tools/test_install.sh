@@ -11,7 +11,8 @@
 # host but the export reaches it.
 #
 #   tools/test_install.sh [--rev REV]                  the tree, here
-#   tools/test_install.sh --tarball cadapt-*.tar.gz    a release tarball, here
+#   tools/test_install.sh --tarball cadapt-*.tar.gz    a binary release tarball, here
+#   tools/test_install.sh --source cadapt-*-src.tar.gz the source tarball: unpacked, built, installed, used
 #   tools/test_install.sh --docker IMAGE [--rev REV]   the tree, in a container
 #
 # Exit 0 when every step held, 1 otherwise, 2 for a usage error.
@@ -23,15 +24,17 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REV=HEAD
 TARBALL=""
+SOURCE=""
 IMAGE=""
 INSIDE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --rev) REV=$2; shift 2 ;;
         --tarball) TARBALL=$(readlink -f "$2"); shift 2 ;;
+        --source) SOURCE=$(readlink -f "$2"); shift 2 ;;
         --docker) IMAGE=$2; shift 2 ;;
         --inside) INSIDE=1; shift ;;
-        *) echo "usage: $0 [--rev REV] | --tarball FILE | --docker IMAGE [--rev REV]" >&2; exit 2 ;;
+        *) echo "usage: $0 [--rev REV] | --tarball FILE | --source FILE | --docker IMAGE [--rev REV]" >&2; exit 2 ;;
     esac
 done
 
@@ -112,6 +115,15 @@ fi
 
 if [ "$INSIDE" = 1 ]; then
     SRC=$(pwd)
+elif [ -n "$SOURCE" ]; then
+    # the source tarball, as a user gets it: what the README promises of it
+    # (make, make install PREFIX=) must hold from its contents alone
+    tar -xzf "$SOURCE" -C "$WORK"
+    SRC=$(find "$WORK" -mindepth 1 -maxdepth 1 -type d -name 'cadapt-*' | head -1)
+    [ -n "$SRC" ] || fail "no cadapt-* directory in $SOURCE"
+    for f in LICENSE README.md CHANGELOG.md adpat/c/Makefile adpat/c/adapt.h; do
+        [ -f "$SRC/$f" ] || fail "$f missing from the source tarball"
+    done
 else
     SRC="$WORK/src"
     mkdir -p "$SRC"
@@ -125,4 +137,8 @@ mkdir -p "$WORK/scratch"
 use_installation "$STAGE/usr/local" "$SRC/adpat/c/examples" "$WORK/scratch"
 ( cd "$SRC/adpat/c" && make -s uninstall DESTDIR="$STAGE" PREFIX=/usr/local > /dev/null 2>&1 ) || fail "uninstall"
 [ -z "$(find "$STAGE" -type f)" ] || fail "uninstall left files: $(find "$STAGE" -type f)"
-echo "test_install: the tree builds with cc and make alone, installs under a prefix, runs, and uninstalls clean"
+if [ -n "$SOURCE" ]; then
+    echo "test_install: $(basename "$SOURCE") builds with cc and make alone, installs under a prefix, runs, and uninstalls clean"
+else
+    echo "test_install: the tree builds with cc and make alone, installs under a prefix, runs, and uninstalls clean"
+fi

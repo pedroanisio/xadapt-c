@@ -74,6 +74,11 @@ git archive "$FULL" adpat/c tools docs Makefile LICENSE README.md CHANGELOG.md S
     sbom.spdx.json | tar -x -C "$SRC"
 rm -rf "$SRC/adpat/c/build" "$SRC/tools/__pycache__"
 ( cd "$WORK" && tar -czf "$OUT/cadapt-$VERSION-src.tar.gz" "cadapt-$VERSION" )
+# the source tarball as a user gets it: built, installed under a prefix, used
+# and uninstalled from its own contents (the export list above is what it
+# holds; a file missing from the list fails here, not on a user's machine)
+tools/test_install.sh --source "$OUT/cadapt-$VERSION-src.tar.gz" > "$OUT/source-install.log" 2>&1 \
+    || { cat "$OUT/source-install.log"; echo "the source tarball does not build and install from its contents" >&2; exit 1; }
 
 # 2. the build, its tests, and the record of it — after the documents'
 #    floors blocks (the README, the manual, this version's release notes,

@@ -338,6 +338,82 @@ class ResearchIndexTest(unittest.TestCase):
                 self.assertTrue(f"({path.name})" in index, f"research/README.md does not link {path.name}")
 
 
+class PipelineDocTest(unittest.TestCase):
+    def test_the_gates_table_names_every_workflow_job_and_no_other(self) -> None:
+        """The "Where it runs" column of docs/release-pipeline.md names the
+        jobs of ci.yml: every job is in the table, and every backticked
+        token there is a job or a word of the workflow (a branch, a label)."""
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        jobs = set(re.findall(r"^  ([a-z][a-z-]+):$", ci, flags=re.M)) - {"push", "on"}
+        text = (ROOT / "docs" / "release-pipeline.md").read_text(encoding="utf-8")
+        table = text[text.index("| Gate | Holds |") :]
+        table = table[: table.index("\n\n")]
+        named: set[str] = set()
+        for row in table.split("\n")[2:]:
+            cells = [c.strip() for c in row.strip("|").split("|")]
+            for token in re.findall(r"`([a-z][a-z-]+)`", cells[-1]):
+                named.add(token)
+                self.assertTrue(token in jobs or token in ci, f"docs/release-pipeline.md names `{token}`, which ci.yml has no job or word for")
+        self.assertEqual(sorted(jobs - named), [], "ci.yml jobs the gates table does not place")
+
+
+class InstallLayoutTest(unittest.TestCase):
+    def test_the_install_layout_the_documents_state_is_the_makefiles(self) -> None:
+        """`make install` writes the paths its recipe names; the README and
+        the current release notes restate them and are held to the recipe."""
+        dry = subprocess.run(["make", "-n", "-C", str(ROOT / "adpat" / "c"), "install", "PREFIX=/p"],
+                             capture_output=True, text=True, check=True).stdout
+        installed = sorted(set(re.findall(r"install -m \d+ \S+ /p/(\S+)", dry)))
+        self.assertTrue(installed, "the install recipe installs nothing?")
+        readme = README.read_text(encoding="utf-8")
+        for path in installed:
+            self.assertTrue(f"`{path}`" in readme, f"README.md does not name `{path}`, which make install writes")
+        notes = ROOT / "docs" / "release-notes" / f"{cadapt_version()}.md"
+        if notes.exists():
+            text = notes.read_text(encoding="utf-8")
+            for path in installed:
+                self.assertTrue(f"`{path}`" in text, f"{notes.name} does not name `{path}`, which make install writes")
+        # and nothing the documents name as installed is absent from the recipe
+        for doc, text in (("README.md", readme),):
+            claimed = set(re.findall(r"`((?:bin|lib|include|share)/[\w./]+)`", text))
+            self.assertEqual(sorted(claimed - set(installed)), [], f"{doc} names installed files the recipe does not write")
+
+
+class EnvironmentTest(unittest.TestCase):
+    def test_every_environment_variable_the_code_reads_is_documented(self) -> None:
+        """A variable read by the codec, the tests or the tools is named in
+        the README, the manual or the bench README — or it is a knob nobody
+        can find."""
+        codec = ROOT / "adpat" / "c"
+        read: set[str] = set()
+        for path in list(codec.glob("*.c")) + list(codec.glob("*.h")):
+            read |= set(re.findall(r'getenv\("([A-Z_]+)"\)', path.read_text(encoding="utf-8")))
+        for path in list(codec.glob("tests/*.py")) + list((ROOT / "tools").glob("*.py")) + list((ROOT / "bench").glob("*.py")):
+            read |= set(re.findall(r'environ(?:\.get)?\(?\[?"([A-Z_]+)"', path.read_text(encoding="utf-8")))
+        documents = "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("README.md", "adpat/c/cadapt.1", "bench/README.md"))
+        undocumented = sorted(name for name in read if name not in documents)
+        self.assertEqual(undocumented, [], "environment variables the code reads and no document names")
+
+
+class VersionRangeTest(unittest.TestCase):
+    def test_the_current_release_notes_and_changelog_entry_state_the_binarys_range(self) -> None:
+        """`cadapt --version` names the container versions the release reads
+        ("format versions 19 to 85"); the current version's release notes
+        and changelog entry restate the range and are held to it."""
+        run = subprocess.run([str(CADAPT), "--version"], capture_output=True, text=True, timeout=30)
+        match = re.search(r"\(format versions (\d+ to \d+)\)", run.stdout)
+        self.assertIsNotNone(match, f"--version printed {run.stdout!r}")
+        version, span = cadapt_version(), match.group(1)
+        changelog = CHANGELOG.read_text(encoding="utf-8")
+        entry = changelog[changelog.index(f"## [{version}]") :]
+        entry = entry[: entry.index("\n## ", 1)] if "\n## " in entry[1:] else entry
+        self.assertTrue(f"versions {span}" in " ".join(entry.split()), f"CHANGELOG.md's [{version}] entry does not state format versions {span}")
+        notes = ROOT / "docs" / "release-notes" / f"{version}.md"
+        if notes.exists():
+            self.assertTrue(f"versions {span}" in " ".join(notes.read_text(encoding="utf-8").split()),
+                            f"{notes.name} does not state format versions {span}")
+
+
 class LayoutTest(unittest.TestCase):
     def test_layout_table_has_a_row_for_every_tracked_top_level_entry(self) -> None:
         text = README.read_text(encoding="utf-8")

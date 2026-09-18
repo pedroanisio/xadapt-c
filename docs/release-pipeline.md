@@ -51,7 +51,7 @@ working tree, so what is published is what is committed (`DLV-2`) — into
 | Artifact | Holds |
 |---|---|
 | `cadapt-<version>-<os>-<arch>.tar.gz` | `bin/cadapt` (stripped), `lib/libadapt.a`, `include/adapt.h`, `share/man/man1/cadapt.1` — the layout `make install` writes, relocatable under any prefix — with `LICENSE`, `NOTICE`, `CHANGELOG.md`, `sbom.spdx.json` and `build-manifest.json` |
-| `cadapt-<version>-src.tar.gz` | the sources, tools and documents; the corpora stay out (`tools/fetch_corpus.py` fetches them) |
+| `cadapt-<version>-src.tar.gz` | the sources, tools and documents; the corpora stay out (`tools/fetch_corpus.py` fetches them). Before it is packaged, `tools/test_install.sh --source` unpacks it, builds it with cc and make alone, installs it under a prefix, uses it and uninstalls it — what the README promises of a source tarball, proven from its contents |
 | `sbom.spdx.json` | the SPDX 2.3 document of the sources: every file by SHA-256 and SHA-1, the licence, the run-time, build-time and test-time dependencies |
 | `build-manifest.json` | the record of the build that made the binary: the sources' hashes, the compiler's version line and flags, the host, the hash and size of every output; `python3 tools/provenance.py reproduce --manifest dist/<version>/build-manifest.json` (or `make reproduce MANIFEST=…`) rebuilds and compares; not tracked in git, since it names the commit and the host it was made on |
 | `NOTICE` | the licence and dependency statement, generated from the SBOM: MIT, no third-party code bundled, the C library and POSIX threads at run time, a C compiler to build, Python and the corpora under test only |
@@ -75,8 +75,9 @@ revision whose `cadapt.c` says `<version>`; the script refuses otherwise.
    `ci.yml`, builds the artifacts on Linux and macOS with `tools/release.sh`,
    installs each binary tarball from its unpacked layout and uses it,
    proves the build reproduces from its manifest, and publishes a GitHub
-   release with one `SHA256SUMS` over every platform's files and the
-   CHANGELOG entry as its notes.
+   release with one `SHA256SUMS` over every platform's files and
+   `docs/release-notes/<version>.md` as its body (`tools/release.sh`
+   refuses a revision without it).
 4. Locally, `make release RELEASE_REV=v<version>` makes the same files under
    `dist/<version>/` for a release published by hand or verified against
    the workflow's.
