@@ -174,7 +174,7 @@ COVUNITS = adapt_decode adapt_encode adapt_archive cadapt cadapt_folder cadapt_f
 COVDIR = $(abspath $(COV))
 COVSTRIP = $(words $(subst /, ,$(COVDIR)))
 COVRUN = GCOV_PREFIX_STRIP=$(COVSTRIP) GCOV_PREFIX=$(COVDIR)/gcda
-CLI_CLASSES = AllocationTest AdaptiveTest VerificationTest MetadataTest MemoryContractTest InstructionSetTest FolderTest \
+CLI_CLASSES = AllocationTest AdaptiveTest VerificationTest MetadataTest MemoryContractTest InstructionSetTest FolderTest ThreadCountTest \
               PresetTest SurfaceTest CommandTest
 
 coverage:
@@ -229,15 +229,43 @@ FUZZ_CFLAGS ?= -std=c99 -O1 -g -DADAPT_NO_MULTIVERSION -fsanitize=fuzzer,address
 $(BUILD)/fuzz_decode: fuzz/fuzz_decode.c fuzz/fuzz_decode.h adapt_decode.c adapt_encode.c adapt_archive.c adapt.h $(MODEL_H) adapt_adaptive.h adapt_bmp.h | $(BUILD)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) adapt_decode.c adapt_encode.c adapt_archive.c fuzz/fuzz_decode.c -o $@
 
-fuzz: $(BUILD)/fuzz_decode
+# fuzz_header: the same oracle on bytes whose header checksum is made good
+# first, so the header's fields are reached; fuzz_archive: the archive
+# unpacker with a sink that holds it to its contract, seeded by
+# archive_seeds. FUZZ_MODEL_MEMORY caps the model one execution admits:
+# the default 128 MiB reaches every sizing a header can name below it;
+# 64 MiB still admits every vector's model (31 MiB normal, 60 MiB max)
+# while refusing the large tables that cost a run most of its time.
+FUZZ_MODEL_MEMORY ?= ((uint64_t)128 << 20)
+
+$(BUILD)/fuzz_header: fuzz/fuzz_header.c fuzz/fuzz_decode.c fuzz/fuzz_decode.h adapt_decode.c adapt_encode.c adapt_archive.c adapt.h $(MODEL_H) adapt_adaptive.h adapt_bmp.h | $(BUILD)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) "-DADAPT_FUZZ_MAX_MODEL_MEMORY=$(FUZZ_MODEL_MEMORY)" -DADAPT_FUZZ_NO_ENTRY adapt_decode.c adapt_encode.c adapt_archive.c fuzz/fuzz_decode.c fuzz/fuzz_header.c -o $@
+
+$(BUILD)/fuzz_archive: fuzz/fuzz_archive.c adapt_archive.c adapt.h | $(BUILD)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) adapt_archive.c fuzz/fuzz_archive.c -o $@
+
+$(BUILD)/archive_seeds: fuzz/archive_seeds.c adapt.h $(LIB)
+	$(CC) $(CFLAGS) -o $@ fuzz/archive_seeds.c $(LIB) $(LDFLAGS)
+
+fuzz: $(BUILD)/fuzz_decode $(BUILD)/fuzz_header $(BUILD)/fuzz_archive
 
 fuzz-smoke: fuzz
 	mkdir -p $(BUILD)/fuzz-corpus
 	cp tests/vectors/*.adpt $(BUILD)/fuzz-corpus/
 	$(BUILD)/fuzz_decode $(BUILD)/fuzz-corpus -runs=$(FUZZ_RUNS) -max_len=65536 -seed=1 -print_final_stats=1
 
+fuzz-header-smoke: $(BUILD)/fuzz_header
+	mkdir -p $(BUILD)/fuzz-header-corpus
+	cp tests/vectors/*.adpt $(BUILD)/fuzz-header-corpus/
+	$(BUILD)/fuzz_header $(BUILD)/fuzz-header-corpus -runs=$(FUZZ_RUNS) -max_len=65536 -seed=1 -print_final_stats=1
+
+fuzz-archive-smoke: $(BUILD)/fuzz_archive $(BUILD)/archive_seeds
+	mkdir -p $(BUILD)/fuzz-archive-corpus
+	$(BUILD)/archive_seeds $(BUILD)/fuzz-archive-corpus
+	$(BUILD)/fuzz_archive $(BUILD)/fuzz-archive-corpus -runs=$(FUZZ_RUNS) -max_len=4096 -seed=1 -print_final_stats=1
+
 clean:
 	rm -rf $(BUILD) $(COV) $(SANITIZE_BUILD)
 
-.PHONY: all test coverage sanitize fuzz fuzz-smoke check check-parts check-long clean
+.PHONY: all test coverage sanitize fuzz fuzz-smoke fuzz-header-smoke fuzz-archive-smoke check check-parts check-long clean
 .PHONY: $(BUILD)/runs/gcov-tests

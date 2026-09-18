@@ -811,15 +811,23 @@ static adapt_status decode_input(replay *ahead, uint64_t threads, adapt_sizes si
  * decode
  * --------------------------------------------------------------------- */
 
-static int codec_failure(const char *input, const adapt_error *error, const stream *in, const stream *out) {
+/* The codec's failure as a message against the path that failed: the
+ * input, or, for an i/o error the sink raised and the source did not, the
+ * output — a full disk is the output's fault, not the input's. */
+static int codec_failure(const char *input, const char *output, const adapt_error *error, const stream *in,
+                         const stream *out) {
     char message[160];
+    const char *path = input;
     if (error->status == ADAPT_ERROR_IO) {
         int e = in->error != 0 ? in->error : out->error;
+        if (in->error == 0 && out->error != 0 && output != NULL) {
+            path = strcmp(output, "-") == 0 ? "standard output" : output;
+        }
         snprintf(message, sizeof(message), "i/o error: %s", e != 0 ? strerror(e) : "callback failed");
     } else {
         adapt_error_message(error, message, sizeof(message));
     }
-    return other_error(input, message);
+    return other_error(path, message);
 }
 
 /* The header, read ahead of the decoder to learn whether the container
@@ -1103,7 +1111,7 @@ static int decode_file(decode_job *job) {
                           write_stream, &io->out, &job->stats, &error);
     status = command_flush_output(io, status, &error);
     command_close_input(io);
-    if (status != ADAPT_OK) return codec_failure(io->input, &error, &io->in, &io->out);
+    if (status != ADAPT_OK) return codec_failure(io->input, io->output, &error, &io->in, &io->out);
     if (io->stage.file != NULL) {
         rc = staged_publish(&io->stage, io->output, job->options.force, job->has_metadata ? &job->metadata : NULL);
         if (rc != 0) return rc;
@@ -1597,7 +1605,7 @@ static int encode_run(encode_job *job) {
         if (options->is_folder && status == ADAPT_ERROR_IO && io->out.error == 0) {
             return packer_failure(io->input, &job->pack);
         }
-        return codec_failure(io->input, &error, &io->in, &io->out);
+        return codec_failure(io->input, io->output, &error, &io->in, &io->out);
     }
     return 0;
 }
@@ -1642,7 +1650,7 @@ static int encode_verify_after(encode_job *job) {
     rc = 0;
     if (status != ADAPT_OK) {
         rc = job->options.is_folder && status == ADAPT_ERROR_IO && job->pack.failed != NULL ?
-            packer_failure(io->input, &job->pack) : codec_failure(io->input, &error, &again, &coded);
+            packer_failure(io->input, &job->pack) : codec_failure(io->input, io->stage.path, &error, &again, &coded);
     }
 done:
     if (again.file != NULL) fclose(again.file);

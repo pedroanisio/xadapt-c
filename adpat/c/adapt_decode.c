@@ -132,6 +132,9 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
      * metadata version): the profile, the transform, the side tables and
      * set, the experimental predictor or BMP mode, the arbiters' keys */
     stream = adapt_version_lookup(row->stream);
+    if (stream == NULL) {
+        return fail(error, ADAPT_ERROR_UNSUPPORTED_VERSION, header[4], 0);
+    }
     version = row->stream;
     s.fast = stream->profile == ADAPT_PROFILE_FAST;
     s.max = stream->profile == ADAPT_PROFILE_MAX;
@@ -910,7 +913,8 @@ void adapt_free(uint8_t *bytes) {
  * the caller holds; the headroom. */
 uint64_t adapt_parallel_decode_memory_bound(adapt_sizes sizes, uint64_t workers, uint64_t segment_raw_max,
                                             uint64_t file_len) {
-    return (adapt_model_bytes(sizes) + segment_raw_max + block_workspace()) * workers + file_len + HEADROOM;
+    return saturating_add(saturating_mul(adapt_model_bytes(sizes) + segment_raw_max + block_workspace(), workers),
+                          saturating_add(file_len, HEADROOM));
 }
 
 uint64_t adapt_decode_workers(adapt_sizes sizes, uint64_t max_memory, uint64_t segment_raw_max, uint64_t file_len,

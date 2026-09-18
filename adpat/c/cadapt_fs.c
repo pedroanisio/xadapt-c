@@ -31,9 +31,11 @@
 
 void attrs_free(attrs *a) {
     uint32_t i;
+    /* attrs_read() counts the names before it allocates their arrays, so
+     * a failed allocation is freed with the count set and an array NULL. */
     for (i = 0; i < a->count; i++) {
-        free(a->names[i]);
-        free(a->values[i]);
+        if (a->names != NULL) free(a->names[i]);
+        if (a->values != NULL) free(a->values[i]);
     }
     free(a->names);
     free(a->values);

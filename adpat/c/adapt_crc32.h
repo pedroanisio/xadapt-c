@@ -190,6 +190,20 @@ static inline uint64_t block_workspace(void) {
     return 3 * ((uint64_t)ADAPT_BLOCK_BYTES + ADAPT_BLOCK_HEADER_BYTES + 36) + (uint64_t)SCAN_SLOTS * 4;
 }
 
+/* A memory bound's arithmetic saturates: a count of workers or threads
+ * large enough to wrap the product must read as more memory than any
+ * budget, never as less, or check_memory() would admit it. */
+static inline uint64_t saturating_mul(uint64_t a, uint64_t b) {
+    if (a != 0 && b > UINT64_MAX / a) {
+        return UINT64_MAX;
+    }
+    return a * b;
+}
+
+static inline uint64_t saturating_add(uint64_t a, uint64_t b) {
+    return b > UINT64_MAX - a ? UINT64_MAX : a + b;
+}
+
 static inline adapt_status check_memory(uint64_t required, uint64_t limit, adapt_error *error) {
     if (required > limit) {
         return fail(error, ADAPT_ERROR_MEMORY_LIMIT, required, limit);

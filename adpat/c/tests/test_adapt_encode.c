@@ -1401,6 +1401,20 @@ static void test_segments(void) {
                  ADAPT_ERROR_BAD_HEADER);
     CHECK_STATUS(adapt_sizes_for_threads(10, (uint64_t)1 << 30, 2, 7, &threads, &error), ADAPT_ERROR_BAD_HEADER);
     CHECK(adapt_segment_out_bound(ADAPT_SEGMENT_BYTES) == 1 + ADAPT_SEGMENT_BYTES + 64 * ADAPT_BLOCK_HEADER_BYTES);
+    /* a thread count that wraps the bound's product reads as more memory
+     * than any budget, never as less: 2^63 threads times an even
+     * per-thread cost wrapped to the headroom alone and was admitted,
+     * the sizes then fitted to a share that had underflowed */
+    CHECK(adapt_threads_encode_memory_bound(threads, (uint64_t)1 << 63, ADAPT_SEGMENT_BYTES) == UINT64_MAX);
+    CHECK(adapt_threads_encode_memory_bound(threads, UINT64_MAX, ADAPT_SEGMENT_BYTES) == UINT64_MAX);
+    CHECK(adapt_parallel_encode_memory_bound(threads, (uint64_t)1 << 63, ADAPT_SEGMENT_BYTES) == UINT64_MAX);
+    CHECK_STATUS(adapt_sizes_for_threads(3000000, ADAPT_DEFAULT_MAX_MEMORY, (uint64_t)1 << 63, ADAPT_SEGMENT_BYTES, &threads,
+                                         &error),
+                 ADAPT_ERROR_MEMORY_LIMIT);
+    CHECK(error.detail == UINT64_MAX && error.limit == ADAPT_DEFAULT_MAX_MEMORY);
+    CHECK_STATUS(adapt_sizes_for_threads_max(3000000, ADAPT_DEFAULT_MAX_MEMORY, (uint64_t)1 << 63, ADAPT_SEGMENT_BYTES, &threads,
+                                             &error),
+                 ADAPT_ERROR_MEMORY_LIMIT);
     free(data);
     free(coded);
     free(again);

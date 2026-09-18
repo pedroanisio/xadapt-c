@@ -15,6 +15,14 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Added
 
+- Two libFuzzer harnesses beside `fuzz_decode`: `fuzz_header` (the same
+  oracle on bytes whose header checksum is made good first, so the fields
+  a CRC-32 shielded from mutation are reached) and `fuzz_archive` (the
+  archive unpacker in short pieces into a sink that holds it to its
+  contract), with `archive_seeds` writing well-formed archives of every
+  version as their corpus; `make fuzz-header-smoke`,
+  `make fuzz-archive-smoke`, and `FUZZ_MODEL_MEMORY` to cap the decoder
+  harnesses' model.
 - `cadapt 0.12.0 --max --allocation context` is listed on the Large Text
   Compression Benchmark (mattmahoney.net/dc/text.html, 2026-09-15): enwik9
   150,063,628 B plus a 209,893 B decompressor, total 150,273,521 B, rank
@@ -32,6 +40,44 @@ The binary reports `0.12.0`; the tag is pending.
   of 2026-09-15 (226 rows).
 
 ### Fixed
+
+- The memory bounds saturate. `adapt_threads_encode_memory_bound`,
+  `adapt_parallel_encode_memory_bound` and
+  `adapt_parallel_decode_memory_bound` multiplied a per-worker cost by the
+  caller's thread count in plain `uint64_t` arithmetic, so a count that
+  wrapped the product read as *less* memory than any budget: `cadapt
+  encode --threads 9223372036854775808` was admitted ("the sizes are
+  fitted to 9223372036854775808 models as asked") and fitted the file to a
+  share that had underflowed — a recall index and window larger than
+  `--threads 12` gives at the same tier — while 2^64−1 and 2^32+1 were
+  refused. Every count that wraps is now refused as the budget's, and the
+  C suites hold the three bounds to `UINT64_MAX` on such counts
+  (`ThreadCountTest` in the CLI suite).
+- An i/o error the output raised — a full disk, a closed pipe — was
+  reported against the input's path; it names the output now (`standard
+  output` for `-`).
+- `attrs_free` dereferenced a NULL array when `attrs_read` failed to
+  allocate the arrays after it had counted the names (gcc's analyzer); it
+  tolerates the arrays a failed allocation left NULL. `read_packer` refuses
+  a header stage without an entry instead of dereferencing it (an
+  invariant of `packer_next`, made explicit), and the decoder refuses a
+  version-table row whose stream is not a row (an invariant the table's
+  test holds).
+- The audit that found them: gcc `-fanalyzer` and clang `--analyze` over
+  the six units; gcc with `-Wshadow -Wconversion -Wsign-conversion
+  -Wnull-dereference -Wformat=2 -Wcast-qual …` (the rest triaged benign:
+  bounded `int16` arithmetic, `int`→`size_t` lane counts, `ENOTSUP ==
+  EOPNOTSUPP`); the C suites, the CLI suite (66 tests, leak detection on)
+  and the safety suite under AddressSanitizer and UndefinedBehaviorSanitizer
+  — the sanitizer build had never produced the `cadapt` binary, so the
+  CLI suite had never run under them; the C suites under
+  MemorySanitizer and ThreadSanitizer; libFuzzer on the two decoders
+  (15 min × 4 workers at 128 MiB, 10 min × 3 at 64 MiB), on the decoders
+  with the header checksum made good (10 min × 3) and on the archive
+  unpacker (10 min × 3, ~15 M executions). No memory error, no undefined
+  behaviour, no data race and no crash was found; the four safety-suite
+  failures under ASan are its shadow reservation refused by the tests'
+  own `RLIMIT_AS`.
 
 - One version table, `ADAPT_VERSIONS` in `adapt.h`: every container version
   the decoder reads is a row naming its stream form, whether it carries the

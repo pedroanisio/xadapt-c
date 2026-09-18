@@ -1265,6 +1265,40 @@ class FolderTest(unittest.TestCase):
         self.assertEqual([], list(parent.iterdir()))
 
 
+class ThreadCountTest(unittest.TestCase):
+    """--threads takes any count of one or more, and the sizes are fitted to
+    it whatever the machine; a count too large for the budget is refused as
+    the budget's, never admitted by arithmetic that wrapped."""
+
+    def setUp(self) -> None:
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        self.source = self.root / "source.txt"
+        self.source.write_bytes(b"the quick brown fox jumps over the lazy dog\n" * 70000)
+
+    def run_codec(self, *args):
+        return subprocess.run([str(CADAPT), *map(str, args)], capture_output=True, timeout=TIMEOUT)
+
+    def test_a_thread_count_that_wraps_the_memory_bound_is_refused_like_any_other_too_large(self) -> None:
+        # 2^63 threads times an even per-thread cost wrapped the bound to
+        # the headroom alone: the count was admitted and the file's sizes
+        # were fitted to a share that had underflowed, unlike 2^64 - 1 and
+        # 2^32 + 1, which the budget refused
+        for count in (1 << 63, (1 << 64) - 1, (1 << 32) + 1, 1_000_000):
+            with self.subTest(threads=count):
+                out = self.root / f"t{count}.adpt"
+                run = self.run_codec("encode", self.source, "-o", out, "--threads", count, "--no-verify")
+                self.assertEqual(run.returncode, 1, run.stderr)
+                self.assertIn(b"memory budget exceeded", run.stderr)
+                self.assertFalse(out.exists())
+        # while a count the budget holds runs, capped at the CPUs online
+        run = self.run_codec("encode", self.source, "-o", self.root / "ok.adpt", "--threads", 3, "--no-verify")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        decoded = self.run_codec("decode", self.root / "ok.adpt", "-o", "-")
+        self.assertEqual(decoded.stdout, self.source.read_bytes())
+
+
 class PresetTest(unittest.TestCase):
     """-0 .. -9 name xz's compression memory, -10 and -11 the 1 and 2 GiB
     tiers above it; -9 is the default; the last preset given wins."""
@@ -1627,6 +1661,25 @@ class CommandTest(CodecTest):
                     self.assert_failure(run, message, b"limit 0")
                     self.assertEqual(run.stdout, b"")
                     self.assertFalse(out.exists())
+
+    @unittest.skipUnless(Path("/dev/full").exists(), "a device that refuses every write")
+    def test_a_sink_that_fails_is_named_in_the_error_not_the_input(self) -> None:
+        """A full disk is the output's fault: the message names standard
+        output (or the output file), not the input that was read fine."""
+        source = self.root / "words.txt"
+        source.write_bytes(b"alpha beta gamma delta\n" * 4000)
+        with open("/dev/full", "wb") as full:
+            encoded = subprocess.run([str(CADAPT), "encode", str(source), "-o", "-", "--no-verify"],
+                                     stdout=full, stderr=subprocess.PIPE, timeout=TIMEOUT)
+        self.assertEqual(encoded.returncode, 1, encoded.stderr)
+        self.assertIn(b"error: standard output: i/o error: No space left on device", encoded.stderr)
+        self.assertNotIn(b"words.txt", encoded.stderr)
+        with open("/dev/full", "wb") as full:
+            decoded = subprocess.run([str(CADAPT), "decode", str(VECTORS / "abc.adpt"), "-o", "-"],
+                                     stdout=full, stderr=subprocess.PIPE, timeout=TIMEOUT)
+        self.assertEqual(decoded.returncode, 1, decoded.stderr)
+        self.assertIn(b"error: standard output: i/o error: No space left on device", decoded.stderr)
+        self.assertNotIn(b"abc.adpt", decoded.stderr)
 
     def test_repeated_value_options_use_the_last_value(self) -> None:
         want = (VECTORS / "abc.bin").read_bytes()

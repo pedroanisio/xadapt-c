@@ -103,7 +103,11 @@ adapt_status adapt_fuzz_decode(const uint8_t *data, size_t size) {
     return whole;
 }
 
+/* The entry point, unless another harness (fuzz_header.c) brings its own
+ * and takes the oracle above. */
+#ifndef ADAPT_FUZZ_NO_ENTRY
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     (void)adapt_fuzz_decode(data, size);
     return 0;
 }
+#endif

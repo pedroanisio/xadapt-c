@@ -56,7 +56,7 @@ refuses versions 10–18. The header of
 |---|---|
 | [adpat/c/](adpat/c/) | The codec: `adapt.h` (public interface), `adapt_model.h` (the predictor, coder and framing, shared by both units: an umbrella over `adapt_constants.h`, `adapt_states.h`, `adapt_coder.h`, `adapt_tables.h`, `adapt_model_state.h`, `adapt_model_byte.h`, `adapt_model_bit.h`, `adapt_model_new.h`, `adapt_blocks.h` and `adapt_crc32.h`, included in that order), `adapt_text.h` (the text transform), `adapt_bmp.h` and `adapt_adaptive.h` (the BMP transform and the adaptive predictors), `adapt_decode.c`, `adapt_encode.c`, `adapt_archive.c` (the folder archive stream), `cadapt.c` (the command line: its commands, arguments, streams and staged file) with `cadapt_folder.c`/`cadapt_folder.h` (the folder side: a directory walked into an archive stream, an archive stream restored into a staged directory), `cadapt_fs.c`/`cadapt_fs.h` (the extended attributes, sparse maps and metadata calls it preserves a file with) and `cadapt_platform.h` (the feature macros and the calls whose names differ off POSIX), its manual `cadapt.1`, `Makefile` |
 | [adpat/c/tests/](adpat/c/tests/) | C unit tests for both units, the CLI's Python tests, the coverage gate's tests, and the committed vectors |
-| [adpat/c/fuzz/](adpat/c/fuzz/) | A libFuzzer harness for the two decoders |
+| [adpat/c/fuzz/](adpat/c/fuzz/) | libFuzzer harnesses: the two decoders, the same with the header checksum made good, the archive unpacker with its seeds |
 | [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |
 | [bench/](bench/README.md) | Retained historical benchmark scripts, measurements and plots |
 | [docs/](docs/CONSTRAINTS.md) | What the codec is held to ([CONSTRAINTS.md](docs/CONSTRAINTS.md)) and the dated performance audits |
@@ -477,6 +477,25 @@ Link against `build/libadapt.a` with `-pthread` (or build with `THREADS=`).
   directory (`FUZZ_RUNS` changes the count). The normal test and coverage
   gates also prove that the actual harness accepts modeled normal, fast,
   and max fixtures, honors its output cap, and refuses oversized models.
+  Two more harnesses reach what that one cannot:
+  [fuzz/fuzz_header.c](adpat/c/fuzz/fuzz_header.c) runs the same oracle on
+  bytes whose header checksum is made good first — a header is refused on
+  its CRC-32 before any field is read, so mutations of the version, sizes,
+  period, sizing or policy byte, BMP descriptor and metadata record hardly
+  ever reached the code that reads them (`make -C adpat/c
+  fuzz-header-smoke`); [fuzz/fuzz_archive.c](adpat/c/fuzz/fuzz_archive.c)
+  feeds the archive unpacker in short pieces into a sink that holds it to
+  its contract — data only between a file's open and close and inside an
+  extent, extents ascending within the apparent length, every path and
+  hard-link target a valid archive path, malformed once malformed for
+  good — seeded with the well-formed archives of every version that
+  [fuzz/archive_seeds.c](adpat/c/fuzz/archive_seeds.c) writes (`make -C
+  adpat/c fuzz-archive-smoke`). `FUZZ_MODEL_MEMORY=((uint64_t)64<<20)`
+  caps the decoder harnesses' model at 64 MiB — still every vector's
+  model, no longer the large tables that cost a run most of its time; a
+  clang whose default GCC installation has
+  no `libstdc++.so` links libFuzzer with
+  `FUZZ_CFLAGS="... --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13"`.
 
 ## Licence, security, support, provenance
 

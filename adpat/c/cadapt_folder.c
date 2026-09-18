@@ -604,6 +604,9 @@ int read_packer(void *context, uint8_t *buf, size_t len, size_t *got) {
                 p->stage = PACK_ROOT_ATTRS;
             } else if (p->stage == PACK_EXTENT) {
                 p->stage = PACK_DATA;
+            } else if (e == NULL) {
+                /* packer_next() enters PACK_HEADER only with an entry */
+                rc = EIO;
             } else if (e->kind == KIND_FILE) {
                 rc = packer_open(p);
                 p->remaining = e->size;

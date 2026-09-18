@@ -1556,6 +1556,9 @@ static void test_threads(void) {
         adapt_sizes plain = sizes;
         plain.segmented = 0;
         CHECK(three > two && two > adapt_decode_memory_bound(sizes));
+        /* a worker count that wraps the product saturates the bound */
+        CHECK(adapt_parallel_decode_memory_bound(sizes, (uint64_t)1 << 63, raw_max, file_len) == UINT64_MAX);
+        CHECK(adapt_parallel_decode_memory_bound(sizes, 2, raw_max, UINT64_MAX) == UINT64_MAX);
 #ifdef ADAPT_THREADS
         CHECK(adapt_decode_workers(sizes, two, raw_max, file_len, 4) == 2);
         CHECK(adapt_decode_workers(sizes, three - 1, raw_max, file_len, 4) == 2);

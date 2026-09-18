@@ -373,7 +373,8 @@ uint64_t adapt_segment_out_bound(uint64_t segment_bytes) {
 }
 
 uint64_t adapt_threads_encode_memory_bound(adapt_sizes sizes, uint64_t threads, uint64_t segment_bytes) {
-    return (adapt_model_bytes(sizes) + block_workspace() + adapt_segment_out_bound(segment_bytes)) * threads + HEADROOM;
+    uint64_t each = adapt_model_bytes(sizes) + block_workspace() + adapt_segment_out_bound(segment_bytes);
+    return saturating_add(saturating_mul(each, threads), HEADROOM);
 }
 
 /* A policy affects resource allocation only; the selected sizes travel in
@@ -382,8 +383,7 @@ static uint64_t context_allocation_bound(adapt_sizes s, uint64_t workers,
                                           uint64_t segment_bytes, int verified) {
     if (workers >= 2) {
         uint64_t per_worker = adapt_model_bytes(s) + block_workspace() + adapt_segment_out_bound(segment_bytes);
-        if (workers > (UINT64_MAX - HEADROOM) / per_worker) return UINT64_MAX;
-        return per_worker * workers + HEADROOM;
+        return saturating_add(saturating_mul(per_worker, workers), HEADROOM);
     }
     return verified ? adapt_verified_memory_bound(s) : adapt_encode_memory_bound(s);
 }
@@ -1451,7 +1451,7 @@ static adapt_status verifier_finish(verifier *v, adapt_error *error) {
 uint64_t adapt_parallel_encode_memory_bound(adapt_sizes sizes, uint64_t workers, uint64_t segment_bytes) {
     uint64_t each = adapt_model_bytes(sizes) + segment_bytes + adapt_segment_out_bound(segment_bytes) + CODED_SLACK +
                     block_workspace();
-    return each * workers + block_workspace() + HEADROOM;
+    return saturating_add(saturating_mul(each, workers), block_workspace() + HEADROOM);
 }
 
 uint64_t adapt_encode_workers(adapt_sizes sizes, uint64_t max_memory, uint64_t segment_bytes, uint64_t threads) {
