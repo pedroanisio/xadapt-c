@@ -29,3 +29,4 @@ docs/doc-quarantine/quarantine-summaries.md
 dist/
 _study/
 of.txt
+proxmox_api.env
