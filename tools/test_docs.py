@@ -234,13 +234,14 @@ class ChangelogTest(unittest.TestCase):
 class MakeTargetsTest(unittest.TestCase):
     def test_every_cited_make_target_exists_where_it_is_cited(self) -> None:
         """`make x` cited in backticks is a rule of the root Makefile, and
-        `make -C adpat/c x` one of the codec's; the changelog's entries are
-        history and are not held."""
+        `make -C adpat/c x` one of the codec's. Dated records (the changelog,
+        the audits, the research notes) are history or proposals and are not
+        held; LOCKS.md is, since its locks are the policy in force."""
         root, codec = make_targets(ROOT / "Makefile"), make_targets(ROOT / "adpat" / "c" / "Makefile")
         citation = re.compile(r"`make(?: (-C adpat/c))?(?: -j\d*)?(?: [A-Z_]+=\S+)* ([a-z][a-z-]*)[^`]*`")
         problems = []
         for path in tracked_documents():
-            if path == "CHANGELOG.md":
+            if dated_record(path) and path != "LOCKS.md":
                 continue
             text = (ROOT / path).read_text(encoding="utf-8")
             for line_number, line in enumerate(text.split("\n"), 1):
