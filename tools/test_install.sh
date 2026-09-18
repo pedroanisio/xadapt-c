@@ -71,7 +71,7 @@ use_installation() {
     if [ "$rendered" = 0 ] && { command -v mandoc > /dev/null 2>&1 || command -v nroff > /dev/null 2>&1; }; then
         fail "manual: a renderer is installed but did not render the page"
     fi
-    [ "$rendered" = 1 ] || echo "test_install: no manual renderer here, the page's rendering is not checked
+    [ "$rendered" = 1 ] || echo "test_install: no manual renderer here, the page's rendering is not checked"
     # a program against the installed header and library, and run
     ${CC:-cc} -std=c99 -Wall -Wextra -I"$prefix/include" -o "$scratch/roundtrip" "$examples/roundtrip.c" \
         "$prefix/lib/libadapt.a" -pthread || fail "compile against the installation"

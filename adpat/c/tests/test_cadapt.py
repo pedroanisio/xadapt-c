@@ -1100,7 +1100,7 @@ class FolderTest(unittest.TestCase):
             os.setxattr(folder / "a.txt", "user.empty", b"")
             os.setxattr(folder / "sub", "user.dir", b"yes")
             xattrs = True
-        except OSError:
+        except (OSError, AttributeError):  # no attributes on this filesystem, or no os.setxattr (macOS)
             xattrs = False
         acls = shutil.which("setfacl") is not None and shutil.which("getfacl") is not None
         if acls:

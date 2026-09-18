@@ -13,7 +13,7 @@ and announced as [SECURITY.md](SECURITY.md) describes.
 
 Nothing yet.
 
-## [0.12.0] — 2026-09-17
+## [0.12.0] — 2026-09-18
 
 Container format versions 19 to 85, one live version per profile and
 variant — the normal profile 84 (85 for a named file or folder; 19 and 22
