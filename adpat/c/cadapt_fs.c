@@ -351,7 +351,7 @@ void metadata_from_stat(const struct stat *st, adapt_metadata *m) {
 
 #ifdef _WIN32
 int metadata_apply(const char *path, int symlink_entry, const adapt_metadata *m) {
-    adapt_metadata restored;
+    adapt_metadata restored = {0}; /* written by a read that succeeds; MinGW's gcc cannot see that */
     int rc;
     struct __utimbuf64 times;
     if (symlink_entry || m->atime_nanoseconds != 0 || m->mtime_nanoseconds != 0) {

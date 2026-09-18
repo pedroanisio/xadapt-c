@@ -85,5 +85,11 @@ typedef off_t cadapt_off;
 #error "cadapt_platform.h must be included before any system header: SEEK_HOLE/SEEK_DATA are missing, so _GNU_SOURCE arrived too late"
 #endif
 #endif
+/* Darwin keeps the same two behind _DARWIN_C_SOURCE. */
+#if defined(__APPLE__)
+#if !defined(SEEK_HOLE) || !defined(SEEK_DATA)
+#error "cadapt_platform.h must be included before any system header: SEEK_HOLE/SEEK_DATA are missing, so _DARWIN_C_SOURCE arrived too late"
+#endif
+#endif
 
 #endif /* CADAPT_PLATFORM_H */

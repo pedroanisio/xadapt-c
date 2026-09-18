@@ -40,6 +40,7 @@ static char *join(const char *a, const char *b) {
 static int examine(const char *path, uint64_t *size, char **target, identity *id) {
 #ifdef _WIN32
     struct _stat64 st;
+    (void)target; /* no links on Windows: none is packed */
     if (_stat64(path, &st) != 0) {
         return -1;
     }

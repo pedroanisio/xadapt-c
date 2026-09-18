@@ -51,6 +51,13 @@ NORMAL_NAMED = tuple(v for v, r in VERSIONS.items() if r["metadata"] and r["stre
 assert MAX_STREAM == (72, 80, 81) and MAX_NAMED == (75, 82, 83) and NORMAL_STREAM == (19, 62, 84) and NORMAL_NAMED == (22, 67, 85)
 
 
+def signed_ns(value):
+    """A stat's nanosecond time as the signed value it names. CPython folds a
+    negative tv_nsec — how Darwin reports a time before 1970 — into an
+    unsigned long, so such a time comes back offset by 2**64."""
+    return value - (1 << 64) if value >= 1 << 63 else value
+
+
 def metadata_base(container: bytes) -> int:
     """Where a named container's metadata starts: after the fixed header, the
     period bytes, the BMP descriptor, and the sizing or policy byte of the
@@ -758,7 +765,7 @@ class MetadataTest(CodecTest):
                 self.assertEqual(decoded.returncode, 0, decoded.stderr)
                 st = restored.stat()
                 self.assertEqual(stat.S_IMODE(st.st_mode), 0o751)
-                self.assertEqual((st.st_atime_ns, st.st_mtime_ns), times)
+                self.assertEqual((signed_ns(st.st_atime_ns), signed_ns(st.st_mtime_ns)), times)
                 self.assertEqual(restored.read_bytes(), SOURCE)
                 piped = self.run_codec("decode", "-", data=encoded.stdout)
                 self.assertEqual(piped.returncode, 0, piped.stderr)
