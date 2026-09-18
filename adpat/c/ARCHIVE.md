@@ -5,7 +5,35 @@ set, that stream describes a directory tree. The archive version is independent
 of the predictor/container version: changing archive framing does not change
 the predictor or existing container headers.
 
-## Version 4: root attributes
+## Metadata and portability
+
+Named files and folder roots carry modes and access/modification timestamps;
+folder entries carry their own metadata. Reading a source can advance its access
+time, so repeatable containers require identical source metadata as well as bytes.
+Metadata is checked after application. A destination unable to reproduce a
+required mode, time or attribute fails restoration rather than silently losing it.
+
+| Property | Behavior |
+| --- | --- |
+| Timestamps and modes | POSIX retains nanoseconds and signed Unix seconds. Symlink times are set without following the link; link modes are restored where supported (macOS/BSD), while Linux uses its fixed link mode. Windows records runtime modes and whole seconds and rejects unsupported values. |
+| Hard links | Links within the source folder share one archived payload and restore as links on POSIX. Links outside the tree do not share archived storage. Windows restores aliases as copies. |
+| Sparse files | Where SEEK_HOLE is available, data extents and logical length are stored. More than 65,535 extents are packed densely. Destinations without sparse storage preserve logical zero bytes. Windows packs dense files and restores extents by seeking. |
+| Extended attributes | Linux stores user attributes and POSIX access/default ACLs. macOS stores the attributes reported by listxattr, but not macOS ACLs. Windows stores none and refuses attribute-bearing archives. Values are limited to 64 KiB. Required attributes are read back after restoration. |
+| Symbolic links | Stored as links on supported POSIX filesystems; neither packed nor restored on Windows. They cannot be parents of other restored entries. |
+| Omitted metadata | Ownership, creation time and status-change time are not preserved. Linux security and trusted attributes are not archived. |
+
+Standard input has no source filesystem metadata; standard output carries only
+bytes. Containers without metadata use umask-derived output permissions.
+Windows restoration behavior is implemented but not a validated support target.
+
+Ordinary file publication without --force uses a no-replace hard link on POSIX;
+filesystems without hard links require --force. Folder publication without
+--force requires an atomic no-replace rename; unsupported operations fail safely.
+Catchable POSIX signals (SIGINT, SIGTERM, SIGHUP, SIGPIPE and SIGXFSZ) run the
+ordinary cleanup path. SIGKILL, machine failure or a failed cleanup can leave
+temporary entries. The sections below describe publication and recovery details.
+
+## Wire format
 
 The CLI writes `ADPTARC4` for folders. The decoded stream contains:
 
@@ -28,7 +56,7 @@ Names are strictly increasing in byte order; repeated names are invalid.
 The root is not a filesystem entry, has no archive path, and does not contribute
 to `adapt_archive_entries()`. Its mode and timestamps remain in the outer
 container's metadata header. Root extended attributes and Linux POSIX access
-and default ACLs now travel with the archive's bytes and checksum.
+and default ACLs travel with the archive's bytes and checksum.
 
 An SDK reader registers `adapt_archive_set_root_attribute_callback()` before
 unpacking version 4. The callback receives the existing sink context, name,
@@ -48,8 +76,8 @@ failure discards staging and preserves the existing destination.
 `ADPTARC1`, `ADPTARC2` and `ADPTARC3` retain their original framing and remain
 readable. Their writers and public entry-header helpers retain their behavior.
 Version-3 entry helpers also write version-4 entries; use
-`adapt_archive_attributes()` and `adapt_archive_attribute()` for the new prefix.
-Older decoders reject the new archive magic. Root attributes omitted by an
+`adapt_archive_attributes()` and `adapt_archive_attribute()` for the root prefix.
+Older decoders reject version 4 archive magic. Root attributes omitted by an
 older encoder cannot be recovered from its container.
 
 ## Private folder staging
@@ -134,4 +162,4 @@ the trailer arrives. It also checks restrictive umasks, legacy modes and
 cleanup on file-size limits (`SIGXFSZ`). The decoder suite exercises malformed worker results with
 null diagnostic pointers.
 
-Source: implemented by OpenAI GPT-6 via Codex using the archive attribute encoding described above.
+Implementation attribution: OpenAI GPT-6 via Codex.

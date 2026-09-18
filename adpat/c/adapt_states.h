@@ -3,14 +3,13 @@
  *
  * A section of adapt_model.h, which includes the sections in order into
  * one translation unit: every function stays static inline and the per-bit
- * path is specialized at compile time as before. Include adapt_model.h,
- * not this file. Moved out of adapt_model.h unchanged on 2026-09-17.
+ * path is specialized at compile time. Include adapt_model.h, not this file.
  */
 #ifndef ADAPT_STATES_H
 #define ADAPT_STATES_H
 
 /* ------------------------------------------------------------------------
- * state.rs — bit-history states
+ * State model — bit-history states
  * --------------------------------------------------------------------- */
 
 /* Count levels a state can hold. */
@@ -132,8 +131,7 @@ static inline uint32_t prior_p22(const state_table *t, unsigned s) {
  * the probability in twelve bits, clamped to 1, in the low half, and its
  * stretch in the high half — refreshed whenever the cell learns, so the
  * per-bit path takes a context's inputs from one load with no table
- * lookup behind it (measured a fifth of predict() under the max
- * profile, twenty contexts of it). */
+ * lookup behind it. */
 /* A context's map cell also carries its state's third-lane mode in the
  * two count bits the count never reaches (MAP_LIMIT is 255): 1 for a
  * state that has seen ones only, 2 zeros only, 0 otherwise. The count

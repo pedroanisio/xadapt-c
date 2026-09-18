@@ -3,14 +3,13 @@
  *
  * A section of adapt_model.h, which includes the sections in order into
  * one translation unit: every function stays static inline and the per-bit
- * path is specialized at compile time as before. Include adapt_model.h,
- * not this file. Moved out of adapt_model.h unchanged on 2026-09-17.
+ * path is specialized at compile time. Include adapt_model.h, not this file.
  */
 #ifndef ADAPT_CONSTANTS_H
 #define ADAPT_CONSTANTS_H
 
 /* ------------------------------------------------------------------------
- * model.rs — constants
+ * Model constants
  * --------------------------------------------------------------------- */
 
 #define TABLE_LOG_MIN 10
@@ -47,8 +46,7 @@ ADAPT_STATIC_ASSERT(WAYS == 4, claim_reads_four_ways);
  * the high nibbles of the last four bytes, the markup nesting (open [[
  * and {{, the tag being read or last read), orders 5 and 8, the word
  * with its case folded, the last three words, and the word with the
- * classes of the three bytes before it. Each was measured on its own
- * against the profile without it, on 16 MiB of enwik8. */
+ * classes of the three bytes before it. */
 #define HASHED 20
 #define BASE_HASHED 10
 #define H_O1 0
@@ -102,7 +100,7 @@ ADAPT_STATIC_ASSERT(WAYS == 4, claim_reads_four_ways);
  * per file from FAST_SETS, a direct order-1 memory, the word run, recall,
  * order-0 and the first arbiter keyed by the word run's state, no second
  * or final arbiter and no estimation stage, over a table of at most
- * ADAPT_FAST_TABLE_LOG_MAX blocks (the crate's `Model<FAST>`).
+ * ADAPT_FAST_TABLE_LOG_MAX blocks.
  * ADAPT_MAX_VERSION (21) is the max profile, described at adapt.h and
  * under the `max` flag below. predict() and update() are compiled once
  * per profile with `fast` and `max` constants, so a profile pays only for
@@ -136,8 +134,7 @@ static const uint32_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
 #define MIXER_SETS (3 * 8 * 256)
 #define MIXER2_SETS (3 * 2 * 256)
 /* The third and fourth first-layer arbiters, keyed by eight bits of the
- * order-2 hash and of the word hash with the partial byte: measured
- * 1.5 % on text, where two more (order-3, the recalled byte) lost it.
+ * order-2 hash and of the word hash with the partial byte.
  * Under the compact side tables (ADAPT_MAX_COMPACT_VERSION) seven bits
  * key them: half the sets, 9.6 MiB each instead of 19, the difference
  * going to the context table at a small budget. */
@@ -159,17 +156,10 @@ static const uint32_t FAST_SETS[ADAPT_FAST_SETS] = {KEEP2(H_O2, H_CLASS), KEEP2(
  * next two recalled bytes. A recall bucket keeps four recent positions and
  * chooses the longest verified match. A fifth first-layer arbiter is keyed
  * by bytes since the last space, preceding byte class and partial byte. */
-/* The parts of model2 that pay under table pressure and cost without it
- * — the o8 and word3 slots re-purposed, and the fifth arbiter — run from
- * a table of 2^MODEL2_PRESSURE_LOG blocks, the size the header names,
- * which follows the input's length for a named file (150 KB is 2^20,
- * 8 MiB 2^22, enwik8 2^25). Measured on the mixed corpus at -6: with
- * them always on, five Canterbury rows broke their floors (kennedy.xls
- * +3.7 %, the order-1 indirect context in o8's slot; fields.c, grammar.lsp,
- * xargs.1 +1.5 to +3 %, the untrained fifth arbiter; alice29.txt +0.17 %,
- * recall in word3's slot); gated at 2^21 every row is under its floor,
- * kennedy.xls by 5.8 %, xml (2^21) keeps its 4.4 %, and nothing at 2^22
- * or above changes a byte. */
+/* Enable the indirect/recall slots and fifth arbiter only at this
+ * declared table size. Small tables have limited context capacity and
+ * short inputs provide less training for the additional arbiter. This
+ * threshold changes predictor semantics and is part of the wire policy. */
 #define MODEL2_PRESSURE_LOG 21
 #define RECALL_WAYS(m2) ((m2) ? 4 : 1)
 #define EXTRA_SETS (128 * 256)
@@ -196,16 +186,11 @@ static const uint32_t CLASS_WIDTHS[3] = {0, 8, 21};
 #define NO_RUNS (1u << 31)
 /* The contexts a lean compact model leaves out (adapt_sizes.lean). */
 #define LEAN_DROPPED (1u << H_O8 | 1u << H_WORD3 | 1u << H_WORDC)
-/* The contexts the mid profile leaves out of the normal profile's ten:
- * measured on the first 8 MiB of enwik8 under one arbiter with the
- * class width pinned, each kind left out in turn, field cost nothing,
- * sparse 0.09 %, order-1 0.14 %, every other kind 0.21 % (record) to
- * 0.91 % (the class history); the three together 0.26 % for 18 % fewer
- * cycles. The seven kept are orders 2, 3, 4 and 6, word, record and
- * the class history: with the class lanes, one lane group of eight. */
+/* Mid omits order-1, field and sparse contexts. Orders 2, 3, 4 and 6,
+ * word, record and class history remain; their lanes fit one group of eight. */
 #define MID_DROPPED (1u << H_O1 | 1u << H_FIELD | 1u << H_SPARSE)
 /* The context sets a file may choose, by header code: a mask of hashed
- * contexts the model leaves out (see CONTEXT_SETS in model.rs). */
+ * contexts the model leaves out. */
 static const uint32_t CONTEXT_SETS[ADAPT_CONTEXT_SETS] = {
     0,
     1 << H_RECORD | 1 << H_FIELD,
@@ -222,7 +207,7 @@ static const char *const CONTEXT_NAMES[HASHED] = {"o1",    "o2",     "o3",      
                                                    "nest",   "o5",     "o8",      "wordlc", "word3",   "wordc"};
 
 /* ------------------------------------------------------------------------
- * container.rs — constants
+ * Container — constants
  * --------------------------------------------------------------------- */
 
 #define METHOD_STORED_OBSERVED 0
@@ -241,7 +226,7 @@ static const char *const CONTEXT_NAMES[HASHED] = {"o1",    "o2",     "o3",      
 #define HEADROOM ((uint64_t)8 << 20)
 
 /* Versions written by the current encoder. Older max profiles remain
- * readable, but every plain max encode now writes the sizing byte. */
+ * readable; plain max encodes carry an explicit sizing byte. */
 static inline uint8_t encode_header_version(adapt_sizes sizes) {
     if (sizes.bmp) {
         return (uint8_t)((sizes.max ? ADAPT_MAX_BMP_VERSION : ADAPT_BMP_VERSION) + sizes.adaptive);
@@ -268,7 +253,7 @@ static inline uint8_t encode_header_version(adapt_sizes sizes) {
 }
 
 /* ------------------------------------------------------------------------
- * container.rs — the x86 branch transform
+ * Container — the x86 branch transform
  * --------------------------------------------------------------------- */
 
 /* Rewrite, in place, the four-byte little-endian operand after every E8
@@ -281,9 +266,8 @@ static inline uint8_t encode_header_version(adapt_sizes sizes) {
  * selected it, and an unconverted one, which failed that test, still
  * fails it. Every operand is skipped by both passes and an opcode byte is
  * never rewritten, so the two passes visit the same positions. Per block,
- * so a segment and a stream see the same bytes. (Measured against the
- * alternatives: converting every operand, or storing the address most
- * significant byte first, both coded machine code larger.) */
+ * so a segment and a stream see the same bytes. Operand eligibility and
+ * byte order are part of this reversible wire transform. */
 static inline uint32_t x86_load(const uint8_t *b) {
     return (uint32_t)b[3] << 24 | (uint32_t)b[2] << 16 | (uint32_t)b[1] << 8 | (uint32_t)b[0];
 }

@@ -1,9 +1,8 @@
 /*
  * adapt_encode.c — the encoding entry points: the sizes for an input and a
  * budget, the streaming and in-memory encoders, and the proof that what
- * was written decodes back. A port of the encoding half of the crate's
- * `container.rs`, kept in its order and under its names; the model and
- * the framing rules it shares with the decoder are in adapt_model.h.
+ * was written decodes back. The model and framing rules shared with the
+ * decoder are defined in adapt_model.h.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
@@ -62,14 +61,10 @@
 #define VERIFY_QUEUE 2
 /* Bytes of the repeat scans' window. */
 #define SCAN 8
-/* The recall index's cap when the budget has room left after the table
- * and the window: 2^22 entries, 16 MiB; its usual cap is 2^20. */
-/* The recall index grows past its usual cap to the format's limit when the
- * budget has room: measured on the first 32 MiB of enwik8 at the default
- * tier, 2^22 -> 2^24 entries 6,297,375 -> 6,287,528 bytes (-0.16 %) for
- * 48 MiB; the sizer takes only what the tier holds (enwik8 at -9: 2^23). */
+/* Grow recall to the format limit only when budget remains after table
+ * and window allocation. Normal/fast use the separate cap below. */
 #define RECALL_LOG_SPARE 24
-/* the normal and fast profiles keep their cap: their containers are the locked floors */
+/* Recall growth cap for the normal and fast profiles. */
 #define RECALL_LOG_SPARE_NORMAL 22
 /* The most bytes a block's coded form can take: at most four settled bytes
  * per bit, eight bits for the byte that crosses the line, four final. */
@@ -145,7 +140,7 @@ adapt_sizes adapt_sizes_fast(adapt_sizes sizes) {
     return sizes;
 }
 
-/* container.rs — detect_period: byte equality per lag up to ADAPT_PERIOD_MAX
+/* Container — detect_period: byte equality per lag up to ADAPT_PERIOD_MAX
  * on the first sample; the strongest short lag is the stride, the period
  * the strongest multiple of it that stands out from the other multiples
  * and from its neighbours. Integer arithmetic, so both codecs decide alike. */
@@ -364,10 +359,9 @@ adapt_status adapt_sizes_for_input_max_adaptive(int length_known, uint64_t lengt
     return sizes_for_input_profile(length_known, length, max_memory, 1, mode, sizes, error);
 }
 
-/* segments.rs — the crate's threads: the most bytes one segment can take
- * in the file, the memory a run of threads needs, and the sizes for one
- * thread's share of a budget. This port codes segments in order, but a
- * file's sizes are the crate's for the same budget and thread count. */
+/* Segmented encoding: output bounds, per-worker memory and model sizing.
+ * Sizes depend on the requested count, while scheduling can use fewer
+ * workers without changing the serialized segments. */
 uint64_t adapt_segment_out_bound(uint64_t segment_bytes) {
     return 1 + segment_bytes + (segment_bytes + ADAPT_BLOCK_BYTES - 1) / ADAPT_BLOCK_BYTES * ADAPT_BLOCK_HEADER_BYTES;
 }
@@ -426,13 +420,9 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
         if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
         s = next;
     }
-    /* A budget that stops the max profile's table at ADAPT_COMPACT_TABLE_LOG
-     * blocks or fewer, short of the target, buys more with the compact side
-     * tables (ADAPT_MAX_COMPACT_VERSION): what they free is a doubling of
-     * the table, measured 1.9-2.2 % smaller on enwik8 at 94-128 MiB. A
-     * table already past that size keeps the full tables, which win there
-     * (256 MiB: +0.34 % with the compact ones). The switch never leaves
-     * the table smaller than the full tables allowed. */
+    /* Compact side tables release space for contexts when the full-table
+     * model remains below its target. Restrict this tradeoff to small
+     * tables and never shrink the context capacity already obtained. */
     if (s.max && !s.adaptive && !s.bmp && !s.compact && s.table_log <= ADAPT_COMPACT_TABLE_LOG &&
         s.table_log < target) {
         next = s;
@@ -799,19 +789,16 @@ static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_cod
 }
 
 /* The class-history width and the context set for a file, as header
- * codes, from the first block: the crate's `choose_model`. The width first,
+ * codes, selected from the first block. The width first,
  * from the block's first CLASS_SAMPLE bytes, each width on the full set, a
  * tie to the narrower; a first sample too compressible to rank anything
- * declines the class context and keeps every other. A class history earns
- * its keep slowly — its eight-byte key spans 2^24 histories, so the sample
- * ranks it within a thousandth of none whichever way the file goes: on
- * the first 8 MiB of enwik8 the sample put eight bytes 14 in 12,037 ahead
- * of none, the first block 282 in 82,357, the file 0.34 % — so on a long
- * input (CLASS_PROOF_TABLE_LOG) whose sample puts a width within
+ * declines the class context and keeps every other. Class history needs
+ * repeated observations to train, so a short sample can understate its value.
+ * On a long input (CLASS_PROOF_TABLE_LOG) whose sample puts a width within
  * CLASS_BAND of none, that width — the sample's favorite, or the narrower
  * of the two when it favored none — is proved against none on the whole
  * block and taken only where it codes the block smaller; a sample that
- * separates them by more decides, as before. Then the context sets on the sample,
+ * separates them by more decides. Then the context sets on the sample,
  * family by family — the text family (sets 1, 2, 6) drops record and
  * field first, the binary family (3, 4, 5, 7) word and field first, and a
  * family whose head cannot beat the full set by SET_MARGIN of the sample
@@ -820,9 +807,7 @@ static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_cod
  * contexts then the lower code; a lean choice on a long block is proved
  * on the whole block against the full set (the width's proof already
  * coded it) and reverts unless it wins there by PROOF_MARGIN. The margins
- * are what a sample can be trusted for: measured on 16 MiB of enwik8, a
- * lean set that won its 32 KiB sample by a hair and its 256 KiB block by
- * less than a thousandth lost the whole file by seven. */
+ * reject marginal sample gains that may not survive a longer input. */
 
 /* The whole-block proof of a chosen set against the full one, shared by
  * the fast and normal set choices: the set stays only where it codes the
@@ -1280,7 +1265,7 @@ static void verifier_free(verifier *v) {
 /* Hand one framed block and its source to the proof. With a thread it is
  * queued, and a fault the thread found earlier is returned instead; the
  * encoder then stops, up to VERIFY_QUEUE blocks after the fault, and the
- * bytes written meanwhile are not to be trusted, as for the crate.
+ * bytes written meanwhile are not to be trusted.
  * Without a thread the block is proven here. */
 static adapt_status verifier_submit(verifier *v, const uint8_t *source, size_t n, const uint8_t *framed, size_t framed_len,
                                     adapt_error *error) {

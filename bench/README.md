@@ -12,12 +12,14 @@ the packages in `requirements.txt`. `telemetry.py` supports Python 3.10+;
 `adaptive_experiment.py` uses Python 3.11+ for streaming file hashes.
 Build the executable with `make` before collecting measurements.
 
-Choose external output directories through BENCH_OUTPUT and BENCH_PLOTS in
-the shell. These are example variables, not implicit tool configuration.
+Choose output directories outside the checkout and build context. BENCH_OUTPUT
+and BENCH_PLOTS below are shell variables, not implicit tool configuration.
 `--output` is required for collection and plotting. No run directory is
 selected inside the source checkout by default.
 
 ```sh
+BENCH_OUTPUT=$(mktemp -d)
+BENCH_PLOTS=$(mktemp -d)
 python3 -m pip install -r bench/requirements.txt
 make
 python3 -B bench/telemetry.py run --output "$BENCH_OUTPUT" --repeats 3
@@ -46,7 +48,8 @@ restoration. A failure to restore makes the run fail. CPU time measures total
 CPU work; wall time measures latency and includes scheduling effects.
 
 ```sh
-python3 -B bench/codec_bench.py --input static/corpus/enwik8 --scratch "$BENCH_OUTPUT"
+unzip -p static/corpus/enwik8.zip enwik8 > "$BENCH_OUTPUT/enwik8"
+python3 -B bench/codec_bench.py --input "$BENCH_OUTPUT/enwik8" --scratch "$BENCH_OUTPUT"
 ```
 
 `xz`, `zstd` and `kanzi` are discovered on PATH. `--kanzi` selects an explicit
@@ -72,7 +75,7 @@ runs; absolute throughput comparisons require the reference environment.
 - `slot_price.py` measures context ablations using a development build with
   `ADAPT_SIZES_OVERRIDE`. `ADAPT_DROP_MASK` selects omitted contexts;
   `ADAPT_SIZES` and `ADAPT_CLASS_CODE` control development sizing and class
-  history. These outputs require the same development configuration to decode.
+  history; ADAPT_MODEL2_SLOTS selects model2 slot experiments. These outputs require the same development configuration to decode.
 - `probe_util.h` shares bounded parsing, hashing and I/O primitives between
   the probes. Tests cover inverse transforms, limits and failure behavior.
 - `fetch_scripts.py` fetches the multilingual corpus with article/revision

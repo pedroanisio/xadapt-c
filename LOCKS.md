@@ -6,7 +6,8 @@ contracts. [CONSTRAINTS.md](docs/CONSTRAINTS.md) defines the product requirement
 
 ## Compatibility and deterministic encoding
 
-Every published container version remains decodable. Changes to predictor
+The supported container versions listed in [SUPPORT.md](SUPPORT.md) remain
+decodable; 0.11.0 files require the documented migration. Changes to predictor
 arithmetic or layout require an unambiguous version or policy field. Encoder
 selection may change while old decoding semantics remain fixed. Unused version
 numbers are refused. Committed vectors pin published formats.
@@ -18,7 +19,7 @@ storage. Versions 72/75 distinguish the current predictor without this fallback.
 
 Integer rounding, update order, context hashes and policy bits are format
 semantics. The baseline and accelerated instruction paths, compilers and
-threaded variants must agree byte for byte. No external learned dictionary or
+worker schedules must agree byte for byte for identical requested segmentation. No external learned dictionary or
 language model is required to decode.
 
 ## Model selection and allocation
@@ -51,7 +52,8 @@ Peak resident memory is held to the declared model requirement plus 16 MiB of
 process headroom by the memory gate. Optional search/proof work documents its
 extra memory and temporary-disk requirements.
 
-Outputs are staged and published only after complete validation. Filesystem
+Named outputs are staged and published after validation. Stream callbacks and
+standard output may receive a prefix before a later failure. Filesystem
 metadata is replayed with bounded memory after syntax and checksum validation;
 access ACLs are applied after other attributes. See [ARCHIVE.md](adpat/c/ARCHIVE.md).
 

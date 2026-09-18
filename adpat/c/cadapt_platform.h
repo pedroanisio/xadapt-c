@@ -5,7 +5,6 @@
  * differ between POSIX and Windows.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
- * Extracted from cadapt.c, 2026-09-17, unchanged.
  *
  * Include this before anything else: _POSIX_C_SOURCE and _GNU_SOURCE decide
  * what the system headers declare, so a header that arrives first wins.

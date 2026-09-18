@@ -4,7 +4,6 @@
  * and times themselves as the operating system reads and applies them.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
- * Extracted from cadapt.c, 2026-09-17, unchanged.
  *
  * This is the only part of the command line that reads or writes a file's
  * metadata through the operating system's own calls, and the shape of those

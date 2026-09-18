@@ -5,7 +5,7 @@ The library — every adapt_* unit and header with code (adapt_decode.c,
 adapt_encode.c, adapt_archive.c, adapt_adaptive.h, adapt_bmp.h, adapt_text.h
 and the ten sections of adapt_model.h, as each unit compiles them) — must
 reach 80 % of its branches together, the command line (every cadapt* unit)
-60 %: the crate's floors, applied to its second implementation. The groups
+60 %. The groups
 are by name, never a list, so a new unit counts the day it exists. A source
 missing from the report fails the gate, so a file that stopped being
 instrumented cannot pass by absence. A header is inlined into both library

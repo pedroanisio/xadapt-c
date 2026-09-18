@@ -3,8 +3,7 @@
  *
  * A section of adapt_model.h, which includes the sections in order into
  * one translation unit: every function stays static inline and the per-bit
- * path is specialized at compile time as before. Include adapt_model.h,
- * not this file. Moved out of adapt_model.h unchanged on 2026-09-17.
+ * path is specialized at compile time. Include adapt_model.h, not this file.
  */
 #ifndef ADAPT_MODEL_BIT_H
 #define ADAPT_MODEL_BIT_H
@@ -236,9 +235,8 @@ static ADAPT_TARGET_V3 uint32_t predict_max2_v3(model *m) {
 }
 #endif
 
-/* The fast profile's path is short and scalar: compiled for the wide
- * instruction set it ran 15 % slower here (eight lanes do not pay for the
- * widening multiplies), so it is built once, for the baseline. */
+/* Fast uses a short scalar path: its few lanes do not amortize the
+ * widening-multiply setup. It has a single baseline instantiation. */
 static uint32_t predict_fast(model *m) {
     return predict_impl(m, 1, 0, 0, 0);
 }
@@ -422,8 +420,7 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
          * known, the twenty exact lines of the second nibble go out over
          * bits 1 and 2 and the next byte's over bits 5 and 6, ten at a
          * time, which the fill buffers hold; when it is not, the two
-         * candidates' lines go out at bits 3 and 7 (the nibble's, worth
-         * 3 % to the normal profile when it was the only prefetch).
+         * candidates' lines go out at bits 3 and 7.
          * Nothing for the fast profile, whose two contexts' lines the core
          * keeps up with. */
         if (m->coding_known) {

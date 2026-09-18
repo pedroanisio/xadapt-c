@@ -1,13 +1,10 @@
 /*
- * test_adapt_decode.c — the C decoder's own tests, needing no Rust
- * toolchain: the library's contract on the committed vectors, every
+ * test_adapt_decode.c — decoder contract tests on committed vectors, every
  * framing error on hand-built bytes, the limits, the stream callbacks, and
  * the messages. The larger vectors pin the decoder to files this
  * implementation wrote across the paths a short input never takes
  * (text-compact.adpt by the compact side tables' first release, with
- * every context; text-lean.adpt with the lean set); the
- * battery against the Rust encoder belonged to the crate, and no longer
- * applies since format 13.
+ * every context; text-lean.adpt with the lean set).
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
@@ -1263,8 +1260,7 @@ static void test_framing(void) {
     /* a corrupted payload of a modeled block: the coder either runs past
      * the stream or recovers bytes the checksum rejects. (The last payload
      * byte is the coder's flush and may carry slack, so it is not the one
-     * damaged here; the Rust battery checks every position against the
-     * crate.) */
+     * damaged here.) */
     {
         size_t abc_len;
         uint8_t *abc = read_file("abc.adpt", &abc_len);

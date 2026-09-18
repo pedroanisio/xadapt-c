@@ -20,10 +20,8 @@ all test clean install uninstall sanitize sanitize-cli coverage check-suites che
 CHECK_LOG_DIR ?= /tmp
 CHECK_SECONDS ?= 120
 CHECK_CODEC_TARGET ?= check
-# The codec is built once, before the parts run: the provenance part runs
-# `make all` in the same build directory (tools/test_provenance.py), and
-# two makes relinking cadapt at once left the safety part executing a
-# half-written binary.
+# Build once before parallel checks: provenance and codec suites share the
+# build directory, so concurrent relinking could expose an incomplete executable.
 check:
 	$(MAKE) -C adpat/c BUILD=$(BUILD) all
 	@mkdir -p "$(CHECK_LOG_DIR)"; logs=$$(mktemp -d "$(CHECK_LOG_DIR)/cadapt-check.XXXXXX"); \
@@ -48,7 +46,7 @@ $(CHECK_LOG_DIR)/ltcb: ; @$(PYTHON) -B -m unittest discover -s tools/ltcb -p 'te
 $(CHECK_LOG_DIR)/gates: | all ; @$(PYTHON) -B tools/test_gates.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(CHECK_LOG_DIR)/docs: | all ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_docs.py' > $@.log 2>&1 && $(PYTHON) -B tools/render_floors.py check >> $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 
-# Locked floors (LOCKS.md, 2026-09-14). gate: the CI proxy, the first 8 MiB of
+# Regression floors (tools/ratio_floor.json). gate: the CI proxy, the first 8 MiB of
 # enwik8 cut from the tracked zip, encoded three times for the median of
 # their CPU seconds (the floor's measure) and decoded once, well under
 # 120 s. ratio-floor: the full enwik8 floor (static/corpus/enwik8 must be
@@ -62,7 +60,7 @@ gate: all
 ratio-floor: all
 	$(PYTHON) -B tools/check_ratio_floor.py --binary "$(abspath $(CODEC_BUILD))/cadapt" --verify $(FLOOR_ARGS)
 
-# The mixed acceptance corpus (DLV-3, LOCKS.md 2026-09-15): corpus fetches
+# The mixed acceptance corpus (DLV-3): corpus fetches
 # Silesia and Canterbury into static/corpus/mixed (git-ignored, pinned by
 # the manifest); corpus-floor checks every file against its locked floor
 # under the default command and under the -6 tier of --max, the two
@@ -140,7 +138,7 @@ ltcb:
 # Benchmarks are owned by the standalone codecbench tool, using an external
 # cadapt command adapter. These compatibility targets report the migration.
 bench plot:
-	@echo "Use codecbench run/history with an external cadapt adapter; see README.md."
+	@echo "Use codecbench run/history with an external cadapt adapter; see bench/README.md."
 	@false
 
 .PHONY: release-content-check

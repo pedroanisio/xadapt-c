@@ -3,7 +3,7 @@
 
 Source: Claude Opus 5 via Claude Code. tools/ratio_floor.json records, per
 fixture, the largest container and the lowest throughput the locked command
-may produce (LOCKS.md, 2026-09-14). This tool encodes the fixture with the
+may produce (see LOCKS.md). This tool encodes the fixture with the
 current binary and fails when the container is larger by even one byte.
 
 Throughput is gated in one of three explicit ways. On the reference host named

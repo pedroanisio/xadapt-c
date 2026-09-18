@@ -6,17 +6,9 @@
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
- * The format began as a port of the Rust crate in `../src`, integer for
- * integer: `container.rs` for the framing and `model.rs` for the
- * predictor. Versions 13 to 15 are defined by this implementation and
- * differ from the crate's 10 to 12 in four measured ways — an x86 branch
- * transform before the model, four blocks to a table line instead of two,
- * a context table twice the size for the same input, and a max profile
- * that adds contexts, run memories and per-context evidence in place of
- * the larger arbiter — so a file of theirs is refused here by version,
- * and the crate must be brought up to these before the two agree again.
- * The layout and names still follow the crate's so the two can be read
- * side by side; a change to any constant below is a new format version.
+ * Containers are self-contained. ADAPT_VERSIONS defines the accepted wire
+ * formats; changing predictor arithmetic or framing requires an unambiguous
+ * version or policy field. Versions 13-15 require cadapt 0.11.0 to decode.
  *
  * Decoding: adapt_decode() holds a file in memory and returns its bytes
  * only after their checksum matched; adapt_decode_stream() pulls it through
@@ -34,7 +26,7 @@
  * second model that decodes every block as it is written; adapt_verify_stream()
  * is the same proof after the fact, with one model, for a source that can
  * be read twice. Sizes come from adapt_sizes_for_input(), which fits the
- * model to the input's length and a memory budget as the crate does.
+ * model to the input's length and a memory budget.
  *
  * Every failure is a typed status, and the details a message needs travel
  * in an adapt_error.
@@ -124,11 +116,8 @@ extern "C" {
  * internal (SUPPORT.md).
  * ----------------------------------------------------------------------- */
 
-/* The container version this reader implements: the normal profile.
- * Versions 10 to 12, the crate's, and 13 to 18, this port's before the
- * model gained its third and fourth arbiters, its second estimation stage,
- * a lower arbiter learning-rate floor and a context table of up to 2^26
- * blocks, are refused like every version no file was published in. */
+/* Normal-profile container version. Accepted formats are enumerated below;
+ * unknown versions are rejected before model allocation. */
 #define ADAPT_FORMAT_VERSION 19u
 /* The header's window byte carries this bit when a record period follows
  * the fixed header as ADAPT_PERIOD_BYTES more bytes; the period is the
@@ -161,13 +150,9 @@ extern "C" {
 /* Bytes of one segment's table entry, and of the count that ends the table. */
 #define ADAPT_SEGMENT_ENTRY_BYTES 8u
 #define ADAPT_SEGMENT_COUNT_BYTES 4u
-/* The version a fast-profile file carries: the same container, the fast
- * model (two hashed contexts chosen per file, a direct order-1 memory,
- * the word run, recall, one arbiter), its context-set code an index into
- * the profile's own menu of ADAPT_FAST_SETS pairs. Version 7, the fast
- * profile of 0.7.0 with one fixed pair, and version 8, the fast profile
- * before segments, are refused like every version no file was published
- * in. */
+/* Fast-profile stream: two selected hashed contexts, direct order-1 memory,
+ * word run, recall and one arbiter. The context-set code indexes this profile's
+ * ADAPT_FAST_SETS menu. */
 #define ADAPT_FAST_VERSION 20u
 /* The version a max-profile file carries: the normal model with ten more
  * hashed contexts (the previous word with the current, the first and
@@ -175,8 +160,7 @@ extern "C" {
  * nibbles of the last four bytes, the markup nesting, orders 5 and 8, the
  * case-folded word, the last three words, the word with the classes
  * before it), run memories on orders 1, 3, 4 and 6, and three arbiter
- * inputs per context instead of one; the same memory, about three times
- * the time, fewer bytes. `cadapt encode --max`. */
+ * inputs per context instead of one. `cadapt encode --max`. */
 #define ADAPT_MAX_VERSION 21u
 /* Versions 22--24 use the same predictors as 19--21 and append a
  * checksummed filesystem-metadata record to the header. */
@@ -205,71 +189,31 @@ extern "C" {
 #define ADAPT_MAX_BMP_LAST_VERSION 48u
 #define ADAPT_MAX_BMP_METADATA_VERSION 49u
 #define ADAPT_MAX_BMP_METADATA_LAST_VERSION 52u
-/* The max profile with compact side tables (ADAPT_MAX_COMPACT_VERSION,
- * 56 with metadata): the third and fourth arbiters keep 2^15 weight sets
- * instead of 2^16 and the second estimation stage 2^17 rows instead of
- * 2^18, so a small memory budget spends the difference on a context table
- * twice the size. The encoder chooses it only when its budget would
- * otherwise leave the max profile a table of at most
- * ADAPT_COMPACT_TABLE_LOG blocks short of the input's target
- * (adapt_table_log_for): measured on enwik8, 20,712,600 -> 20,258,968
- * bytes at 94 MiB and 20,091,771 -> 19,715,577 at 128 MiB, while at
- * 256 MiB and above the full tables win and the bytes are unchanged.
- * A version-21 file of any table size still decodes with the full
- * tables. */
+/* Max profile with compact side tables (53; 56 with metadata). The third
+ * and fourth arbiters use 2^15 weight sets and the second estimation stage
+ * uses 2^17 rows. Smaller fixed tables leave more budget for contexts.
+ * Version 21 retains its full side-table layout regardless of table size. */
 #define ADAPT_MAX_COMPACT_VERSION 53u
 #define ADAPT_MAX_COMPACT_METADATA_VERSION 56u
 #define ADAPT_COMPACT_TABLE_LOG 22u
-/* The compact model with its lean context set (ADAPT_MAX_LEAN_VERSION, 57
- * with metadata): it leaves out the three costliest hashed contexts
- * (order-8, the third word back, the word with its classes), which at a
- * table of ADAPT_COMPACT_TABLE_LOG blocks or fewer evict more than they
- * predict — measured on enwik8 with the compact tables, 20,258,968 ->
- * 20,150,130 bytes at 94 MiB and 19,715,577 -> 19,657,760 at 128 MiB,
- * and a loss of 0.05 % once the table is 2^23. The context policy
- * chooses it with the compact tables at that table size; a decoder sets
- * `lean` from the version, so a version-53 file keeps every context. */
+/* Compact max model with a lean context set (54; 57 with metadata). It
+ * omits order-8, third-word and word/class contexts. The version fixes this
+ * set; version 53 retains its full context set. */
 #define ADAPT_MAX_LEAN_VERSION 54u
 #define ADAPT_MAX_LEAN_METADATA_VERSION 57u
-/* The max profile sized to its budget (ADAPT_MAX_SIZED_VERSION, 58; 61
- * with metadata): one sizing byte follows the fixed header and the period
- * bytes, ahead of any metadata, and describes the whole model. Bit 0 is
- * the compact side tables (the model of version 53), bit 1 the lean
- * context set (the model of 54; never without bit 0), bits 2 to 4 the
- * context table's fraction f, 0 to 7: the table holds
- * (8 + f) << (table_log - 3) blocks, so a budget between two powers of
- * two is spent on it rather than left idle — a hash then picks its line
- * by a range multiply instead of a mask (see adapt_table_blocks).
- * Measured on enwik8 at 256 MiB, a 160 MiB table against the 128 MiB one,
- * 19,185,877 -> 19,066,780 bytes. The encoder takes only the fraction the
- * budget's slack holds after the window, never a smaller window, and
- * writes this version only for a fraction above 0: a power-of-two table
- * keeps versions 21, 53 and 54, so every file they wrote decodes as
- * written. Bit 5 is the text transform (adapt_text.h, the transform of
- * versions 64 to 66) ahead of the sized model, so a fraction and the
- * transform are taken together. Bit 6 starts every arbiter's trust in a
- * context's stretched probability at 1/32 instead of 1/4
- * (adapt_sizes.low_start), which the encoder sets under the text
- * transform, so the max profile under the transform is always this
- * version; measured on the first 16 MiB of enwik8 under it, 3,336,047 ->
- * 3,330,628 bytes at 128 MiB and 3,320,062 -> 3,296,290 at the default
- * tier. Bit 7 (ADAPT_SIZING_MODEL2, adapt_sizes.model2) is the second
- * max model: the first-layer arbiters' weights as int16 in 1/32768 with
- * a rounded train step (vpmulhrsw) and sixteen-lane dot products
- * (vpmaddwd), four context slots carrying other contexts than their
- * names (o5 the 21-byte class history, o8 the order-1 indirect context,
- * word3 recall's expected byte, sparse2 its next two), recall buckets of
- * four positions, and a fifth arbiter keyed by the bytes since a space
- * and the previous byte's class — the last three (o8's and word3's
- * slots, the fifth arbiter) only from a table of 2^21 blocks, the size
- * the header names, since they pay under table pressure and cost small
- * inputs without it (MODEL2_PRESSURE_LOG in adapt_model.h); the encoder
- * sets it for every max encode in versions 72/75. Historical 58/61
- * files used both policies; a decoder resolves those by checksum. Measured on the first 8 MiB of enwik8
- * under the text transform, 1,700,354 -> 1,686,110 bytes with 4.9 %
- * fewer instructions and a decode 5 % faster; on the first 32 MiB,
- * 6,351,878 -> 6,297,375. The int16 tables halve the side tables' 36.5
- * MiB and the fifth arbiter takes 4.8 MiB. */
+/* Sized max profile (58; 61 with metadata). One sizing byte follows the
+ * fixed header and optional period, before metadata. Bit 0 selects compact
+ * side tables; bit 1 selects lean contexts. Bits 2-4 encode fraction f,
+ * 0..7: (8 + f) << (table_log - 3) blocks, addressed by range multiply.
+ * Bit 5 enables the text transform. Bit 6 selects initial arbiter weight
+ * 1/32 rather than 1/4. Bit 7 selects model2: int16 first-layer weights,
+ * rounded training, class/indirect/recall contexts, four-position recall
+ * buckets and a fifth arbiter. Current model2 policies gate the indirect
+ * and recall slots and fifth arbiter at table_log >= MODEL2_PRESSURE_LOG.
+ * Versions 58/61 can contain either small-table policy; decoding uses
+ * checksum-verified fallback. Versions 72/75 identify the pressure-gated
+ * policy unambiguously. The version table and sizing validator define which
+ * flag combinations each family accepts. */
 #define ADAPT_MAX_SIZED_VERSION 58u
 #define ADAPT_MAX_SIZED_METADATA_VERSION 61u
 /* Pressure-gated model2 has its own wire identity. Versions 58/61 with
@@ -297,9 +241,7 @@ extern "C" {
  * bytes, and a fixed rule of the format carries no data). The decoder
  * undoes it as it writes; the trailer's length and checksum are the
  * original's. The encoder takes it when the first block looks like text
- * (text_detect) or when told to (adapt_sizes.text); measured on enwik8
- * with the model unchanged, at 128 MiB (--max --allocation context)
- * 19,657,760 -> 18,958,016 bytes, the model coding 62 % of the bytes.
+ * (text_detect) or when requested (adapt_sizes.text).
  * Never with the adaptive predictors, the BMP transform or the x86
  * transform. A text version names a power-of-two table; with a table
  * fraction the transform rides the sized version's sizing byte instead
@@ -320,35 +262,19 @@ extern "C" {
  * contexts fixed by the profile (orders 2, 3, 4 and 6, word, record and
  * the class history; the width still chosen per file) and its first
  * arbiter alone as the verdict — no second, third, fourth or final
- * arbiter. Measured on the first 8 MiB of enwik8 against the normal
- * profile: 1,726,147 -> 1,748,849 bytes (+1.3 %) at 490 -> 310 cycles
- * per bit (-37 %), 2.6 times faster than the max profile. Versions 76
+ * arbiter. Versions 76
  * (78 with metadata), 77 under the text transform (79 with metadata). */
 #define ADAPT_MID_VERSION 76u
 #define ADAPT_TEXT_MID_VERSION 77u
 #define ADAPT_MID_METADATA_OFFSET 2u
 #define ADAPT_MID_METADATA_VERSION 78u
 #define ADAPT_TEXT_MID_METADATA_VERSION 79u
-/* The max profile's arbiters keyed by the byte classes (adapt_sizes.keys,
- * ADAPT_KEYS_TEXT and ADAPT_KEYS_BINARY): the sized max model of version
- * 72 with the sets of its second, third and fourth arbiters chosen by
- * other state. Under every earlier version the second arbiter's set is
- * the previous byte, the third's eight bits of the order-2 hash, the
- * fourth's eight bits of the word so far; measured on the first 8 MiB of
- * enwik8 under the lean set, the fourth earned nothing there (dropped, 121
- * bytes fewer) and the classes of the last bytes (byte_class in
- * adapt_model.h: letter, capital, digit, space, ...) key all three
- * better. ADAPT_KEYS_TEXT: the second by the last two and two thirds
- * classes, the third by the last five hashed, the fourth by the nesting
- * state with the last tag and two classes — 1,681,725 -> 1,669,716 bytes
- * (-0.71 %) at the same cycles, memory and tables. ADAPT_KEYS_BINARY: the
- * second as before, the third by the five classes, the fourth by recall's
- * expected byte and state — what the star catalogue sao and the C source
- * of the mixed corpus prefer. The encoder tries both against the classic
- * keys on the first block's sample (choose_keys) and writes version 72
- * for the classic keys, so no file is written larger than before; 80 and
- * 81 carry the sizing byte of 72, 82 and 83 the same with metadata
- * (ADAPT_KEYS_METADATA_OFFSET). */
+/* Keyed max profile: version 72 sizing with alternative second, third and
+ * fourth arbiter keys. ADAPT_KEYS_TEXT uses recent byte classes, hashed class
+ * history, and nesting/tag state. ADAPT_KEYS_BINARY uses the class history
+ * and recall state. The encoder compares candidates on the first block;
+ * that sample comparison does not guarantee a smaller complete file.
+ * Versions 80/81 identify text/binary key policies, 82/83 their metadata forms. */
 #define ADAPT_MAX_KEYS_VERSION 80u
 #define ADAPT_MAX_KEYS_BINARY_VERSION 81u
 #define ADAPT_KEYS_METADATA_OFFSET 2u
@@ -380,14 +306,9 @@ extern "C" {
 #define ADAPT_CONTEXTS_AUTO 0u
 #define ADAPT_CONTEXTS_LEAN 1u
 #define ADAPT_TEXT_OFF 2u
-/* The input length from which the sizing policies leave the transform to
- * the first block's look (ADAPT_TEXT_AUTO); below it, or with the length
- * unknown, they set ADAPT_TEXT_OFF, because the book's three sightings a
- * word and the model's learning of the codes are paid before they pay
- * back — measured on enwik8's first bytes at the default budget, --max:
- * 64 KiB +3.2 %, 1 MiB +1.3 %, 4 MiB +0.4 %, 8 MiB -0.03 %, 32 MiB
- * -0.75 %, the whole -2.9 %. A pipe's length is unknown: a caller who
- * knows it holds text asks with ADAPT_TEXT_ON. */
+/* Minimum known input length for automatic text-transform selection.
+ * Below it, or for unknown-length streams, automatic selection is disabled
+ * to avoid dictionary startup cost. Callers can request ADAPT_TEXT_ON explicitly. */
 #define ADAPT_TEXT_MIN_BYTES ((uint64_t)8 << 20)
 
 /* ---- the version table -------------------------------------------------
@@ -566,19 +487,14 @@ size_t adapt_header_add_metadata(const uint8_t *header, size_t len, const adapt_
 #define ADAPT_TRAILER_BYTES 13u
 /* Input is coded in blocks of at most this many bytes. */
 #define ADAPT_BLOCK_BYTES ((size_t)1 << 18)
-/* Output the decoder produces without an explicit limit: 1 GiB. */
+/* Default SDK output limit returned by adapt_default_limits(): 1 GiB.
+ * The CLI explicitly disables default decode caps unless options supply them. */
 #define ADAPT_DEFAULT_MAX_OUTPUT ((uint64_t)1 << 30)
-/* Default working-memory budget: 674 MiB, what xz -9 takes to compress,
- * and the decoder's default too, since a decoder holds the model the
- * encoder held. Memory buys the context table, and the table buys ratio at
- * no cost in time: on 100 MB of enwik8 a 64 MiB budget coded 21,221,772
- * bytes, 256 MiB 20,321,065, 674 MiB 19,943,347 (−6.0 %), all at the same
- * speed; the window mattered little (four times the window alone: −0.25 %).
- * Inputs under 8 MiB fit their model in 64 MiB and are unaffected. */
+/* Default SDK working-memory limit and default CLI encoding budget: 674 MiB.
+ * The CLI explicitly disables the default decode cap; SDK callers choose limits. */
 #define ADAPT_DEFAULT_MAX_MEMORY ((uint64_t)674 << 20)
 
-/* Why a file could not be decoded. The names and order follow the crate's
- * `Error`; adapt_error_message() writes the same text it displays. */
+/* Operation status. adapt_error_message() formats diagnostic details. */
 typedef enum adapt_status {
     ADAPT_OK = 0,
     /* The operation would exceed the caller's working-memory budget. */
@@ -637,7 +553,7 @@ typedef struct adapt_error {
  * ADAPT_ERROR_BAD_HEADER. The header CRC covers the metadata and framing. */
 adapt_status adapt_read_metadata(const uint8_t *header, size_t len, adapt_metadata *metadata, adapt_error *error);
 
-/* Write the message the Rust crate displays for `error` into `buf`
+/* Format the diagnostic for `error` into `buf`
  * (NUL-terminated, truncated to `len`); returns the length it wanted, as
  * snprintf does. */
 int adapt_error_message(const adapt_error *error, char *buf, size_t len);
@@ -808,7 +724,7 @@ adapt_status adapt_read_trailer(const uint8_t *trailer, uint64_t *length, uint32
 /* Bytes of class history the model's class context reads under `sizes`. */
 uint32_t adapt_class_width(adapt_sizes sizes);
 
-/* The contexts the set in `sizes` leaves out, as the crate's `info` names
+/* The contexts omitted by the set selected in `sizes`; `info` names
  * them, comma-separated ("field, sparse, record, runs"); an empty string
  * for the full set. `buf` should hold at least 64 bytes. */
 void adapt_dropped_contexts(adapt_sizes sizes, char *buf, size_t len);
@@ -827,7 +743,7 @@ adapt_sizes adapt_sizes_mid(adapt_sizes sizes);
  * with `max` set, as `adapt encode --max` does. */
 adapt_sizes adapt_sizes_max(adapt_sizes sizes);
 
-/* Rough size in bytes of one model at these sizes, as the crate counts it. */
+/* Estimated allocation in bytes of one model at these sizes. */
 uint64_t adapt_model_bytes(adapt_sizes sizes);
 
 /* Working-memory bound for decoding at these sizes: one model with its
@@ -845,30 +761,17 @@ uint64_t adapt_verified_memory_bound(adapt_sizes sizes);
 /* Whether every size is one the format allows. */
 int adapt_sizes_valid(adapt_sizes sizes);
 
-/* The largest context table, as a log2 of blocks, an input of `length`
- * bytes grows into when the budget holds it and the window has its cap:
- * the sweet spot the length chooses below 4 MiB, then a block per four
- * input bytes to 2^26 from 256 MiB — eight times the crate's
- * `table_log_for`. Measured on text and tables, the table the crate chose
- * was the model's bottleneck: every context added to it was evicted
- * rather than learned; twice the table coded an 8 MiB text 1.6 % smaller,
- * four times the table, on 100 MB of it, 1.9 % smaller again, and eight
- * times 0.3 % more. The budget still bounds it. */
+/* Context-table target for an input length, as log2(blocks). Growth is
+ * bounded by the format maximum (2^26 blocks) and the caller's budget;
+ * this target does not itself allocate memory. */
 uint8_t adapt_table_log_for(uint64_t length);
 
-/* The sizes for an input of `length` bytes (`length_known` 0 when the
- * length is not known in advance, as on a pipe) under a memory budget, as
- * the crate chooses them: tables grow with the input up to their sweet
- * spot and shrink, largest first, until the budget holds them; then the
- * window takes what the budget leaves, capped at the input's own length;
- * then, on an input of 32 MiB or more whose window has reached that cap,
- * the context table grows past the sweet spot while the budget holds it
- * (adapt_table_log_for), so the default output is what it was and a
- * larger budget buys a larger table for a large input.
- * A pipe's sizes are chosen for two models whenever the budget holds two
- * at all, since only a second model can prove a pipe. The class code is
- * left 0: the encoder chooses it from the first block. Fails only when the
- * budget cannot hold the smallest model the format allows. */
+/* Fit model sizes to the input length and memory budget. Set length_known
+ * to 0 for an unknown-length stream. Tables and window are bounded by the
+ * budget and input-dependent targets. Unknown-length input reserves room
+ * for two models when possible so a streaming verifier can run. Class
+ * selection is deferred to the encoder's first block. Returns
+ * ADAPT_ERROR_MEMORY_LIMIT when even the minimum sizing request cannot fit. */
 adapt_status adapt_sizes_for_input(int length_known, uint64_t length, uint64_t max_memory, adapt_sizes *sizes,
                                    adapt_error *error);
 /* adapt_sizes_for_input for the max profile: the same rule and the same
@@ -876,16 +779,12 @@ adapt_status adapt_sizes_for_input(int length_known, uint64_t length, uint64_t m
 adapt_status adapt_sizes_for_input_max(int length_known, uint64_t length, uint64_t max_memory, adapt_sizes *sizes,
                                        adapt_error *error);
 
-/* The crate's threads (its `segments` module), for the sizes a file gets:
- * the most bytes one segment of `segment_bytes` can take in the file; the
- * working memory a run of `threads` needs, a model, one block of workspace
- * and one segment's coded bytes per thread and the headroom once; and the
- * sizes for an input of `length` bytes coded that way, each thread's model
- * fitted to a segment's length and the thread's share of the budget, or
- * ADAPT_ERROR_MEMORY_LIMIT naming the bytes the threads need. `cadapt
- * encode --threads` chooses a file's sizes with this and codes the
- * segments through adapt_encode_stream_threads(), to the bytes the
- * crate's threads write. */
+/* Segmented-encoding bounds and sizing: each worker needs a model, one
+ * block workspace and segment output; shared headroom is counted once.
+ * Models fit the requested worker count and segment length. Insufficient
+ * budget returns ADAPT_ERROR_MEMORY_LIMIT with required bytes. Bounds
+ * saturate on overflow. Scheduling the same segments with fewer active
+ * workers preserves the encoded bytes. */
 uint64_t adapt_segment_out_bound(uint64_t segment_bytes);
 uint64_t adapt_threads_encode_memory_bound(adapt_sizes sizes, uint64_t threads, uint64_t segment_bytes);
 adapt_status adapt_sizes_for_threads(uint64_t length, uint64_t max_memory, uint64_t threads, uint64_t segment_bytes,
@@ -997,7 +896,7 @@ adapt_status adapt_encode_stream(adapt_read_fn read, void *read_context, adapt_w
 /* adapt_encode_stream() with the segment length spelled out: when
  * `sizes.segmented` is set, every `segment_bytes` of input (a whole number
  * of blocks) starts a fresh model after a marker byte, and the table of
- * segments precedes the trailer; the crate's threads write the same bytes.
+ * segments precedes the trailer; parallel workers write the same bytes.
  * adapt_encode_stream() cuts ADAPT_SEGMENT_BYTES. */
 adapt_status adapt_encode_stream_segments(adapt_read_fn read, void *read_context, adapt_write_fn write,
                                           void *write_context, adapt_sizes sizes, uint64_t max_memory,

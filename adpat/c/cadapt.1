@@ -1,9 +1,9 @@
 .\" cadapt(1) — the adapt self-adaptive lossless codec, in C.
-.\" Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-15,
+.\" Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-18,
 .\" with Claude Opus 5 (Claude Code). Option values follow cadapt --help;
 .\" benchmark figures are generated from the maintained floor definitions.
 .\" Render: man -l cadapt.1
-.TH CADAPT 1 "2026-09-15" "cadapt 0.12.0" "User Commands"
+.TH CADAPT 1 "2026-09-18" "cadapt 0.12.0" "User Commands"
 .SH NAME
 cadapt \- compress and decompress files and folders with the adapt context-mixing codec
 .SH SYNOPSIS
@@ -48,269 +48,215 @@ cadapt \- compress and decompress files and folders with the adapt context-mixin
 .br
 .B cadapt \-\-help
 .SH DESCRIPTION
-.B cadapt
-is a lossless compressor of the context-mixing kind: every bit of the input
-is predicted by a set of adaptive context models whose predictions are
-combined by learned arbiters and refined by estimation stages, then coded
-by a binary arithmetic coder.
-Decoding runs the same model in the same order, so the decoder needs the
-same memory the encoder used.
+cadapt compresses arbitrary byte streams with an adaptive context model and
+binary arithmetic coding. A container records the model and parameters needed
+for decoding; no external dictionary or service is required.
 .PP
-Two independent choices decide what a run does, and they are easy to
-confuse:
-.TP
-.B the profile
-.RB ( \-\-fast ,
-the default, or
-.BR \-\-max )
-selects
-.I which model
-runs: how many contexts, how many inputs per context, how many arbiters and
-estimation stages.
-A bigger model writes fewer bytes and takes longer, whatever its memory.
-.TP
-.B the memory tier
-.RB ( \-0 " .. " \-11 )
-selects
-.I how much memory
-that model may fill.
-The model shrinks or grows its context table, recall table and history
-window to fit; the profile's fixed tables are the same at every tier.
-More memory buys ratio, not speed.
-The tier is encode's only memory setting, and the file records the model
-it produced: whoever decodes the file needs that model's memory, so the
-tier is a promise about every decoder, not only about this run.
-.PP
-So
-.B \-9 \-\-max
-is the max model in 674 MiB (the default budget, so
-.B \-\-max
-alone means the same),
-.B \-5 \-\-max
-is the same model squeezed into 94 MiB, and
-.B \-9
-alone is the normal model in 674 MiB.
-The two axes are independent: no tier changes the model's shape, no
-profile changes the memory.
+Choose a profile for the predictor and a tier for its requested memory budget.
+Compression ratio, speed and selected table sizes depend on the input.
 .SH COMMANDS
 .TP
 .BI encode " input"
-Compress
-.I input
-to
-.IR input .adpt
-(or to
-.BR \-o ).
-A named file or folder is stored with its metadata (modes, timestamps;
-for folders every entry, hard links, holes, extended attributes and ACLs).
-.I input
-may be
-.B \-
-for standard input, in which case the container is a bare stream with no
-metadata.
+Compress a file, folder or standard input. The default output appends .adpt.
+Named files carry mode and timestamps; folders also carry entries and supported
+filesystem attributes. Use \-o to choose another output.
 .TP
 .BI decode " input"
-Restore the file or folder
-.I input
-holds, to the name with
-.B .adpt
-stripped (or
-.B .out
-appended), or to
-.BR \-o .
-The model is allocated as the container's header names it, whatever the
-decoder's own settings.
+Restore a container. The default output removes .adpt, or appends .out when
+that suffix is absent. A folder requires a named output directory.
 .TP
 .BI info " file"
-Print the container's format version, its declared size, the model's
-sizes (table, recall table, window, class history, contexts, profile), the
-transforms it carries, what it holds and the memory decoding it takes.
-.TP
-.B \-\-version
-Print the release and the span of container versions the decoder reads
-(\fBcadapt 0.12.0 (format versions 19 to 85)\fR) and exit.
+Print format, profile, declared sizes, model settings, transforms and decoder
+memory requirements. This inspects a header; it does not prove payload integrity.
 .TP
 .B \-\-help
-Print the usage text and exit.
-.SH PROFILE OPTIONS
+Print command usage.
+.TP
+.B \-\-version
+Print the release and format span, then exit. The span can contain unsupported
+numbers; see COMPATIBILITY for the exact supported set.
+.SH PROFILES AND TRANSFORMS
+.TP
+Default (normal)
+General-purpose context modeling with first-block model selection.
 .TP
 .B \-\-fast
-Two hashed contexts chosen per file, a direct order-1 memory, the word run,
-recall and one arbiter; a table of at most 2 MiB.
-Decodes about three times faster than the normal profile for about a
-twelfth more bytes.
-Container version 20 (23 with metadata).
-.TP
-(default)
-The normal profile: ten hashed contexts with one input each, two run
-models, four arbiters, two estimation stages.
-Version 19 (22 with metadata); 84 (85) when its second, third and
-fourth arbiters take the class or recall keys the first block prefers,
-as under
-.BR \-\-max .
+A predictor with fewer contexts and one arbiter.
 .TP
 .B \-\-mid
-The normal profile's tables and estimation stages with seven hashed
-contexts fixed by the profile (orders 2, 3, 4 and 6, word, record and
-the class history, whose width is still chosen per file) and its first
-arbiter alone as the verdict.
-Measured against the normal profile: on the first 8 MiB of enwik8
-1.3 % more bytes for 37 % fewer encode cycles and 25 % fewer decode
-cycles; on enwik8 1.4 % more bytes (18,761,302 against 18,500,473) in
-29 % less encode time and 24 % less decode time; on enwik9 2.4 % more
-(172,472,731 against 168,451,193) in 28 % and 26 % less. 2.1 to 2.4
-times faster than
-.BR \-\-max ,
-for 4.8 % more bytes on enwik8 and 17.5 % on enwik9.
-Version 76 (78 with metadata; 77 and 79 under the text transform).
-Not with
-.BR \-\-adaptive ", " "\-\-transform bmp" " or " "\-\-contexts lean" .
+Seven fixed contexts and one arbiter. Cannot be combined with adaptive
+predictors, BMP transformation or the lean context option.
 .TP
 .B \-\-max
-Twenty hashed contexts with three inputs each, six run models, five
-arbiters, a second estimation stage four times the normal one.
-Writes fewer bytes for about 1.8 times the time in the same memory.
-The second, third and fourth arbiters take one of three key policies,
-chosen per file on the first block: the classic keys (the previous byte,
-the order-2 hash, the word so far; version 72, 75 with metadata), the
-byte classes with the nesting state (80, 82) or the classes with recall
-(81, 83); info names the choice as
-.IR "arbiter keys" .
-Versions 21 and 24 are read.
+Additional contexts, run models and arbiter policies. Model selection and sizing
+fit the requested budget; a larger model is not a guarantee of fewer bytes.
 .TP
 .BR \-\-adaptive " " rates | sparse | retained | auto
-Experimental causal predictors layered over the normal or max profile;
+Select an experimental causal predictor over normal or max. Rates uses
+calibration experts, sparse adds lagged-byte count predictors, and retained
+adds a bank selected from preceding block statistics.
 .B auto
-spools the input to temporary disk once, tries the base and the three
-adaptive profiles (and the BMP transform where it applies) and keeps the
-smallest complete container that fits the budget, using up to eight
-encodes.
-Versions 25 to 52.
+spools the input once, encodes the eligible base/adaptive/BMP candidates and
+keeps the smallest complete output. Ties favor the earlier candidate. Up to
+eight sequential encodes use temporary disk for input and two containers.
 .TP
-.BR \-\-transform " " bmp
-Code a BMP24 image through reversible colour and row residuals.
-.TP
-.BR \-\-transform " " text | none
-The text transform: a word both sides have seen written out three times
-becomes, from then on, a code of one to three bytes the model reads as
-one symbol. Each side builds the same bounded book as the file is coded;
-nothing is sent ahead and nothing is built in, and every other byte
-passes as it is. A file of 8 MiB or more whose first block looks like
-text takes it by itself;
-.B text
-asks for it whatever the input (a pipe's length is unknown, so a pipe
-gets it only when asked), and
-.B none
-refuses it. Measured on enwik8 at 128 MiB, 3.5 % fewer bytes in fewer
-seconds; below 8 MiB it costs, which the rule is for. Not with
-.B \-\-adaptive
-or
-.BR "\-\-transform bmp" .
-Versions 62 and 63 ahead of the normal and fast profiles, 67 and 68 with
-metadata; the max profile under the transform is its sized version 72
-(75), the sizing byte naming the transform and the arbiters' 1/32
-starting weight, which the transform earns (3,336,047 to 3,330,628 bytes
-on the first 16 MiB of enwik8 at 128 MiB); 64 to 66 and 69 to 71 are
-read, no longer written.
-.SH MEMORY OPTIONS
+.BR \-\-transform " " bmp | text | none
+BMP applies reversible color and row residuals to eligible uncompressed 24-bit
+BMP data. Headers, padding and unmatched bytes remain unchanged.
+Text builds a dictionary causally from repeated words in the input. Eligible
+text of known length at least 8 MiB uses it automatically; an unknown-length
+pipe needs an explicit request. None disables automatic transforms.
+Text cannot be combined with adaptive predictors or BMP transformation.
+.SH MEMORY AND MODEL OPTIONS
 .TP
 .BR \-0 " .. " \-11
-The tier:
-.B \-0
-to
-.B \-9
-are what
-.BR xz (1)
-takes to compress at the same preset, so a user of xz reads them as
-before;
-.B \-10
-and
-.B \-11
-are the two tiers above xz's ladder, for the max profile's largest tables
-and a window the size of a 1 GB input:
+Select the requested encoding budget. The default is \-9; the last tier wins.
 .TS
 l l l l l l l.
-preset	-0	-1	-2	-3	-4	-5
+tier	-0	-1	-2	-3	-4	-5
 MiB	3	9	17	32	48	94
 .TE
 .TS
 l l l l l l l.
-preset	-6	-7	-8	-9	-10	-11
+tier	-6	-7	-8	-9	-10	-11
 MiB	94	186	370	674	1024	2048
 .TE
 .IP
-.B \-9
-is the default; the last tier given wins.
-A tier below the profile's smallest model is raised to that model, never
-refused.
-The tier bounds the model, its window and the workspace; a folder's path
-and metadata bookkeeping is additional.
-There is no byte-count budget on
-.BR encode :
-.B \-\-max\-memory
-belongs to
-.BR decode ,
-where it is a cap, and is refused on
-.BR encode .
-.TP
-Floors
-The smallest model of the fast and normal profiles takes 28,184,711 bytes
-(about 27 MiB), the max profile's 57,816,199 (about 55 MiB), so
-.BR \-0 " to " \-2
-all mean the 27 MiB floor and, under
-.BR \-\-max ,
-.BR \-0 " to " \-4
-all mean the 55 MiB one.
-.B \-\-verify
-alongside the coder needs two models.
-.TP
-Ceilings
-The context table stops growing at 2^26 blocks (1 GiB), the recall table
-at 2^24 entries (64 MiB), the window at 2^30 bytes; the fast profile's
-table at 2 MiB.
-On enwik8 (100 MB) the max profile is saturated at
-.BR \-9 :
-.B \-10
-and
-.B \-11
-write the same bytes, the table being at the input's target.
-.TP
-What a tier buys
-Measured on enwik8 (100 MB) with
-.BR "\-\-max \-\-allocation context" ,
-commit 89e2486, 2026-09-15 (a dated table; the locked floors below are the
-figures a run verifies):
-.TS
-l r r r.
-tier	context table	container	vs \-9
-_
-\-5, \-6	36 MiB	19,252,902	+5.7 %
-\-7	128 MiB	18,744,782	+3.0 %
-\-8	256 MiB	18,451,834	+1.3 %
-\-9	512 MiB	18,207,203	\(em
-\-10, \-11	512 MiB	18,207,203	0
-.TE
+Requests below the profile's smallest sizing budget are raised to it.
+Normal needs 28,184,711 bytes; max needs 57,816,199 bytes for that minimum
+request. Selected model memory may be lower. A tier covers codec model,
+window and workspace, not every process allocation. Folder enumeration,
+metadata, verification and segmented operation have additional costs.
 .IP
-At
-.B \-5
-(raised to the smallest max model) and
-.B \-6
-the table is bought with the compact side tables, the lean context set
-and a fraction past 2^21 blocks, under the text transform (the sized
-version 58, 61 with metadata, its sizing byte carrying all four); at
-.B \-7
-with the compact tables (the text version 65, 70 with metadata); from
-.B \-8
-the full tables win (64, 69).
+Decoder memory follows the model recorded in the container; it is not the
+requested encoder tier. Inspect the requirement with cadapt info.
 .TP
-Locked floors
+.BR \-\-allocation " " auto | window | context
+Choose how sizing divides memory between the context table and recall window.
+Auto grows the table first when window-first sizing leaves it below the
+input's target; otherwise it uses window-first sizing. Window or context
+forces that preference. A segment is the sizing unit for segmented encoding.
+.TP
+.BR \-\-contexts " " auto | lean
+Auto compares eligible context sets on the first block. Lean forces the reduced
+set, omitting word/field contexts and additional max-profile contexts.
+Unavailable with fast or mid.
+.TP
+.BI \-\-max\-memory " bytes"
+Decode only: refuse a model whose working-memory requirement exceeds the cap.
+The decoder cannot shrink a recorded model. No cap applies unless supplied.
+.TP
+.BI \-\-max\-output " bytes"
+Decode only: cap decoded bytes and, for archives, the combined logical size of
+restored files, including sparse holes and hard-link aliases. Declared sizes
+are checked before model/result allocation; stream and archive checks occur
+as lengths become available. No cap applies unless supplied.
+.SH OUTPUT, VERIFICATION AND PARALLELISM
+.TP
+.BI \-o " output"
+Select the output path. Input and output can each be \- for a byte stream.
+A folder cannot be restored to standard output.
+.TP
+.B \-\-force
+Permit replacement of an existing output. Named outputs remain staged until
+publication. Forced folder replacement depends on the platform/filesystem:
+Linux/macOS support atomic rename or exchange for supported destination types;
+Windows refuses an existing folder destination. An unsupported replacement
+fails without deleting the destination.
+.TP
+.BR \-\-verify ", " \-\-no\-verify
+Encoder round-trip proof is off by default. Verification uses a second model
+when the budget permits, or a second pass with one model for suitable named-file
+input/output. A pipe that cannot fit the required proof resources is refused.
+Candidate search verifies its selected output when this option is enabled.
+.TP
+.B \-\-explain
+Report allocation, contexts, arbiter keys, transform choices and trial sizes
+on standard error. This does not change the container. Diagnostic field layout
+may change between releases.
+.TP
+.BI \-\-threads " n"
+Request workers, default 1. Encoding with n of at least two creates segments,
+each starting a fresh model. Sizes are fitted to the requested count; actual
+workers are limited by memory and available CPUs. Changing the requested count
+can change compressed bytes. Scheduling the same segments differently cannot.
+A segmented file can be decoded in parallel; pipe decoding uses a stream.
+.TP
+.BI \-\-segment\-bytes " bytes"
+Select segment length for threaded encoding. The default is 16777216 bytes;
+lengths must be whole 262144-byte blocks. Restarting a model can reduce ratio.
+.SH FILESYSTEM METADATA AND SAFETY
+Named files and folders preserve modes and access/modification times.
+POSIX timestamps retain nanoseconds; applying and reading back required
+metadata must succeed. Folder entries include supported links, sparse extents,
+attributes and ACLs. Ownership, creation time and status-change time are not
+preserved.
+.PP
+Linux records user attributes and POSIX access/default ACLs. macOS records
+extended attributes but not macOS ACLs. Windows records runtime modes and
+whole-second times; it rejects symlinks and attribute-bearing archives, and
+restores hard-link entries as copies. Windows behavior is not validated.
+Sparse storage depends on the destination filesystem; logical bytes are preserved.
+.PP
+POSIX named outputs use private staging wrappers and retained handles.
+Folder metadata replay uses temporary disk with bounded working memory after
+checksum validation. Existing destinations are preserved until replacement
+succeeds. Catchable failures attempt cleanup; uncatchable termination or
+cleanup failure can leave temporary entries. Errors after publication report
+that state and can retain a replaced entry for recovery.
+.PP
+Standard output and library callbacks can receive bytes before a final failure.
+Accept their output only on success. Checksums detect corruption; they do not
+authenticate or encrypt data. Resource caps are opt-in.
+.SH COMPATIBILITY
+Supported container versions: 19-54, 56-58, 61-72, 75-85.
+The CLI writes archive version 4 and reads archive versions 1-4.
+Containers from cadapt 0.11.0 (versions 13-15) require that release to decode;
+convert them or keep the old binary before upgrading. Unknown numbers are rejected.
+.PP
+Small-table model2 containers in versions 58/61 can identify two predictors.
+Decoding tries them sequentially with one live model and temporary disk for
+tentative bytes; output is emitted only after checksum verification.
+.SH ENVIRONMENT
+.TP
+.B ADAPT_ISA
+Set to baseline to select the portable predictor path. It produces the same
+bytes as the accelerated path for identical input, metadata and settings.
+.SH EXIT STATUS
+.TP
+0
+Success.
+.TP
+1
+Codec, resource or I/O failure. A stream output may contain a prefix.
+.TP
+2
+Invalid command usage.
+.TP
+128 + signal number
+Handled POSIX interruption: SIGINT, SIGTERM, SIGHUP, SIGPIPE or SIGXFSZ.
+Blocked I/O wakes for cleanup; active codec work reaches its next I/O boundary.
+.SH EXAMPLES
+.nf
+cadapt encode report.pdf
+cadapt decode report.pdf.adpt -o report-copy.pdf
+cadapt encode photos/ -o photos.adpt --verify
+cadapt decode photos.adpt -o photos-copy
+cadapt encode records.csv --max -6
+cadapt info records.csv.adpt
+cadapt decode records.csv.adpt -o records-copy.csv --max-memory 134217728
+printf 'example data\en' | cadapt encode - --fast -3 > example.adpt
+cadapt decode - < example.adpt
+.fi
+.SH REGRESSION BASELINES
 .\" floors:start
-Locked 2026-09-16 on AMD Ryzen 5 5600X 6-Core Processor,
+Baselines recorded 2026-09-16 on AMD Ryzen 5 5600X 6-Core Processor,
 .BR "cadapt encode --max --allocation context --contexts lean" ;
-a change may only improve on these:
+Container sizes must not exceed these limits;
+throughput may decrease by at most 10%:
 .TS
 l r r r.
-fixture	input	container floor	time floor
+fixture	input	maximum container	baseline time
 _
 enwik8-8MiB	8,388,608	1,669,716	10.7 CPU s
 enwik8-16MiB	16,777,216	3,236,535	19.8 CPU s
@@ -318,235 +264,7 @@ enwik8	100,000,000	17,800,141	107.4 CPU s
 enwik9	1,000,000,000	145,784,134	1,054.0 CPU s
 .TE
 .\" floors:end
-.TP
-.BR \-\-allocation " " auto | window | context
-How a budget is spent once the smallest model fits:
-.B window
-grows the history window first, then the context table;
-.B context
-grows the table first;
-.B auto
-(the default) grows the table first only where the window-first sizes would
-leave it below its target for the input — an input longer than the window
-the budget allows, whose table then stays at its floor — and is the
-window-first sizes everywhere else. Under
-.B \-\-max
-it also halves the side tables (versions 53/56) when the budget would
-otherwise stop the table at 2^22 blocks or fewer, short of the input's
-target, and spends the difference on a table twice the size, with a lean
-context set (54/57) while the table stays at that size; and what the
-budget still holds once the window has grown goes to the table an eighth
-of its next doubling at a time (58/61), never at the window's expense.
-A table at the input's target takes no fraction, so the default budget's
-containers are unchanged. The rule fires under every profile at the tiers
-whose window cannot hold the input: on the first 16 MiB of enwik8,
-.B \-\-fast \-0
-writes 3.7 % fewer bytes than window-first,
-.B \-\-max \-1
-12 % fewer and
-.B \-\-max \-6
-1.4 % fewer, at the same peak memory and the time of
-.BR "\-\-allocation context" ;
-.B \-\-mid
-and the normal profile size alike either way there.
-Either can win depending on the input; on enwik8 at
-.B \-9
-(commit 89e2486)
-.B context
-writes 18,207,203 bytes and
-.B window
-18,393,652.
-.TP
-.BR \-\-contexts " " auto | lean
-Which context set the model runs:
-.B auto
-(the default) chooses it by coding the first block under each candidate;
-.B lean
-takes the lean set outright — word and field left out and, under
-.BR \-\-max ,
-o8, word3 and wordc too (the sizing byte's lean bit, written with the
-full side tables as well since this option; a reader older than it
-refuses such a file). This trades context coverage for prediction cost. Not with
-.BR \-\-fast .
-.TP
-Decoding memory
-.B decode
-allocates the model the container's header names, so a file written at
-.B \-9
-takes about 640 MB to decode on any machine (for the max profile; about
-370 MB for the normal one), and a file written at
-.B \-11
-up to 2 GiB.
-.BI \-\-max\-memory " bytes"
-on
-.B decode
-only caps that: a container needing more is refused with the bytes it
-needs, never shrunk; without it nothing is refused.
-.SH OTHER OPTIONS
-.TP
-.BI \-o " output"
-Where to write; existing files are kept unless
-.B \-\-force
-is given.
-.B \-
-is standard output (encode) or standard input (decode).
-.TP
-.B \-\-force
-Overwrite an existing output.
-.TP
-.BI \-\-max\-output " bytes"
-On decode, refuse a container that declares more decoded bytes than this.
-For folders the cap is on the combined logical sizes of restored files,
-including sparse holes and each hard-link alias; a refused entry discards
-the staging directory and leaves the existing destination intact.
-Without it nothing is refused: the container alone decides what decoding
-writes (see FMT-6 in
-.IR docs/CONSTRAINTS.md ),
-and a service that decodes untrusted containers sets the cap itself.
-.TP
-.BR \-\-verify ", " \-\-no\-verify
-.B encode
-skips round-trip verification by default.
-.B \-\-verify
-proves the output as it is written when the budget holds two models, on a
-second thread; otherwise, for a file written to a file, in a second pass
-with one model.
-.B \-\-no\-verify
-states the default.
-.TP
-.B \-\-explain
-Adds to the report, on standard error, what the first block decided: the
-tables and the allocation taken, the class-history width, context set,
-record period and arbiter keys, the sample codings that chose them and
-their bytes, and whether the text transform is on. The container is the
-same with or without it.
-.TP
-.BI \-\-threads " n"
-With
-.I n
-of two or more,
-.B encode
-cuts the input into segments of
-.B \-\-segment\-bytes
-(default 16777216, whole blocks of 262144) that each start the model
-afresh, and codes them at once on as many of the
-.I n
-threads as the budget holds a model, a segment and a block's workspace
-for, and never more than the CPUs online;
-.B decode \-\-threads
-decodes a segmented file the same way.
-The sizes stay fitted to the
-.I n
-asked for, so the bytes are the same on every machine; the host only
-decides how many workers code them at once, and a request past its CPUs
-is noted.
-Each restart costs ratio (about +4 % on enwik8 with 16 MiB segments), and
-each worker needs a whole model, so within a small budget one thread is the
-better answer.
-The report says how many threads ran.
-.TP
-.BI \-\-segment\-bytes " bytes"
-The segment length for
-.BR \-\-threads .
-.SH ENVIRONMENT
-.TP
-.B ADAPT_ISA
-Set to
-.B baseline
-to run the portable per-bit path instead of the x86-64-v3 one on a CPU
-that has it.
-Both write the same bytes; the knob exists so the two can be compared.
-.SH EXIT STATUS
-.TP
-0
-The command succeeded.
-.TP
-1
-It failed: an input that could not be read or decoded, an output that
-could not be written, a budget below the model's floor, a container the
-decoder's cap refuses.
-Nothing is left half-published.
-.TP
-2
-A usage error; the usage text follows the message.
-.SH EXAMPLES
-The floor configuration, the max model in the default 674 MiB with the
-table grown first:
-.PP
-.nf
-    cadapt encode enwik8 --max --allocation context
-.fi
-.PP
-The same model in 94 MiB, and what it will take to decode:
-.PP
-.nf
-    cadapt encode enwik8 --max --allocation context -5
-    cadapt info enwik8.adpt
-.fi
-.PP
-The normal model in 32 MiB, which the max model cannot enter:
-.PP
-.nf
-    cadapt encode data.bin -3
-.fi
-.PP
-The max model in 2 GiB, the top tier, for a 1 GB input; and a decoder on
-a 1 GiB machine refusing it with the bytes it needs:
-.PP
-.nf
-    cadapt encode enwik9 --max --allocation context -11
-    cadapt decode enwik9.adpt --max-memory 1073741824
-.fi
-.PP
-A folder, proven as it is written, and restored:
-.PP
-.nf
-    cadapt encode project/ -o project.adpt --verify
-    cadapt decode project.adpt -o restored/
-.fi
-.PP
-A stream through a pipe:
-.PP
-.nf
-    tar c src | cadapt encode - --fast > src.tar.adpt
-    cadapt decode - < src.tar.adpt | tar x
-.fi
-.SH FILES
-Containers carry a format version in their header; a decoder refuses a
-version it does not implement.
-Versions 13 to 18 are refused; 19 to 24 are the three profiles as streams
-and as named files or folders; 25 to 52 are the experimental profiles;
-53 and 56 are the max profile with compact side tables, 54 and 57 with
-its lean context set as well; 58 and 61 the max profile sized to its
-budget, one byte after the header naming the side tables, the context
-set, the table's fraction, the text transform, the arbiters' 1/32
-starting weight and, in bit 7, the second max model (int16 arbiters,
-four re-purposed context slots, four-way recall buckets, a fifth
-arbiter). Current max encodes use 72 (75 with metadata), identifying the
-pressure-gated model2 policy; 21, 24, 53, 54, 56 and 57 remain readable; 62 to 66 are the text transform ahead of the normal,
-fast, max, compact and lean models, 67 to 71 with metadata, of which the
-max ones (64 to 66, 69 to 71) are read and no longer written; 76 and 77
-are the mid profile, plain and under the text transform, 78 and 79 the
-same with metadata; 80 and 81 are the sized max profile of 72 with its
-second, third and fourth arbiters keyed by the byte classes and the
-nesting state (80) or by the classes and recall (81), a choice the
-encoder makes per file on the first block, 82 and 83 the same with
-metadata; 84 is the normal profile of 19 with the same key policies,
-one policy byte after the header naming the policy and the text
-transform, 85 the same with metadata.
-For historical 58/61 model2 files below a table of 2^21 blocks, the decoder
-checks both historical predictors sequentially, using temporary disk for
-a consumed input prefix and tentative output. It emits bytes only after
-checksum verification and keeps one model in memory.
-.PP
-On POSIX, file outputs use a private 0700 staging wrapper and retained file
-and directory handles for metadata, publication and cleanup. Deferred folder
-and root attributes are kept in an automatically removed temporary journal,
-replayed after checksum verification with bounded memory. A temporary-storage
-failure discards staging and preserves the existing destination.
 .SH SEE ALSO
-.BR xz (1).
-.br
-The project documentation is available at
+The project documentation, C API examples, support and security policies:
 .UR https://github.com/pedroanisio/xadapt-c
 .UE .

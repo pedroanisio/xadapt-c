@@ -3,14 +3,13 @@
  *
  * A section of adapt_model.h, which includes the sections in order into
  * one translation unit: every function stays static inline and the per-bit
- * path is specialized at compile time as before. Include adapt_model.h,
- * not this file. Moved out of adapt_model.h unchanged on 2026-09-17.
+ * path is specialized at compile time. Include adapt_model.h, not this file.
  */
 #ifndef ADAPT_MODEL_STATE_H
 #define ADAPT_MODEL_STATE_H
 
 /* ------------------------------------------------------------------------
- * model.rs — the predictor
+ * Predictor — the predictor
  * --------------------------------------------------------------------- */
 
 typedef struct model {
@@ -322,10 +321,9 @@ static inline size_t claim(model *m, uint64_t h) {
     size_t base = block_line(m, h);
     uint8_t tag = (uint8_t)(h >> 56);
     uint8_t *line = m->table + base * BLOCK;
-    /* The four tags at once, then one branch on the line: the way loop
-     * with a compare-and-return per way was four data-dependent branches
-     * a claim, and the tag of every way is in the one cache line anyway.
-     * The first matching way wins, as the loop's order had it. */
+    /* Compare the four tags in one cache line before branching, avoiding
+     * a data-dependent branch per way. The first matching way must win
+     * to preserve deterministic replacement order. */
     unsigned hits = (unsigned)(line[0 * BLOCK] == tag) | (unsigned)(line[1 * BLOCK] == tag) << 1 |
                     (unsigned)(line[2 * BLOCK] == tag) << 2 | (unsigned)(line[3 * BLOCK] == tag) << 3;
     if (hits != 0) {

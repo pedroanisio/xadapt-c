@@ -1,10 +1,3 @@
----
-title: Large Text Compression Benchmark tables as CSV
-date: 2026-09-14
-source_model: Claude Opus 5
-tool: Claude Code
----
-
 # Large Text Compression Benchmark tables as CSV
 
 Two CSV snapshots of Matt Mahoney's Large Text Compression Benchmark (LTCB),
@@ -29,24 +22,33 @@ renderings it writes into this directory — `ltcb-dashboard.{svg,png}`,
 root builds all of them, and each section below gives its own command;
 nothing quotes a number from them that the CSVs do not carry.
 
-text.html was fetched on 2026-09-15 at 23:25 UTC (SHA-256
-`7ea13d26b7c8e67427361a333dfe0eae82981f4e24cf1b7fddeb6affaaf76866`), the
-day the page listed cadapt 0.12.0 at rank 30 (its changelog line: "Sep 15
-2026 - added cadapt 0.12.0, zmix 1.0, zmix 1.0.1"); the previous snapshot
-was of 2026-09-14 20:04 UTC (SHA-256 `a504ea64…e0b84f`, page dated Sept
-12, 2026, 224 rows), from which today's differs by the rows `zmix 1.0` and
-`cadapt 0.12.0 --max --allocation context` and by three Pareto marks the
-new rank-1 row took from rata-cmix 1.0.0, fx2-cmix-transformer and nncp
-v3.2 — every other row is identical, which is how the transcriber below
-was checked. textdata.html was fetched on 2026-09-14 at 20:02 UTC (SHA-256
-`b91ee875eb9d9b17ba825dc59ad8789b65f6d12661df0e5dffcb578668ac6822`).
-The main table changes as entries are added; re-fetch before citing it as
-current:
+## Snapshot provenance
+
+The main source page was captured on 2026-09-15 at 23:25 UTC, SHA-256
+`7ea13d26b7c8e67427361a333dfe0eae82981f4e24cf1b7fddeb6affaaf76866`.
+The textdata page was captured on 2026-09-14 at 20:02 UTC, SHA-256
+`b91ee875eb9d9b17ba825dc59ad8789b65f6d12661df0e5dffcb578668ac6822`.
+These are dated snapshots. Fetch and validate a new source before presenting
+rankings as current; review the CSV diff and refresh derived comparisons together.
 
 ```sh
-curl -s https://mattmahoney.net/dc/text.html -o build/text.html
-python3 -B tools/ltcb/transcribe_ltcb_table.py --html build/text.html --output research/ltcb-main-table.csv
+snapshot_dir=$(mktemp -d)
+curl --fail --show-error --silent https://mattmahoney.net/dc/text.html -o "$snapshot_dir/text.html"
+python3 -B tools/ltcb/transcribe_ltcb_table.py --html "$snapshot_dir/text.html" --output "$snapshot_dir/ltcb-main-table.csv"
 ```
+
+## Snapshot comparison
+
+In the 2026-09-15 snapshot, cadapt 0.12.0 --max --allocation context has
+150,063,628 B of enwik9 data plus a 209,893 B decompressor ZIP:
+**150,273,521 B total, rank 30 of 226**, with reported memory of 661 MB.
+The least reported memory among higher-ranked entries is 1,542 MB for drt|lpaq9m.
+These statistics describe that submission, not the current development build.
+
+`tools/ltcb/ltcb_goal.py` computes comparison thresholds from the CSV. For
+place 20, paq8px_v206fix1 totals 125,099,359 B. A 209,893 B decompressor
+would require at most 124,889,465 B of enwik9 data to overtake it. This is
+arithmetic on the snapshot, not a product acceptance target.
 
 ## How the tables were transcribed
 
@@ -63,8 +65,7 @@ skipped row. Two places need a rule beyond the pattern:
 - **Single time value.** Twelve main-table rows publish only one of Comp and
   Decomp. Numbers in the table are right-aligned, so the value was assigned by
   its starting column: a value beginning left of the `Decomp` header is Comp,
-  otherwise Decomp. Every such row was checked by hand against the page on
-  2026-09-14; two figures the page runs together (`108960~110000`) are
+  otherwise Decomp. Two figures the page runs together (`108960~110000`) are
   split at the `~`, and a row without flag letters (NTFS) keeps them empty.
 - **Program versus options.** The page separates the two by alignment, not by
   a delimiter. `program` is the text before the first run of two or more
@@ -130,7 +131,8 @@ python3 -B tools/ltcb/plot_ltcb_tables.py --output research/ltcb-dashboard.svg
 python3 -B -m unittest discover -s tools/ltcb -p 'test_*.py'
 ```
 
-The output is deterministic: the same CSV gives byte-identical SVG and PNG.
+Within the same plotting environment, the same inputs produce deterministic
+SVG and PNG output.
 Every number on the figure is computed from the published columns; the only
 derived quantities are bits per byte (8 × compressed ÷ 10^9 or 10^8), the
 speed/ratio frontier (entries no other entry beats on both axes), medians,
@@ -154,31 +156,10 @@ next point, with the ratio it gains over the previous phase's last point and
 the time it costs. The lower strip shows the marginal gain of each frontier
 step in bits per byte per tenfold time: a cliff is a spike, a plateau a trough.
 
-On the compression axis the published table has six phases (218 timed
-entries, 16 frontier points):
-
-| Phase | Family | ns per byte | bits per byte | Gain per decade | Enters with |
-| ---: | --- | ---: | ---: | ---: | --- |
-| 1 | LZ / dictionary | 4 – 21 | 3.908 → 3.121 | 1.09 | lzv 0.1.0 |
-| 2 | BWT | 23 – 160 | 1.311 → 1.282 | 0.03 | bsc 3.25: −1.81 bpb for ×1.1 time |
-| 3 | Context mixing | 394 – 868 | 1.159 → 1.152 | 0.02 | mcm 0.83: −0.12 bpb for ×2.5 time |
-| 4 | PPM | 1,341 | 1.019 | (one point) | durilca'kingsize: −0.13 bpb for ×1.5 time |
-| 5 | Context mixing | 73,986 – 86,182 | 0.979 → 0.932 | 0.70 | gmix v1: −0.04 bpb for ×55 time |
-| 6 | Neural | 110,013 – 227,372 | 0.907 → 0.747 | 0.51 | jax-compress: −0.03 bpb for ×1.3 time |
-
-Three features carry the story. The cliff at 21–23 ns/B, where BWT replaces
-LZ and 1.81 bpb is gained for 10 % more time, is the largest step on the
-frontier (45.8 bpb per decade). Two plateaus follow it: BWT from 23 to 160
-ns/B and, after the CM and PPM steps, a single PPM point that no entry beats
-between 1,341 and 73,986 ns/B, a 55-fold span for 0.04 bpb. Past 74,000 ns/B
-the heavy context-mixing and neural entries resume buying ratio at 0.5–0.7
-bpb per decade, with the transformer step (jax-compress → fx2-cmix-transformer,
-−0.13 bpb for ×1.2 time) as the last sharp move; nothing beats altxs 1.0.0
-(0.747 bpb) past 227,372 ns/B. The decompression axis has eight phases with
-the same shape shifted left: LZ holds to 6.6 ns/B at 1.618 bpb (lzham 1.0),
-BWT takes over at 8 ns/B with −0.31 bpb for ×1.2 time, and the LZ family
-re-enters once (glza 0.12 at 9.4 ns/B) before the same CM, PPM and neural
-sequence.
+Timing comparisons use the reported hardware-dependent values. The phase map
+summarizes this snapshot; it does not establish a controlled speed advantage
+between algorithms. Regenerate the figure and underlying CSV after updating
+the input table rather than copying their results into this guide.
 
 ```sh
 python3 -B tools/ltcb/plot_ltcb_phases.py --local research/ltcb-local-entries.csv \
@@ -258,8 +239,8 @@ python3 -B tools/ltcb/plot_ltcb_tables.py --local research/ltcb-local-entries.cs
 
 ## Relationship to this repository
 
-`static/corpus/enwik8` and `static/corpus/text8` match the checksums the
-textdata page publishes (enwik8 MD5 `a1fa5ffddb56f4953e226637dabbb36a`,
+The uncompressed enwik8 and text8 members of the pinned ZIP fixtures use the
+checksums recorded for the benchmark (enwik8 MD5 `a1fa5ffddb56f4953e226637dabbb36a`,
 text8 MD5 `3bea1919949baf155f99411df5fada7e`), so `enwik8_bytes` in either
 CSV is directly comparable with a local full-enwik8 container size. LTCB ranks by enwik9 plus decompressor size. A row lacking enwik9 can
 be compared only on columns for which it has measurements.

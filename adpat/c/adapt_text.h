@@ -23,14 +23,9 @@
  * transform is invertible byte for byte and its inverse never looks
  * ahead.
  *
- * Measured on enwik8 with the model unchanged, --max --allocation
- * context at 128 MiB: 19,657,760 -> 18,958,016 bytes (-3.56 %), the
- * model coding 62 % of the bytes. A dictionary built in a first pass
- * and sent ahead of the text measured 18,980,671 and was set aside:
- * both sides can build the book as they go (FMT-2, FMT-8). Keeping the
- * space before a word measured better than implying it; case flags
- * measured better than a case-sensitive book; entering a word at its
- * second sighting measured 18,993,159, at its third 18,958,016. */
+ * The causal book avoids an input prepass and a transmitted dictionary.
+ * Explicit spaces, case flags and the three-sighting admission threshold
+ * are wire semantics shared by the forward and inverse transforms. */
 #ifndef ADAPT_TEXT_H
 #define ADAPT_TEXT_H
 #include "adapt.h"
@@ -435,8 +430,7 @@ static inline int text_inverse_complete(const text_inverse *v) {
  * two fifths of its bytes in runs of two or more ASCII letters and fewer
  * than one in twenty-five at or above 0x80 (each of those costs an
  * escape). The encoder decides from the first block, as it does for the
- * x86 transform; measured on enwik8 the codes take a third of the bytes
- * away, on binaries the escapes would add them. */
+ * x86 transform. High-byte escapes can increase output size on binary data. */
 static inline int text_detect(const uint8_t *p, size_t n) {
     size_t i, letters = 0, high = 0, run = 0;
     if (n < 1024) return 0;

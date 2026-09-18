@@ -4,9 +4,6 @@
  * directory, and the staged directory itself. See cadapt_folder.h.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
- * Extracted from cadapt.c, 2026-09-17: the code is unchanged, its types
- * moved to the header, and the functions the commands call lost their
- * `static`.
  */
 #include "cadapt_platform.h"
 
@@ -217,11 +214,9 @@ void folder_free(folder *f) {
     f->count = f->cap = f->inode_count = f->inode_cap = 0;
 }
 
-/* The inode table is a hash table — open addressing over (device, inode),
- * a power of two of slots never more than half full — so a snapshot tree
- * of a million hard-linked names costs a million lookups, not a million
- * scans of everything seen so far (the flat list it replaced was measured
- * quadratic: 0.3 s over 30,000 inodes, 6.3 s over 100,000). */
+/* Open addressing over (device, inode), with a power-of-two capacity and
+ * load at most one half. Expected constant-time lookups avoid quadratic
+ * scans when a folder contains many hard-link aliases. */
 static size_t inode_slot(const identity *id, size_t mask) {
     uint64_t h = id->inode ^ (id->device * 0x9E3779B97F4A7C15ull);
     h ^= h >> 31;

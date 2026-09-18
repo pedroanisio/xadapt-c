@@ -8,7 +8,7 @@ and complete-container accounting invariants.
 ## Implemented algorithms
 
 The chosen normal or max model always predicts and learns from the same prefix as
-the new experts. The new layer combines its final bit probability with:
+the adaptive experts. The mixture combines its final bit probability with:
 
 1. **Rates:** two probability calibration tables with update rates 1/32 and
    1/512. Each table has 16,384 hashed contexts and 33 probability bins.
@@ -62,14 +62,14 @@ trains its own state. Stored/skipped bytes update the retained-state histogram
 on both encoder and decoder, while predictor learning remains skipped as the
 block method specifies. Segment markers reset all predictor state. The routing
 descriptor necessarily lags a regime change by a block, and a bank can receive
-poorly matched data during that lag; no instant regime-detection claim is made.
+poorly matched data during that lag.
 
 ## Reversible BMP24 transform
 
 Eligibility is a BMP header declaring uncompressed 24-bit pixels, one plane,
 an information header of at least 40 bytes, valid positive width, nonzero
 signed height, and a declared file size covering the pixel extent. Top-down
-and bottom-up layouts both work. Width, absolute row count and pixel offset
+and bottom-up layouts both work. Pixel offset, width and absolute row count
 are carried as three little-endian 32-bit values: **12 counted bytes**.
 The row stride is `4 * ceil(3 * width / 4)`, matching the BMP layout described
 in [Microsoft's BITMAPINFOHEADER documentation](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapinfoheader).
@@ -107,12 +107,11 @@ checks the winning candidate before publication.
 Adaptive state is charged to model memory before table and window sizing.
 Only one candidate model is live at a time. Temporary disk holds the input
 and candidate containers. The BMP descriptor uses three little-endian
-32-bit fields for width, row count and pixel offset. Original-byte checksums
+32-bit fields for pixel offset, width and row count. Original-byte checksums
 are checked after inverse transformation.
 
 The supported format-version table is defined in [adapt.h](../adpat/c/adapt.h)
-and described in the [format reference](../README.md#format). Published formats
-remain decodable. C clients initialize all sizing fields through the sizing
+and described in the [format reference](../README.md#format). The compatibility commitment is defined in [SUPPORT.md](../SUPPORT.md). C clients initialize all sizing fields through the sizing
 functions or zero-initialize the complete structure before assigning fields.
 
 ## Usage

@@ -1,22 +1,28 @@
-# LTCB artifact preparation
+# Prepare an LTCB submission
 
-Part of [adapt](../README.md). `tools/ltcb_release.sh` prepares a benchmark
-submission from a committed revision. Its binary ZIP includes the executable,
-license and usage instructions. Source releases use the separate
-[release pipeline](release-pipeline.md).
+`tools/ltcb_release.sh` packages a committed revision for the Large Text
+Compression Benchmark. The decompressor ZIP includes the executable, license
+and usage instructions; sources use the separate [release pipeline](release-pipeline.md).
 
-Build and verify the fixture containers with the exact executable being
-submitted. Run the packaging script with explicit fixture locations:
+Provide ENWIK8 and ENWIK9 as paths to the verified, uncompressed benchmark
+fixtures. The script checks their identities and verifies each round trip
+using the executable being submitted. Choose a fresh output directory:
 
 ```sh
-tools/ltcb_release.sh --help
+: "${ENWIK8:?Set ENWIK8 to the uncompressed fixture path}"
+: "${ENWIK9:?Set ENWIK9 to the uncompressed fixture path}"
+submission_dir=$(mktemp -d)
+tools/ltcb_release.sh --rev HEAD --out "$submission_dir" \
+    --enwik8 "$ENWIK8" --enwik9 "$ENWIK9"
 ```
 
-The script records the resolved source revision, executable and container
-hashes, complete compressed sizes, and verification results in its manifest.
-Report decompressor ZIP size separately from the enwik9 container size; their
-sum is the ranked quantity. Identify the fixture, host, command and timing
-measure for every reported timing. An incomplete or interrupted run is not a
-submission artifact. Inspect the exact ZIP and verify its manifest before
-publishing. The public comparison inputs and their column meanings are in
-[ltcb-tables.md](../research/ltcb-tables.md).
+The script replaces its output directory, so do not point --out at an existing
+collection. Encoding and verifying full enwik9 is a substantial benchmark run.
+An interrupted or failed run is not ready for submission.
+
+The manifest records source revision, executable/container hashes, complete
+compressed sizes, timing and verification. Inspect the exact ZIP and manifest
+before publication. LTCB ranks the enwik9 container plus the decompressor ZIP;
+report both components. Every timing needs its fixture, host, command and CPU
+or wall-time measure. [Benchmark reference data](../research/ltcb-tables.md)
+describes the published columns and dated comparison snapshot.

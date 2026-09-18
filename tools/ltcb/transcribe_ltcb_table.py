@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Transcribe the Large Text Compression Benchmark's main table into CSV.
 
-Source: Claude Opus 5 via Claude Code, 2026-09-15. The rules are the ones
-research/ltcb-tables.md records for the snapshot of 2026-09-14, written down
-as code so a re-fetch is a command, not a session: the table is the
+Source: Claude Opus 5 via Claude Code, 2026-09-15. Parsing rules are documented
+in research/ltcb-tables.md. The source table is the
 `<pre><ol>` block of mattmahoney.net/dc/text.html, one `<li>` per row;
 every row is matched against one pattern anchored on the right-hand numeric
 columns (a row that does not match is an error, never skipped); a single

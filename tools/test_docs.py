@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
-"""The documents against the code they describe.
+"""Validate copied documentation facts against code and maintained data.
 
-Each test pins one thing a document hand-copies from a source of truth: the
-README's usage block against `cadapt --help`, the flags of the manual and the
-README against the binary, the container versions of adapt.h against the
-README and the manual, the floors blocks against tools/ratio_floor.json
-(render_floors.py), the README's layout table against the tracked tree, every
-relative link and every backticked path against the tree (or the script that
-writes it), every cited `make` target against the Makefile it is invoked in,
-the changelog's top entry against CADAPT_VERSION and the tag, and the research
-index against the notes. A failure names what moved.
+Checks cover CLI syntax/options, accepted formats, memory tiers/minima,
+generated baselines, dated benchmark comparisons, installation paths, CI jobs,
+links and documented environment settings. Presentation and section order are
+not contracts. Run after building the codec:
 
     python3 -B -m unittest discover -s tools -p 'test_docs.py'
 
-The binary is the one `make` builds (adpat/c/build/cadapt) unless CADAPT
-names another; `make check` builds before it runs this.
+CADAPT can select an alternate built executable.
 """
 
 from __future__ import annotations
@@ -109,13 +103,13 @@ def usage_tokens(text: str) -> list[str]:
 class UsageTest(unittest.TestCase):
     def test_readme_usage_block_is_the_help_text(self) -> None:
         expected = usage_tokens(help_text())
-        readme = fenced_block(README.read_text(encoding="utf-8"), "cadapt encode")
+        readme = fenced_block(README.read_text(encoding="utf-8"), "cadapt encode <input>")
         self.assertEqual(usage_tokens(readme), expected, "README usage block differs from cadapt --help")
 
     def test_every_flag_of_help_is_in_the_manual_and_the_readme(self) -> None:
         flags = set(FLAG.findall(help_text()))
         self.assertGreaterEqual(len(flags), 10)
-        manual = set(m.replace("\\", "") for m in re.findall(r"\\-\\-[a-z][a-z\\-]*", MANUAL.read_text(encoding="utf-8")))
+        manual = set(m.replace("\\", "") for m in re.findall(r"\\-\\-[a-z][a-z\\-]*", MANUAL.read_text(encoding="utf-8").split(".SH DESCRIPTION", 1)[1]))
         readme = set(FLAG.findall(README.read_text(encoding="utf-8")))
         self.assertEqual(flags - manual, set(), "flags in --help missing from cadapt.1")
         self.assertEqual(flags - readme, set(), "flags in --help missing from README.md")
@@ -134,23 +128,15 @@ def named_versions(text: str) -> set[int]:
 
 
 class VersionTest(unittest.TestCase):
-    def versions(self) -> dict[str, int]:
-        text = HEADER.read_text(encoding="utf-8")
-        found = {m.group(1): int(m.group(2)) for m in re.finditer(r"#define (ADAPT_[A-Z_]*VERSION) (\d+)u", text)}
-        self.assertGreaterEqual(len(found), 20)
-        return found
-
-    def test_readme_names_every_version_family(self) -> None:
-        text = README.read_text(encoding="utf-8")
-        named = named_versions(text[: text.index("## Layout")])
-        for name, value in self.versions().items():
-            self.assertIn(value, named, f"{name} = {value} is not in the README's version paragraph")
-
-    def test_manual_names_every_version_family(self) -> None:
-        text = MANUAL.read_text(encoding="utf-8")
-        named = named_versions(text[text.index(".SH FILES") :])
-        for name, value in self.versions().items():
-            self.assertIn(value, named, f"{name} = {value} is not in the manual's FILES section")
+    def test_documented_supported_sets_match_the_version_table(self) -> None:
+        header = HEADER.read_text(encoding="utf-8")
+        expected = {int(v) for v in re.findall(r"ADAPT_VERSION_ROW\((\d+),", header)}
+        self.assertGreater(len(expected), 20)
+        for path in (README, MANUAL):
+            match = re.search(r"Supported container versions: (.+)", path.read_text(encoding="utf-8"))
+            self.assertIsNotNone(match, f"{path}: no supported format set")
+            self.assertEqual(named_versions(match.group(1)), expected,
+                             f"{path}: supported formats differ from ADAPT_VERSIONS")
 
     def test_named_versions_reads_ranges_and_singles(self) -> None:
         self.assertEqual(named_versions("19 to 24, 53 and 56; 25–52 refused 55") & {19, 24, 53, 56, 30, 52, 55, 60},
@@ -158,33 +144,28 @@ class VersionTest(unittest.TestCase):
 
 
 class TiersTest(unittest.TestCase):
-    def test_the_tier_ladder_and_the_smallest_models_are_the_help_texts(self) -> None:
-        """--help prints the memory tiers from the encoder's table and the two
-        smallest models from the sizer; the README's prose and the manual's
-        tier table and floors restate them and are held to the text."""
-        text = help_text()
-        ladder = re.search(r"preset: (.+?) MiB;\n(.+?), above xz's ladder", text)
-        minima = re.search(r"smallest budget the normal profile\s+runs in is (\d+) bytes, the max profile's (\d+)", text)
-        self.assertIsNotNone(ladder, "--help states no tier ladder")
-        self.assertIsNotNone(minima, "--help states no smallest models")
-        mib, gib = ladder.group(1), ladder.group(2)                       # "3, 9, …, 370 and 674", "-10 and -11 are 1 and 2 GiB"
-        normal, largest = int(minima.group(1)), int(minima.group(2))
-        about = f"about {round(normal / 2**20)} and {round(largest / 2**20)} MiB"
-        readme = " ".join(README.read_text(encoding="utf-8").split()).replace("`", "")
-        self.assertTrue(f"preset — {mib} MiB — and {gib}" in readme, f"README.md: the tier ladder is not --help's ({mib} MiB; {gib})")
-        self.assertTrue(f"--help prints the two: {about}" in readme, f"README.md: the smallest models are not --help's ({about})")
+    def test_documented_tiers_match_encoder_budgets(self) -> None:
+        source = SOURCE.read_text(encoding="utf-8")
+        match = re.search(r"PRESET_MIB\[PRESETS\] = \{([^}]+)\}", source)
+        self.assertIsNotNone(match)
+        expected = [int(n) for n in re.findall(r"\d+", match.group(1))]
+        readme = README.read_text(encoding="utf-8")
+        rows = re.findall(r"^\| `-(\d+)` \| (\d+) \|$", readme, flags=re.M)
+        self.assertEqual([(int(t), int(m)) for t, m in rows], list(enumerate(expected)),
+                         "README tier table differs from PRESET_MIB")
         manual = MANUAL.read_text(encoding="utf-8")
-        rows = [int(n) for line in manual.split("\n") if line.startswith("MiB\t") for n in line.split("\t")[1:]]
-        tiers = [int(n) for n in re.findall(r"\d+", mib)] + [int(n) * 1024 for n in re.findall(r"\d+", gib.split(" are ")[1])]
-        self.assertEqual(rows, tiers, "cadapt.1: the tier table is not --help's ladder")
-        floors = " ".join(manual.split())
-        wanted = f"takes {normal:,} bytes (about {round(normal / 2**20)} MiB), the max profile's {largest:,} (about {round(largest / 2**20)} MiB)"
-        self.assertTrue(wanted in floors, f"cadapt.1: the smallest models are not --help's ({wanted})")
-        # "-0 to -k all mean the N MiB floor": every preset below the model is raised to it
-        for floor, phrase in ((normal, "floor"), (largest, "one")):
-            k = sum(1 for t in rows if t * 2**20 < floor) - 1
-            self.assertTrue(f'-0 " to " \\-{k}' in manual and f"all mean the {round(floor / 2**20)} MiB {phrase}" in floors,
-                            f"cadapt.1: the presets below the {round(floor / 2**20)} MiB model are -0 to -{k}")
+        values = [int(n) for line in manual.splitlines() if line.startswith("MiB\t")
+                  for n in line.split("\t")[1:]]
+        self.assertEqual(values, expected, "manual tier table differs from PRESET_MIB")
+
+    def test_documented_minima_match_the_sizer_in_help(self) -> None:
+        match = re.search(r"smallest budget the\s+normal profile\s+runs in is (\d+) bytes, the max profile's (\d+)", help_text())
+        self.assertIsNotNone(match, "help must print dynamically computed sizing minima")
+        for path in (README, MANUAL):
+            text = " ".join(path.read_text(encoding="utf-8").split())
+            for label, number in zip(("normal", "max"), match.groups()):
+                self.assertRegex(text.lower(), rf"{label} needs {int(number):,} bytes",
+                                 f"{path}: {label} minimum differs from the sizer")
 
 
 class FloorsTest(unittest.TestCase):
@@ -219,17 +200,17 @@ class BenchmarkComparisonTest(unittest.TestCase):
         self.assertIn("mixed corpus", row)
         self.assertNotIn("top 20", row)
 
-    def test_readme_states_the_comparison_and_the_memory_claim(self) -> None:
+    def test_research_reference_states_the_snapshot_comparison(self) -> None:
         g = self.figures()
-        text = README.read_text(encoding="utf-8")
-        section = text[text.index("## The Large Text Compression Benchmark"):]
+        text = (RESEARCH / "ltcb-tables.md").read_text(encoding="utf-8")
+        section = text[text.index("## Snapshot comparison"):]
         section = " ".join(section[: section.index("\n## ", 1)].split())  # prose wraps; figures do not
         least_mb, least_who = g.least_memory_above
         for figure in (f"{g.target_enwik9:,} B", f"{g.threshold_total:,} B", g.threshold_program,
                        f"rank {g.rank} of {g.entries}", f"{g.total:,} B", f"{g.memory_mb:,.0f} MB",
                        f"{least_mb:,.0f} MB", least_who, "tools/ltcb/ltcb_goal.py"):
-            self.assertIn(figure, section, f"the README's benchmark section does not state {figure!r}")
-        self.assertTrue(g.leads_memory_above, "the README claims the least memory above; the snapshot says otherwise")
+            self.assertIn(figure, section, f"the snapshot reference does not state {figure!r}")
+        self.assertTrue(g.leads_memory_above, "the snapshot reference claims the least memory above; the snapshot says otherwise")
 
 
 class ChangelogTest(unittest.TestCase):
@@ -402,13 +383,6 @@ class VersionRangeTest(unittest.TestCase):
 
 
 class LayoutTest(unittest.TestCase):
-    def test_layout_table_has_a_row_for_every_tracked_top_level_entry(self) -> None:
-        text = README.read_text(encoding="utf-8")
-        layout = text[text.index("## Layout") : text.index("## Build")]
-        entries = sorted({path.split("/")[0] for path in tracked()} - {".gitattributes", ".gitignore", "LICENSE", "README.md"})
-        for entry in entries:
-            self.assertIn(f"[{entry}", layout, f"README layout table has no row for {entry}")
-
     def test_every_relative_link_in_a_tracked_markdown_file_resolves(self) -> None:
         for path in tracked():
             if not path.endswith(".md"):

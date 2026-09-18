@@ -1,11 +1,10 @@
 /*
- * test_adapt_encode.c — the C encoder's own tests, needing no Rust
- * toolchain: the committed vectors written byte for byte, the sizes a
+ * test_adapt_encode.c — encoder tests: committed vectors byte for byte,
+ * the sizes a
  * length and a budget choose, round trips through the C decoder over every
  * block kind, and the proof's every failure. The larger vectors pin the
  * encoder's class, context-set, period and segment choices to files it
- * wrote; the battery against the Rust encoder belonged to the crate, and
- * no longer applies since format 13.
+ * wrote.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
  *
@@ -1160,17 +1159,9 @@ static void test_verified_blocks(void) {
     free(reference);
 }
 
-/* ---- the fast profile ---------------------------------------------------
- * Format version 8 through the stream encoder: the committed vector the
- * crate wrote with --fast, then prose under both profiles — the fast file
- * names a set of the fast menu, differs from the normal one past the
- * header, and both decode to the source; the version byte alone tells
- * them apart. adapt_sizes_fast caps the table as the command line does. */
-
-/* ---- the record period ---------------------------------------------------
- * The detector on a raster the crate's test draws (a pixel stride of
- * three, a scanline of 120 bytes) and on prose; the period after the
- * header, read back, and refused on the fast profile. */
+/* Record-period detection on a synthetic raster (pixel stride three,
+ * scanline 120 bytes) and prose. The header period is read back and
+ * rejected for the fast profile. */
 
 static void test_record_period(void) {
     size_t width = 40, rows = 300, n = width * rows * 3, x, y, c, out_len, i;
@@ -1224,7 +1215,7 @@ static void test_record_period(void) {
 }
 
 /* Segments: every segment starts a fresh model, the table names them, both
- * decoders read them, and the crate's thread sizes are computed here. */
+ * decoders read them, and worker sizing respects the shared budget. */
 static void test_segments(void) {
     size_t n = 4 * ADAPT_BLOCK_BYTES + 123, i, out_len, first_coded, k;
     uint8_t *data = malloc(n);
@@ -1389,7 +1380,7 @@ static void test_segments(void) {
     memmove(coded + adapt_sizes_header_bytes(read) + 1, coded + adapt_sizes_header_bytes(read), w.len - adapt_sizes_header_bytes(read));
     coded[adapt_sizes_header_bytes(read)] = 4;
     CHECK_STATUS(adapt_decode(coded, w.len + 1, adapt_default_limits(), &out, &out_len, &error), ADAPT_ERROR_BAD_BLOCK);
-    /* the crate's sizes for its threads: a segment's model, one thread's
+    /* Threaded sizing: a segment's model, one thread's
      * share of the budget, and a refusal below the floor */
     CHECK_STATUS(adapt_sizes_for_threads((uint64_t)1 << 30, (uint64_t)1 << 30, 4, ADAPT_SEGMENT_BYTES, &threads, &error),
                  ADAPT_OK);

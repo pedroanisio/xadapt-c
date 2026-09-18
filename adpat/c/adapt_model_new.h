@@ -3,17 +3,15 @@
  *
  * A section of adapt_model.h, which includes the sections in order into
  * one translation unit: every function stays static inline and the per-bit
- * path is specialized at compile time as before. Include adapt_model.h,
- * not this file. Moved out of adapt_model.h unchanged on 2026-09-17.
+ * path is specialized at compile time. Include adapt_model.h, not this file.
  */
 #ifndef ADAPT_MODEL_NEW_H
 #define ADAPT_MODEL_NEW_H
 
 /* The starting weight of arbiter lane j under a profile: 1/4 for a
  * context's stretched probability, or 1/32 when `low` (the sized max
- * profile's ADAPT_SIZING_LOW_START, measured to leave the arbiters
- * learning the weights sooner on text), 0 for its other lanes and the
- * runs'. */
+ * profile's ADAPT_SIZING_LOW_START), reducing initial trust before
+ * input-driven learning. Other lanes and run inputs start at 0. */
 static inline int32_t initial_weight(size_t j, int fast, int max, int low) {
     size_t base = (size_t)RUN_BASE(fast, max);
     int32_t trusted = low ? 1 << 11 : 1 << 14;
@@ -151,9 +149,8 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
      * stretched probabilities begin trusted; their other lanes and the run
      * inputs earn it. */
     /* Every set of an arbiter starts from the same row, so the row is
-     * built once and copied: the lane-by-lane call for each of the
-     * 170,000 sets of the max profile was 45 % of a small file's encode,
-     * whose first-block trials each build a model. */
+     * built once and copied. First-block candidate trials also construct
+     * models, so repeated per-lane initialization would multiply that cost. */
     if (m->model2) {
         /* the int16 arbiters start at the same weights in their own
          * units (1/32768: half the int32 value), the fifth like the rest */

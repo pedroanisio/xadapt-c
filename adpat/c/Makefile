@@ -9,20 +9,20 @@
 #   make check      build the library and CLI, then run C and Python tests
 #                   and the coverage gate — the fast suite, bounded for CI
 #   make check-long the CLI suite's long cases too (megabytes under --max:
-#                   ADAPT_LONG_TESTS=1), for a landing, not every push
+#                   ADAPT_LONG_TESTS=1)
 #   make sanitize   the C suites under AddressSanitizer and
 #                   UndefinedBehaviorSanitizer, every fault fatal
 #   make install    the command, manual, library and header under PREFIX
 #                   (default /usr/local; DESTDIR for a staging root)
 #   make clean
 #
-# Outputs go to build/ here (git-ignored, as the crate's target/ is), where
+# Outputs go to build/ here (git-ignored), where
 # the benchmark looks for cadapt; BUILD= chooses another directory. CC and
 # CFLAGS are honoured; the defaults are the strictest the code is written
 # for. Two switches worth adding to CFLAGS on another platform:
 # -DADAPT_NO_MULTIVERSION builds the per-bit path for the baseline
-# instruction set only (the default on x86-64 compiles it twice and binds
-# the variant through an ifunc, which wants a glibc-style loader);
+# instruction set only (the default on x86-64 builds separate predictor
+# functions and selects them from available CPU features per model);
 # -DADAPT_NO_HUGEPAGES allocates the model's tables with calloc instead of
 # an anonymous mapping. The coverage gate needs GCC and its gcov; the
 # sanitizer run needs clang (SANITIZER_CC= names another compiler).
@@ -42,8 +42,8 @@ TEST_THREADS = $(if $(findstring -DADAPT_THREADS,$(CFLAGS)),1,0)
 LIB   = $(BUILD)/libadapt.a
 BIN   = $(BUILD)/cadapt
 # Every suite under tests/ is built and run: the lists come from the files,
-# never from a typed list (a suite left off one ran nowhere, and nothing
-# said so). A suite with dependencies of its own has its rule below; any
+# so new suites enter the validation set automatically. A suite with
+# dependencies of its own has its rule below; any
 # other builds by the pattern rule against the header and the library, and
 # runs with the arguments ARGS_<suite> names, none by default. The two
 # large suites run as shards (see their mains) and are the exceptions.

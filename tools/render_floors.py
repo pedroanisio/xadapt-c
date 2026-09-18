@@ -1,23 +1,12 @@
 #!/usr/bin/env python3
-"""Render the locked floors of tools/ratio_floor.json for the documents.
+"""Render regression baselines from ratio_floor.json into maintained documents.
 
-Source: Claude Opus 5 via Claude Code, 2026-09-15. The floors are the only
-numbers a run has verified (LOCKS.md); README.md, cadapt.1 and the release
-notes of the version cadapt.c names (docs/release-notes/<version>.md, when
-they exist) carry them in a marked block that this tool writes, so the prose
-never restates a figure the next re-lock would leave behind. An earlier
-release's notes keep the floors of their day.
+Usage: python3 tools/render_floors.py {markdown,troff,update,check}
+The current release notes, README and manual share generated blocks. Older
+release notes retain their release-specific values. Check exits nonzero for
+a missing marker or stale block.
 
-    python3 tools/render_floors.py markdown     # the README block's body
-    python3 tools/render_floors.py troff        # the manual page block's body
-    python3 tools/render_floors.py update       # rewrite the blocks in place
-    python3 tools/render_floors.py check        # exit 1 when a block is stale
-
-The README's and the notes' block sits between `<!-- floors:start -->` and
-`<!-- floors:end -->`, the manual's between `.\" floors:start` and
-`.\" floors:end`; the lines between them belong to this tool. Notes of the
-current version without the block are an error: the floors they state
-would be typed.
+Authored with Claude Opus 5 via Claude Code.
 """
 
 from __future__ import annotations
@@ -70,10 +59,12 @@ def time_floor(floor: dict) -> str:
 def markdown(data: dict) -> str:
     args = " ".join(data["arguments"])
     lines = [
-        f"Locked {data['locked_on']} on {data['host']}, `cadapt {args}`; a change may only",
-        "improve on these (`make gate` checks the first, `make ratio-floor` the rest):",
+        f"Baselines recorded {data['locked_on']} on {data['host']},",
+        f"`cadapt {args}`. Container sizes must not exceed these limits;",
+        f"throughput may decrease by at most {data['throughput_tolerance']:.0%} (`make gate` checks the proxy,",
+        "`make ratio-floor` the other inputs):",
         "",
-        "| Fixture | Input | Container floor | Time floor |",
+        "| Fixture | Input | Maximum container | Baseline time |",
         "|---|---:|---:|---:|",
     ]
     for floor in data["floors"]:
@@ -87,12 +78,13 @@ def markdown(data: dict) -> str:
 def troff(data: dict) -> str:
     args = " ".join(data["arguments"])
     lines = [
-        f"Locked {data['locked_on']} on {data['host']},",
+        f"Baselines recorded {data['locked_on']} on {data['host']},",
         f".BR \"cadapt {args}\" ;",
-        "a change may only improve on these:",
+        "Container sizes must not exceed these limits;",
+        f"throughput may decrease by at most {data['throughput_tolerance']:.0%}:",
         ".TS",
         "l r r r.",
-        "fixture\tinput\tcontainer floor\ttime floor",
+        "fixture\tinput\tmaximum container\tbaseline time",
         "_",
     ]
     for floor in data["floors"]:

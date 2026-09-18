@@ -1,63 +1,60 @@
 # Security
 
-<!-- Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-14, with Claude Opus 5 (Claude Code). -->
+cadapt treats encoded containers and archive entries as untrusted input.
+Resource limits and staging protect callers from malformed data; successful
+decoding does not establish the identity or trustworthiness of its author.
 
-Part of [adapt](README.md). This is the security policy `DLV-2` in
-[docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) asks for: what is defended, which
-versions are maintained, how to report a vulnerability, and what happens
-then.
+## Implemented protections
 
-## What the codec defends against
+- The in-memory decoder validates framing before allocating the model and
+  result. The streaming decoder validates the header first, then validates
+  blocks as they arrive. Failures return typed `adapt_status` values and
+  diagnostic details through `adapt_error_message()`.
+- `--max-memory` bounds decoder working memory and `--max-output` bounds decoded
+  bytes. Both are opt-in. Archive output limits also count logical sparse-file
+  sizes and each hard-link alias, checked before creating or extending the
+  corresponding entry. Use limits appropriate to the consumer's resources.
+- Archive paths reject empty, dot, parent, NUL and absolute components. POSIX
+  restoration resolves parents through retained directory handles without
+  following symlinks. Restored symlinks cannot be parents of other entries;
+  hard links must name regular files within the archive root. Windows also
+  rejects native drive, backslash and alternate-stream path syntax.
+- POSIX named outputs use private staging wrappers and retained file/directory
+  handles for restoration, metadata, publication and rollback. Replacing a
+  visible staging pathname cannot redirect those operations. Publication
+  preserves an existing destination until the replacement operation succeeds.
+- Deferred directory and root metadata use a disk journal with bounded working
+  memory. Replay follows checksum and archive validation. The
+  [restoration reference](adpat/c/ARCHIVE.md) describes ACL ordering and failure
+  cases, including retained entries after a cleanup failure.
+- Threaded decoding accounts for retained compressed input alongside the model.
+  Pipes and files exceeding that buffer budget use streaming decoding.
 
-The threat the codec is built around is a **hostile container**: bytes that
-claim to be a file or folder and are not. The decoders treat every input as
-untrusted:
+C and CLI suites, sanitizer targets and [fuzz harnesses](adpat/c/fuzz/) exercise
+these protections. Harness regression tests cover modeled normal, fast and max
+inputs. The [pipeline](docs/release-pipeline.md) states where checks run; it is
+not evidence that a particular revision has passed them.
 
-- The in-memory decoder validates the whole framing before it allocates a
-  model or a result; the stream decoder allocates the model only after the
-  header passed and refuses each damaged block when its damage is read.
-- Every fault is a typed status with a message (`adapt_status`,
-  `adapt_error_message()`); nothing is silently coerced.
-- A folder's archive is checked rule by rule at the byte that breaks one,
-  and no entry can name a path outside the directory being restored (no
-  empty, `.` or `..` component, no NUL, no absolute path). Restoration
-  happens under a staging directory that is removed on any failure. On
-  POSIX the staging root stays private during extraction, and each entry's
-  parent is opened relative to it with symlink following disabled at every
-  component. Symbolic links may be restored but cannot serve as parents;
-  hard-link sources must resolve to regular files inside that root. Windows
-  also rejects native backslash and drive/stream syntax in archive paths.
-  POSIX single-file outputs use the same private wrapper and retained
-  handles for metadata, publication and rollback, including when another
-  process replaces the visible staging name.
-- Memory is bounded by what the container's header names (at most about
-  1.2 GiB by the format's own limits) and by `--max-memory`; output by
-  `--max-output`. For folders, that output cap applies both to the decoded
-  archive stream and to the combined logical sizes of restored files,
-  including sparse holes and each hard-link alias. The sink checks this
-  cumulative limit before creating, extending or linking a file. Deferred
-  root and directory attributes use an automatically removed disk journal,
-  with bounded memory and replay only after checksum verification.
-- Threaded decoding reserves the container buffer before reading it and
-  counts retained input even when only one worker fits. A file that would
-  exceed the input-buffer budget, or a pipe of unknown size, uses streaming
-  decoding without that buffer.
-- The two decoders are fuzzed against each other under AddressSanitizer and
-  UndefinedBehaviorSanitizer ([adpat/c/fuzz/](adpat/c/fuzz/)), and the test
-  suites run clean under both plus LeakSanitizer (`make sanitize`).
-  A regression runs the actual fuzz harness on modeled normal, fast and
-  max fixtures so a stale memory cap cannot silently exclude those paths.
+## Limits of protection
 
-Out of scope: the encoder run on untrusted *source* files is not a
-security boundary (it reads what it is given), and the command line trusts
-its own arguments.
+Checksums detect corruption; they provide neither authentication nor encryption.
+The codec makes no constant-time or compression-side-channel guarantee. Avoid
+using compressed sizes as a confidentiality boundary.
+
+A stream callback or standard output can receive a prefix before a later error.
+Discard its result unless decoding completes successfully. Named outputs are
+staged, but uncatchable termination, storage failure or a failed cleanup can
+leave temporary entries. Memory caps cover codec allocations, not every process
+or filesystem resource; search and metadata journals also require temporary disk.
+The encoder reads the source paths selected by its caller and is not a sandbox
+for those paths or command arguments.
 
 ## Supported versions
 
-| Version | Supported |
-|---|---|
-| the latest release on the main branch | yes — fixes land there |
-| earlier releases | no — upgrade; the container format is versioned and old containers keep decoding |
+Security fixes target the latest release; older releases have no maintenance
+commitment. Read [SUPPORT.md](SUPPORT.md) before upgrading: 0.11.0 containers
+require conversion with that release, while the current supported format set
+has a forward compatibility commitment.
 
 ## Reporting a vulnerability
 

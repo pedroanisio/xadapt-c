@@ -3,8 +3,7 @@
  *
  * A section of adapt_model.h, which includes the sections in order into
  * one translation unit: every function stays static inline and the per-bit
- * path is specialized at compile time as before. Include adapt_model.h,
- * not this file. Moved out of adapt_model.h unchanged on 2026-09-17.
+ * path is specialized at compile time. Include adapt_model.h, not this file.
  */
 #ifndef ADAPT_MODEL_BYTE_H
 #define ADAPT_MODEL_BYTE_H
@@ -72,9 +71,8 @@ static inline void hash_kinds(const model *m, const byte_view *v, int fast, uint
                                          ((uint64_t)24 << 56))
                                  : 0;
     if (m->model2) {
-        /* four slots whose own contexts cost more than they gave (MODEL2
-         * above) carry these instead; the set's mask still decides
-         * whether the slot runs */
+        /* Model2 assigns indirect/class/recall contexts to four slots.
+         * The selected set mask still determines which slots run. */
         uint64_t len = v->mlen < 15 ? v->mlen : 15;
         if (m->on[H_WORD3] && m->slots_on) {
             hk[H_WORD3] = v->mlen > 0 ? mix64((uint64_t)v->mbyte | len << 8 | (c & 0xFF) << 12 | ((uint64_t)25 << 56))

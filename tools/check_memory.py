@@ -11,10 +11,9 @@ fixture under each command, decodes the result, measures both peak
 resident sets as the kernel accounts them to the child (wait4's ru_maxrss),
 and fails when either exceeds the declared need by more than SLACK — the
 process itself: the binary and the C library, the stack, stdio's buffers,
-the staged output — measured at under 8 MiB on Linux and macOS, so the
-slack is 16 MiB. A regression that allocates a second table, keeps a
-whole input, or leaks per block shows up here whatever the host, since a
-resident set is not a timing; a slower machine measures the same bytes.
+the staged output. The default slack is 16 MiB. This check detects excess
+allocations such as a second model or retained whole input. Runtime and allocator
+overheads can vary by platform; the allowance is an explicit gate parameter.
 
     python3 tools/check_memory.py --binary adpat/c/build/cadapt --fixture NAME=PATH ...
         [--command="..."]... [--slack BYTES] [--output-dir DIR]

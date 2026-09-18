@@ -487,9 +487,8 @@ def _f(value, digits=3):
 
 def report(analysis: dict, source: str = ltcb.DEFAULT_SOURCE) -> str:
     a = analysis
-    out = ["---", "title: LTCB main table, statistical analysis", "date: 2026-09-14",
-           "source_model: Claude Opus 5", "tool: Claude Code", "---", "",
-           "# LTCB main table, statistical analysis", "",
+    out = ["# LTCB main table, statistical analysis", "",
+           "Derived from the supplied benchmark snapshot; not a live ranking.", "",
            f"Computed by `analyze_ltcb.py` from `ltcb-main-table.csv` ({source}); "
            f"{a['entries']} entries, {a['timed']} timed, {a['with_enwik8']} with an enwik8 "
            "result. Ratios are bits per byte (bpb); times are the page's ns per byte.", ""]

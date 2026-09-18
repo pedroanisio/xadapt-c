@@ -5,11 +5,9 @@
  * staged output both halves of the command line publish.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
- * Extracted from cadapt.c, 2026-09-17, unchanged: the types as they were
- * declared there, and the functions the commands call, which lost their
- * `static`. cadapt.c keeps the commands, their streams and the staged
- * file; the two services the folder side takes from it — the cancellation
- * check and the error report — are declared at the end.
+ * cadapt.c owns command dispatch, streams and file staging. This interface
+ * exposes folder packing/restoration and uses the command layer's cancellation
+ * check and error reporting services declared below.
  */
 #ifndef CADAPT_FOLDER_H
 #define CADAPT_FOLDER_H
@@ -24,7 +22,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-/* Exit codes, as the Rust command line uses them. */
+/* CLI exit codes shared by command and filesystem operations. */
 enum { EXIT_OTHER = 1, EXIT_USAGE = 2 };
 
 /* The staged output: a file beside the target, published by name only

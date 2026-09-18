@@ -3,14 +3,13 @@
  *
  * A section of adapt_model.h, which includes the sections in order into
  * one translation unit: every function stays static inline and the per-bit
- * path is specialized at compile time as before. Include adapt_model.h,
- * not this file. Moved out of adapt_model.h unchanged on 2026-09-17.
+ * path is specialized at compile time. Include adapt_model.h, not this file.
  */
 #ifndef ADAPT_CRC32_H
 #define ADAPT_CRC32_H
 
 /* ------------------------------------------------------------------------
- * crc32.rs
+ * CRC32
  * --------------------------------------------------------------------- */
 
 #define CRC32_INIT 0xFFFFFFFFu
@@ -235,7 +234,7 @@ static inline adapt_status fill(adapt_read_fn read, void *ctx, uint8_t *buf, siz
 }
 
 /* What a reader taking a file in order counts of its segments, to hold
- * the table to when it comes (the crate's SegmentCounter): a marker or a
+ * the table against when it arrives: a marker or a
  * table in a file that is not segmented, an empty segment, a block after
  * the table or a trailer before it are each ADAPT_ERROR_BAD_BLOCK, as is
  * a table that names other lengths than the ones read. */

@@ -26,7 +26,7 @@ uint32_t adapt_crc32(const uint8_t *data, size_t len) {
 }
 
 /* ------------------------------------------------------------------------
- * container.rs — framing
+ * Container — framing
  * --------------------------------------------------------------------- */
 
 int adapt_bmp_probe(const uint8_t *prefix, size_t length, adapt_sizes *sizes) {
@@ -394,7 +394,7 @@ static adapt_status text_sink_fail(const text_sink *s, uint64_t max_output, adap
 }
 
 /* ------------------------------------------------------------------------
- * container.rs — the streaming decoder
+ * Container — the streaming decoder
  * --------------------------------------------------------------------- */
 
 /* Both historical model2 variants used 58/61. At small table sizes their
@@ -756,7 +756,7 @@ adapt_status adapt_decode_stream(adapt_read_fn read, void *read_context, adapt_w
 }
 
 /* ------------------------------------------------------------------------
- * container.rs — the in-memory decoder
+ * Container — the in-memory decoder
  * --------------------------------------------------------------------- */
 
 typedef struct memory_reader {
@@ -1281,7 +1281,7 @@ adapt_status adapt_declared_len(const uint8_t *file, size_t file_len, uint64_t *
 }
 
 /* ------------------------------------------------------------------------
- * lib.rs — the messages
+ * Error messages
  * --------------------------------------------------------------------- */
 
 int adapt_error_message(const adapt_error *error, char *buf, size_t len) {

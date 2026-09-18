@@ -59,8 +59,7 @@ OUT=$(readlink -f "$OUT")
 # 1. the sources of the revision, and a build of them
 # the whole codec directory: the sources are the section headers and the
 # command line's units as the Makefile of the revision names them, so a
-# list here would go stale (it did, when adapt_model.h became ten
-# sections and cadapt.c three units)
+# partial source list would omit dependencies when translation units change.
 git archive "$FULL" adpat/c LICENSE | tar -x -C "$OUT/src"
 ( cd "$OUT/src/adpat/c" && make -s all > "$OUT/build.log" 2>&1 ) || { cat "$OUT/build.log"; exit 1; }
 cp "$OUT/src/adpat/c/build/cadapt" "$OUT/cadapt"

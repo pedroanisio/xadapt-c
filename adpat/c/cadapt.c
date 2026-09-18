@@ -8,14 +8,12 @@
  *   cadapt decode <input> [-o <output>] [--force] [--max-output <bytes>] [--max-memory <bytes>] [--threads <n>]
  *   cadapt info   <file>
  *
- * The commands and container follow `adapt` in the Rust crate; this CLI
- * makes encoding verification opt-in, and takes an <input> that is a
- * folder, which the crate does not: the folder is walked into one archive
+ * Encoding verification is opt-in. A folder input is walked into one archive
  * stream (adapt.h, "Archives") and coded as one container, which `decode`
  * restores as a folder — every file byte for byte, every directory and
  * symbolic link in its place — under the output name, never to standard
- * output. Both directions stream: memory is
- * the model and one block, whatever the length. `encode --verify` proves
+ * output. Sequential codec working memory holds the model and block
+ * workspace; folder enumeration, proof and segmentation need additional resources. `encode --verify` proves
  * what it wrote decodes to the input — with a second model checking
  * every block as it is written when the budget holds two, or, for a file
  * input written to a file, in a second pass with one. Encoding skips this
@@ -192,7 +190,7 @@ static void print_usage(FILE *stream) {
     (void)adapt_sizes_for_input_max(1, 0, 0, &minimum_sizes, &minimum_max_error);
     preset_ladder(ladder, sizeof(ladder), above, sizeof(above));
     fprintf(stream,
-            "cadapt — the adapt self-adaptive lossless codec, in C\n"
+            "cadapt - lossless compression for files, streams and folders\n"
             "\n"
             "usage:\n"
             "  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--explain] [--fast | --mid | --max] [-0 .. -11]\n"
@@ -203,76 +201,51 @@ static void print_usage(FILE *stream) {
             "  cadapt info   <file>\n"
             "  cadapt --version\n"
             "\n"
-            "<input> or <output> may be '-' for standard input or output. Without -o,\n"
-            "encode writes <input>.adpt and decode strips that suffix (or appends .out).\n"
-            "Existing output files are kept unless --force is given. --fast writes the\n"
-            "fast profile, which decodes about three times faster for about a twelfth\n"
-            "more bytes; --mid the mid profile, seven fixed contexts and one arbiter over\n"
-            "the normal profile's tables, about a quarter less time for 1.4 %% (enwik8) to\n"
-            "2.4 %% (enwik9) more bytes; --max the max profile, which writes\n"
-            "fewer bytes for about three times the time in the same memory; the default is\n"
-            "the normal profile. Normal/fast/mid/max streams use versions %u/%u/%u/%u (the\n"
-            "max profile %u or %u and the normal profile %u when their arbiters take the class\n"
-            "or recall keys, chosen per file); named files and folders include metadata in\n"
-            "versions %u/%u/%u/%u (%u, %u, %u).\n"
-            "--adaptive rates/sparse/retained select experimental causal predictors\n"
-            "over normal or --max. auto spools the\n"
-            "source once to temporary disk and selects the smallest complete container\n"
-            "from the base and these three profiles that fit the memory budget. Search\n"
-            "also tries BMP24 color/row residuals on eligible files. Experiment formats occupy versions 25--52;\n"
-            "the max profile's compact side tables, chosen by --allocation context when the budget\n"
-            "would otherwise leave the context table at 2^22 blocks or fewer, are versions 53/56, and\n"
-            "with the lean context set they take at a table of 2^22 blocks or fewer, 54/57.\n"
-            "--transform bmp explicitly selects that reversible transform. Search\n"
-            "uses up to eight encodes, temporary disk of input plus two containers, and\n"
-            "verifies only with --verify (one model, also for pipes).\n",
-            ADAPT_FORMAT_VERSION, ADAPT_FAST_VERSION, ADAPT_MID_VERSION, ADAPT_MAX_PRESSURE_VERSION, ADAPT_MAX_KEYS_VERSION,
-            ADAPT_MAX_KEYS_BINARY_VERSION, ADAPT_NORMAL_KEYS_VERSION, ADAPT_METADATA_VERSION, ADAPT_METADATA_FAST_VERSION,
-            ADAPT_MID_METADATA_VERSION, ADAPT_MAX_PRESSURE_METADATA_VERSION, ADAPT_MAX_KEYS_METADATA_VERSION,
-            ADAPT_MAX_KEYS_BINARY_METADATA_VERSION, ADAPT_NORMAL_KEYS_METADATA_VERSION);
-    fprintf(stream,
-            "The text transform (versions 62--66, 67--71 with metadata) replaces a word both\n"
-            "sides have seen three times by a code the model reads as one symbol; the book\n"
-            "is built as the file is coded, nothing is sent ahead. It is taken by itself for\n"
-            "a file of 8 MiB or more whose first block looks like text (measured on\n"
-            "enwik8 at 128 MiB: 3.5 %% fewer bytes in fewer seconds); --transform text asks\n"
-            "for it whatever the input, --transform none refuses it.\n"
-            "--allocation auto, the default, grows the context table before the recall\n"
-            "window where the window-first sizes would leave the table below its target (an\n"
-            "input longer than the window the budget allows); context or window force one.\n"
-            "--contexts lean takes the lean context set outright (word and field left out;\n"
-            "under --max o8, word3 and wordc too) instead of choosing the set from the first\n"
-            "block: on text about 12 %% less encode time and 8 %% less decode time for about\n"
-            "0.1 %% more bytes; auto, the default, chooses. Not with --fast.\n"
-            "-0 .. -9 set the memory budget to what xz takes to compress at the same\n"
-            "preset: %s MiB;\n"
-            "%s, above xz's ladder. A preset below the smallest model of the\n"
-            "profile is raised to it; -9 is the default. The preset is the only memory\n"
-            "setting of encode: it bounds the model, window and workspace, and decode\n"
-            "takes the model's memory as the header names it, so the preset a file was\n"
-            "written with is the memory every decoder of it needs. Folder path and\n"
-            "metadata bookkeeping is additional. The smallest budget the normal profile\n"
-            "runs in is %llu bytes, the max profile's %llu (a preset below it is raised to\n"
-            "it; the model written there may need less); verification and segments may need more.\n"
+            "Use '-' for standard input or output. Without -o, encode appends .adpt;\n"
+            "decode removes that suffix or appends .out. Existing outputs require --force.\n"
+            "Profiles: normal (default), --fast (fewer contexts), --mid (seven fixed\n"
+            "contexts), --max (additional contexts and model policies). Speed and size\n"
+            "depend on the input; select a memory tier separately from the profile.\n"
+            "\n"
+            "--adaptive rates/sparse/retained select causal predictors with normal or max.\n"
+            "--adaptive auto keeps the smallest complete container among eligible base,\n"
+            "adaptive and BMP candidates. It uses up to eight sequential encodes and\n"
+            "temporary disk for the input and two containers. Proof requires --verify.\n"
+            "--transform bmp requires an eligible uncompressed 24-bit BMP.\n"
+            "--transform text builds a reversible dictionary from the input; it is selected\n"
+            "automatically for eligible text of known length at least 8 MiB. Use\n"
+            "--transform none to disable automatic transforms. Explicit text and adaptive\n"
+            "predictors cannot be combined.\n"
+            "--allocation auto chooses between window-first and context-first sizing;\n"
+            "window or context forces one. --contexts auto selects from the first block;\n"
+            "lean forces fewer contexts. Lean is unavailable with fast or mid.\n"
+            "\n"
+            "Memory tiers -0 through -9 (MiB): %s.\n"
+            "%s. The default is -9; the last tier wins.\n"
+            "Requests below the profile minimum are raised to it. The smallest budget the normal profile\n"
+            "runs in is %llu bytes, the max profile's %llu.\n"
+            "The selected model may need less than the requested budget.\n"
+            "The container records its decoder requirement; inspect it with cadapt info.\n"
+            "Folder enumeration/metadata, proof and parallel work have additional costs.\n"
+            "\n"
             "Named files and folders preserve modes and access/modification timestamps.\n"
-            "--explain adds to encode's report what the first block decided: the tables\n"
-            "and allocation, the class width, context set, record period and arbiter keys,\n"
-            "the trials that chose them and whether the text transform is on.\n"
-            "encode skips round-trip verification by default. --verify proves its output\n"
-            "as it writes it when the budget holds two models, or, for a file written\n"
-            "to a file, in a second pass with one. --no-verify explicitly skips this proof.\n"
-            "decode allocates the model its input's header names, whatever the size\n"
-            "(FMT-6: the container alone decodes); --max-memory <bytes> caps that and\n"
-            "refuses a container needing more; --max-output <bytes> refuses a container\n"
-            "declaring more decoded bytes than that (a folder's restored sizes together).\n"
-            "Neither cap applies unless given.\n"
-            "--threads <n> (default 1) with n of two or more cuts the input into segments\n"
-            "of --segment-bytes (default %llu, whole blocks of %llu) that start the\n"
-            "model afresh, the file the crate's threads write, and codes them at once on\n"
-            "as many of the n threads as the budget holds a model, a segment and a block's\n"
-            "workspace for, and never more than the CPUs online (the sizes stay fitted\n"
-            "to n, so the bytes are the same on every machine); decode --threads <n>\n"
-            "decodes a file's segments the same way. The report says how many threads ran.\n",
+            "Folder metadata support depends on the platform and destination filesystem.\n"
+            "--explain reports allocation, model and transform decisions on standard error.\n"
+            "--verify checks a round trip with two models when the budget permits, or a\n"
+            "second pass for suitable named-file input/output. Proof is off by default;\n"
+            "--no-verify explicitly selects that default.\n"
+            "Decode uses the recorded model. --max-memory limits decoder working memory;\n"
+            "--max-output limits decoded bytes and the total logical size of restored files,\n"
+            "including sparse holes and hard-link aliases. Neither cap applies by default.\n"
+            "Named outputs are staged. Standard output may contain a prefix before a final\n"
+            "error; accept it only after the command succeeds.\n"
+            "\n"
+            "--threads n (default 1) enables segmentation for n >= 2. --segment-bytes\n"
+            "sets the segment size (default %llu, a multiple of %llu bytes).\n"
+            "Each segment starts a fresh model. Requested thread count and segment size\n"
+            "can change the container; available worker count and scheduling cannot.\n"
+            "Workers are limited by memory and available CPUs. Decode can process a\n"
+            "segmented file in parallel; a pipe uses a streaming decoder.\n",
             ladder, above, (unsigned long long)minimum_error.detail, (unsigned long long)minimum_max_error.detail,
             (unsigned long long)ADAPT_SEGMENT_BYTES, (unsigned long long)ADAPT_BLOCK_BYTES);
 }
@@ -414,7 +387,7 @@ static int reject_unknown(const args *a, const char *const *known) {
     return 0;
 }
 
-/* A byte count: decimal digits only, as Rust's `usize` parser accepts. */
+/* A byte count: decimal digits only, with range validation. */
 static int parse_bytes(const char *text, uint64_t *out) {
     char *end;
     unsigned long long v;
@@ -436,7 +409,7 @@ static int parse_bytes(const char *text, uint64_t *out) {
     return 1;
 }
 
-/* --threads <n>: the worker count the crate would use, 1 when absent; 0
+/* --threads <n>: the requested worker count, 1 when absent; 0
  * when the value is not a count of one or more. */
 static uint64_t thread_count(const args *a) {
     const char *text = value_of(a, "--threads");
@@ -532,9 +505,8 @@ static int write_stream(void *context, const uint8_t *buf, size_t len) {
     while (at < len) {
         /* A pipe reported writable can accept PIPE_BUF bytes without
          * blocking. Recheck cancellation before each further chunk. A
-         * regular file never blocks that way and takes the block whole:
-         * chunking it was four system calls per 4 KiB, a seventh of the
-         * wall time of a stored-block decode. */
+         * regular-file sink takes the block whole to avoid per-chunk
+         * polling and write calls. */
         size_t take = s->sink == 1 || len - at < PIPE_BUF ? len - at : PIPE_BUF;
         ssize_t n;
         int rc = wait_stream(fileno(s->file), POLLOUT);
@@ -1191,8 +1163,7 @@ done:
  * encode
  * --------------------------------------------------------------------- */
 
-/* The input's length, when it is a regular file: as the crate decides it,
- * by the file's kind where POSIX tells it, so a device or a pipe is sized
+/* Determine length from the file kind on POSIX; a device or pipe is sized
  * as a stream. Without POSIX, a seekable input counts as a file. */
 static int input_length(FILE *file, uint64_t *length) {
     cadapt_off size;
@@ -1549,7 +1520,7 @@ static int encode_choose_sizes(encode_job *job) {
     }
     if (status != ADAPT_OK) {
         char message[160];
-        /* The crate's command line names sizing failures without the input. */
+        /* Sizing failures report the resource requirement rather than an input path. */
         adapt_error_message(&error, message, sizeof(message));
         fprintf(stderr, "error: %s\n", message);
         return EXIT_OTHER;
@@ -1711,7 +1682,7 @@ static int encode_verify_output(encode_job *job) {
 static void encode_report(const encode_job *job) {
     const adapt_stats *stats = &job->stats;
     char segments[96] = "";
-    /* Hundredths of a percent in integers, as the crate prints them. */
+    /* Compute hundredths of a percent without floating-point rounding. */
     uint64_t hundredths = stats->input_bytes == 0 ? 0 :
         (stats->output_bytes * 10000 + stats->input_bytes / 2) / stats->input_bytes;
     if (job->options.threads >= 2) {

@@ -3,14 +3,13 @@
  *
  * A section of adapt_model.h, which includes the sections in order into
  * one translation unit: every function stays static inline and the per-bit
- * path is specialized at compile time as before. Include adapt_model.h,
- * not this file. Moved out of adapt_model.h unchanged on 2026-09-17.
+ * path is specialized at compile time. Include adapt_model.h, not this file.
  */
 #ifndef ADAPT_CODER_H
 #define ADAPT_CODER_H
 
 /* ------------------------------------------------------------------------
- * coder.rs — the binary arithmetic decoder
+ * Arithmetic coder — the binary arithmetic decoder
  * --------------------------------------------------------------------- */
 
 typedef struct arith {

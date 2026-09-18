@@ -3,10 +3,8 @@
  * what FMT-7 preserves. See cadapt_fs.h for the interface.
  *
  * Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
- * Extracted from cadapt.c, 2026-09-17: the code is unchanged, and the six
- * functions cadapt.c calls lost their `static`. The metadata calls — a
- * path's modes and times read, applied and checked, inherited ACLs cleared
- * — followed the same day, unchanged.
+ * Metadata operations capture, apply and verify modes and timestamps,
+ * and clear inherited ACLs before final permissions are applied.
  */
 #include "cadapt_platform.h"
 
