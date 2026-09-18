@@ -43,7 +43,23 @@ and announced as [SECURITY.md](SECURITY.md) describes.
   one was stale by the next commit (`make reproduce` refused it). Each
   release ships its own; `make reproduce MANIFEST=…` checks against it,
   and `make manifest` writes a local, git-ignored one.
-- `tools/test_gates.py`, under `make check`, holds the five above.
+- The coverage pass builds and runs every C suite under `tests/` and every
+  class of the CLI suite that holds a test (`test_cadapt.py --classes`),
+  from the files: `test_model_dispatch`, `test_cadapt_fs` and any new CLI
+  class were absent from its typed lists and never ran under coverage.
+  `COVUNITS` is the tree's units, and `check-gcov.py` groups sources by
+  name (`adapt_*` the library, `cadapt*` the command line) and expects
+  every unit and every header with a function body, so a new unit counts
+  the day it exists.
+- `tools/release.sh` refuses a revision without `docs/release-notes/<version>.md`
+  before it exports anything, and `release.yml` no longer falls back to
+  the changelog's entry for the release body.
+- `tools/test_gates.py`, under `make check`, holds the five above and:
+  every test file under `tools/`, `bench/` and `adpat/c/tests/` against
+  the `make check` parts that run it; the corpus floor files against the
+  corpus manifest (every file, at its size); the release-notes refusal;
+  and the constants `LOCKS.md` states as policy — the 120 s check budget
+  and the floor files' tolerances — against the Makefile and the files.
 
 - The root `Makefile` forwards `sanitize`, `coverage` and `check-long`
   to `adpat/c/Makefile`, as the documents that cite `make sanitize`

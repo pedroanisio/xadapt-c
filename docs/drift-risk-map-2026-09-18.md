@@ -35,8 +35,18 @@ benches, the workflows, the documents)
 > model stated as 70 MiB where the binary says 55, and the manual's "-0 to
 > -3" where the ladder gives -0 to -2; the C suites are the files under
 > `tests/` (a suite with no rule of its own builds and runs by pattern);
-> the root build manifest is untracked and not exported. The inventory
-> below is the state the audit found.
+> the root build manifest is untracked and not exported. The five HIGH
+> couplings are closed the same way, later still: every test file under
+> `tools/`, `bench/` and `adpat/c/tests/` is held to the parts of `make
+> check` that run it; the corpus floors are held to the corpus manifest's
+> files and sizes; `tools/release.sh` refuses a revision without its
+> release notes and the workflow has no fallback body; the constants
+> `LOCKS.md` states as policy (the check budget, the tolerances) are held
+> to the Makefile and the floor files; the coverage units are the tree's
+> and `check-gcov.py` groups them by name, and the coverage pass runs
+> every suite and every CLI class from the files — which found that
+> `test_model_dispatch`, `test_cadapt_fs` and a new CLI class were never
+> run under coverage. The inventory below is the state the audit found.
 
 ## Executive Summary
 

@@ -52,6 +52,11 @@ VERSION=$(git show "$FULL:adpat/c/cadapt.c" | sed -n 's/^#define CADAPT_VERSION 
 case "$REV" in
     v[0-9]*) [ "$REV" = "v$VERSION" ] || { echo "tag $REV names a tree whose cadapt.c says $VERSION" >&2; exit 2; } ;;
 esac
+# the release notes are the published release's body: a revision without
+# them is not a release (the workflow once fell back to the changelog's
+# entry in silence — no install instructions, no compatibility notes)
+git cat-file -e "$FULL:docs/release-notes/$VERSION.md" 2>/dev/null \
+    || { echo "$REV has no docs/release-notes/$VERSION.md: write the release notes before releasing $VERSION" >&2; exit 2; }
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 NAME="cadapt-$VERSION-$OS-$ARCH"

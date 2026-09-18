@@ -195,7 +195,9 @@ COV = $(BUILD)-cov
 # -O1: the instrumented per-bit path runs 1.6 times faster than at -O0 and
 # writes the same bytes; the branches gcov counts are the source's either way.
 COVFLAGS = -std=c99 -O1 --coverage -DADAPT_NO_MULTIVERSION -Wall -Wextra -Wpedantic -Werror $(THREADS)
-COVUNITS = adapt_decode adapt_encode adapt_archive cadapt cadapt_folder cadapt_fs
+# every unit of the codec and the command line: the files, never a list
+# (check-gcov.py groups them by name: adapt_* the library, cadapt* the CLI)
+COVUNITS = $(basename $(wildcard *.c))
 
 # The suites run at once, each process writing its counts under its own
 # GCOV_PREFIX (GCOV_PREFIX_STRIP drops the object directory's path, so the
@@ -207,14 +209,13 @@ COVUNITS = adapt_decode adapt_encode adapt_archive cadapt cadapt_folder cadapt_f
 COVDIR = $(abspath $(COV))
 COVSTRIP = $(words $(subst /, ,$(COVDIR)))
 COVRUN = GCOV_PREFIX_STRIP=$(COVSTRIP) GCOV_PREFIX=$(COVDIR)/gcda
-CLI_CLASSES = AllocationTest AdaptiveTest VerificationTest MetadataTest MemoryContractTest InstructionSetTest FolderTest ThreadCountTest \
-              PresetTest SurfaceTest CommandTest
+# the CLI suite's classes, from the suite itself (those with a test in
+# them); every C suite, from SUITES, as `make test` runs them
+CLI_CLASSES = $(shell $(PYTHON) -B tests/test_cadapt.py --classes)
 
 coverage:
 	rm -rf $(COV)
-	$(MAKE) BUILD=$(COV) CFLAGS="$(COVFLAGS)" LDFLAGS="--coverage" all $(COV)/test_adapt_decode \
-	    $(COV)/test_adapt_encode $(COV)/test_adapt_archive $(COV)/test_adapt_adaptive $(COV)/test_decode_budget $(COV)/test_fuzz_decode \
-	    $(COV)/test_adapt_text $(COV)/test_profile_conversion $(COV)/test_p1_compatibility
+	$(MAKE) BUILD=$(COV) CFLAGS="$(COVFLAGS)" LDFLAGS="--coverage" all $(addprefix $(COV)/,$(SUITES))
 	mkdir -p $(COV)/gcda
 	$(MAKE) -j $(COV)/gcda/done
 	cd $(COV) && for u in $(COVUNITS); do gcov -b -c --json-format -o . $$u.o > /dev/null && gunzip -f $$u.gcov.json.gz; done
@@ -222,17 +223,10 @@ coverage:
 
 # One run per line, in parallel under make -j; each leaves its counts in
 # its own directory and its report in its own log, printed when it fails.
-COVRUNS = $(foreach k,$(ENCODE_SHARDS),encode-$(k)) $(foreach k,$(DECODE_SHARDS),decode-$(k)) archive adaptive budget fuzz text profile compatibility \
-          safety $(foreach c,$(CLI_CLASSES),cli-$(c))
+COVRUNS = $(TESTRUNS) safety $(foreach c,$(CLI_CLASSES),cli-$(c))
 $(COV)/gcda/encode-%: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_encode tests/vectors $*/$(words $(ENCODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(COV)/gcda/decode-%: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_decode tests/vectors $*/$(words $(DECODE_SHARDS)) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(COV)/gcda/archive: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_archive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(COV)/gcda/adaptive: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_adaptive > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(COV)/gcda/budget: ; @$(COVRUN)/$(@F) $(COV)/test_decode_budget tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(COV)/gcda/fuzz: ; @$(COVRUN)/$(@F) $(COV)/test_fuzz_decode tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(COV)/gcda/text: ; @$(COVRUN)/$(@F) $(COV)/test_adapt_text tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(COV)/gcda/compatibility: ; @$(COVRUN)/$(@F) $(COV)/test_p1_compatibility tests/vectors > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-$(COV)/gcda/profile: ; @$(COVRUN)/$(@F) $(COV)/test_profile_conversion > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+$(COV)/gcda/test_%: ; @$(COVRUN)/$(@F) $(COV)/test_$* $(ARGS_test_$*) > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(COV)/gcda/safety: ; @ADAPT_TEST_THREADS=$(if $(findstring -DADAPT_THREADS,$(COVFLAGS)),1,0) $(COVRUN)/$(@F) \
 	    $(PYTHON) -B tests/test_cadapt_safety.py "$(COVDIR)/cadapt" > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 $(COV)/gcda/cli-%: ; @$(COVRUN)/$(@F) $(PYTHON) -B tests/test_cadapt.py "$(COVDIR)/cadapt" $* > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }

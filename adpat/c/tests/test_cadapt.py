@@ -1948,7 +1948,20 @@ class CommandTest(CodecTest):
         self.assertIn(b"0 bytes -> 53 bytes (0.00%), verified", run.stderr)
 
 
+def classes_with_tests() -> list[str]:
+    """The test classes of this file that hold a test, in file order: what
+    the coverage pass runs one process each (a base class runs nothing and
+    unittest exits 5 on an empty run)."""
+    loader = unittest.TestLoader()
+    module = sys.modules[__name__]
+    return [name for name, cls in vars(module).items()
+            if isinstance(cls, type) and issubclass(cls, unittest.TestCase) and loader.getTestCaseNames(cls)]
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--classes":
+        print("\n".join(classes_with_tests()))
+        sys.exit(0)
     if len(sys.argv) > 1:
         CADAPT = Path(sys.argv.pop(1)).resolve()
     unittest.main()

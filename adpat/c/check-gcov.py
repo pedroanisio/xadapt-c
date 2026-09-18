@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Enforce branch coverage of the C codec from gcov's JSON.
 
-The library — adapt_decode.c, adapt_encode.c, adapt_archive.c, and the
-headers adapt_adaptive.h, adapt_bmp.h, adapt_text.h and the ten sections of
-adapt_model.h as each of the first two compiles them — must reach 80 % of its
-branches together, the command line (cadapt.c, cadapt_folder.c, cadapt_fs.c) 60 %: the crate's
-floors, applied to its second implementation. A source missing from the
-report fails the gate, so a file that stopped being instrumented cannot pass
-by absence. A header is inlined into both library units and counted under
-each, since each compiles its own copy.
+The library — every adapt_* unit and header with code (adapt_decode.c,
+adapt_encode.c, adapt_archive.c, adapt_adaptive.h, adapt_bmp.h, adapt_text.h
+and the ten sections of adapt_model.h, as each unit compiles them) — must
+reach 80 % of its branches together, the command line (every cadapt* unit)
+60 %: the crate's floors, applied to its second implementation. The groups
+are by name, never a list, so a new unit counts the day it exists. A source
+missing from the report fails the gate, so a file that stopped being
+instrumented cannot pass by absence. A header is inlined into both library
+units and counted under each, since each compiles its own copy.
 
     python3 check-gcov.py <unit.gcov.json>...
 
@@ -16,17 +17,40 @@ Authored by Pedro Anisio de Luna e Silva (pedroanisio@faz.ai), 2026-09-12.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
-# adapt_model.h is an umbrella: it holds macros and includes these sections,
-# and gcov reports the sections, where the code is.
-MODEL = {"adapt_constants.h", "adapt_states.h", "adapt_coder.h", "adapt_tables.h", "adapt_model_state.h",
-         "adapt_model_byte.h", "adapt_model_bit.h", "adapt_model_new.h", "adapt_blocks.h", "adapt_crc32.h"}
-LIBRARY = {"adapt_decode.c", "adapt_encode.c", "adapt_archive.c", "adapt_adaptive.h", "adapt_bmp.h",
-           "adapt_text.h"} | MODEL
-CLI = {"cadapt.c", "cadapt_folder.c", "cadapt_fs.c"}
+CODEC = Path(__file__).resolve().parent
 FLOORS = {"library": 80.0, "cli": 60.0}
+# a function body in a header: what makes gcov report the header at all
+BODY = re.compile(r"^static\b[^;]*?\)\s*\{", re.M | re.S)
+
+
+def group_of(name: str) -> str | None:
+    """The group a source counts toward, by its name: adapt_* is the library
+    (the units, adapt_adaptive.h, adapt_bmp.h, adapt_text.h and the sections
+    of adapt_model.h), cadapt* the command line; anything else — a system
+    header, adapt.h, a test — is not counted. No list to keep."""
+    if re.fullmatch(r"cadapt(_\w+)?\.[ch]", name):
+        return "cli"
+    if re.fullmatch(r"adapt_\w+\.[ch]", name):
+        return "library"
+    return None
+
+
+def expected_sources(codec: Path = CODEC) -> set[str]:
+    """Every source the reports must hold: each unit of the tree, and each
+    header of a group that defines a function (gcov reports those, where
+    the code is; a header of declarations alone never appears). A file that
+    stopped being instrumented cannot pass by absence."""
+    out = set()
+    for path in codec.glob("*.[ch]"):
+        if group_of(path.name) is None:
+            continue
+        if path.suffix == ".c" or BODY.search(path.read_text(encoding="utf-8")):
+            out.add(path.name)
+    return out
 
 
 def branches(path: str) -> dict[str, tuple[int, int]]:
@@ -44,7 +68,7 @@ def branches(path: str) -> dict[str, tuple[int, int]]:
         raise ValueError("files must be a nonempty list")
     for file in report["files"]:
         name = Path(file["file"]).name
-        if name not in LIBRARY | CLI:
+        if group_of(name) is None:
             continue
         if name in seen:
             raise ValueError(f"duplicate source evidence: {name}")
@@ -77,19 +101,19 @@ def main(paths: list[str]) -> int:
         print(f"invalid coverage report: {error}", file=sys.stderr)
         return 1
     sources = {key.rsplit(":", 1)[-1] for key in seen}
-    missing = (LIBRARY | CLI) - sources
+    missing = expected_sources() - sources
     if missing:
         print(f"coverage report lacks {sorted(missing)}", file=sys.stderr)
         return 1
 
-    def rate(names: set[str]) -> tuple[float, int, int]:
-        covered = sum(c for key, (c, _) in seen.items() if key.rsplit(":", 1)[-1] in names)
-        count = sum(n for key, (_, n) in seen.items() if key.rsplit(":", 1)[-1] in names)
+    def rate(label: str) -> tuple[float, int, int]:
+        covered = sum(c for key, (c, _) in seen.items() if group_of(key.rsplit(":", 1)[-1]) == label)
+        count = sum(n for key, (_, n) in seen.items() if group_of(key.rsplit(":", 1)[-1]) == label)
         return (100.0 * covered / count if count else 0.0, covered, count)
 
     ok = True
-    for label, names in (("library", LIBRARY), ("cli", CLI)):
-        pct, covered, count = rate(names)
+    for label in ("library", "cli"):
+        pct, covered, count = rate(label)
         floor = FLOORS[label]
         verdict = "ok " if pct >= floor else "LOW"
         ok &= pct >= floor

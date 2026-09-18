@@ -192,6 +192,36 @@ class GateTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertNotIn("test_adapt_decode", out)
 
+    def test_units_are_grouped_by_name_so_a_new_unit_counts_the_day_it_exists(self) -> None:
+        """The groups come from the names, not a list: a unit added to the
+        tree is counted toward its group without an edit here or in the
+        Makefile, whose COVUNITS is the wildcard of the units."""
+        self.assertEqual(check_gcov.group_of("adapt_new_stage.c"), "library")
+        self.assertEqual(check_gcov.group_of("adapt_new_stage.h"), "library")
+        self.assertEqual(check_gcov.group_of("cadapt_new_side.c"), "cli")
+        self.assertEqual(check_gcov.group_of("cadapt.c"), "cli")
+        for other in ("adapt.h", "stdio.h", "test_adapt_decode.c", "example.h", "fuzz_decode.c"):
+            self.assertIsNone(check_gcov.group_of(other), other)
+        # a new library unit's branches count toward the library's rate
+        reports = units((50, 50), (50, 50), (90, 100))
+        reports.append(report({"adapt_new_stage.c": (0, 100)}))
+        code, out, _ = self.run_gate(*self.write_units(reports))
+        self.assertEqual(code, 1, out)
+        self.assertIn("LOW library", out)
+        # and the expected sources are the tree's: every unit, every header with a function body
+        expected = check_gcov.expected_sources()
+        self.assertEqual({n for n in expected if n.endswith(".c")}, {p.name for p in HERE.parent.glob("*.c")})
+        self.assertIn("adapt_model_bit.h", expected)
+        self.assertNotIn("cadapt_fs.h", expected)  # declarations only
+        self.assertNotIn("adapt.h", expected)
+        with tempfile.TemporaryDirectory() as scratch:
+            tree = Path(scratch)
+            (tree / "adapt_x.c").write_text("int x;\n")
+            (tree / "adapt_y.h").write_text("static int y(int a) {\n    return a;\n}\n")
+            (tree / "adapt_z.h").write_text("int z(int a);\nstatic int q;\n")
+            (tree / "cadapt_w.h").write_text("static inline int w(int a,\n                    int b) { return a + b; }\n")
+            self.assertEqual(check_gcov.expected_sources(tree), {"adapt_x.c", "adapt_y.h", "cadapt_w.h"})
+
     def test_malformed_reports_fail_closed(self) -> None:
         paths = self.write_units(units((50, 50), (50, 50), (90, 100)))
         for name, content in [

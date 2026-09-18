@@ -76,15 +76,11 @@ jobs:
             cp "$d"/NOTICE release/NOTICE
           done
           cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS
-      - name: the release notes (docs/release-notes/<version>.md, or the CHANGELOG's entry)
+      - name: the release notes (docs/release-notes/<version>.md; tools/release.sh refused a revision without them)
         run: |
           version=${GITHUB_REF_NAME#v}
-          if [ -f "docs/release-notes/$version.md" ]; then
-            cp "docs/release-notes/$version.md" notes.md
-          else
-            awk -v v="$version" '/^## /{p = index($0, "[" v "]")} p' CHANGELOG.md > notes.md
-          fi
-          [ -s notes.md ] || echo "cadapt $version" > notes.md
+          cp "docs/release-notes/$version.md" notes.md
+          [ -s notes.md ]
       - uses: softprops/action-gh-release@v2
         with:
           files: release/*

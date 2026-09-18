@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The gates against what they enumerate: the five silent drift vectors of
+"""The gates against what they enumerate: the silent drift vectors of
 docs/drift-risk-map-2026-09-18.md, each held so it cannot reopen.
 
 1. The profiles the memory gate and the identical-bytes job hold come from
@@ -10,9 +10,16 @@ docs/drift-risk-map-2026-09-18.md, each held so it cannot reopen.
    target and `make sanitize-cli` with nothing inline.
 3. (The tier ladder is held by tools/test_docs.py's TiersTest.)
 4. Every suite under adpat/c/tests/test_*.c is built and run by `make
-   test`, a new one included, with no list to add it to.
+   test` and by the coverage pass, a new one included, with no list to add
+   it to; the coverage units are the tree's, the CLI classes the file's.
 5. The build manifest is not tracked and not exported: it names the commit
    and the host it was made on.
+6. Every test file under tools/, bench/ and adpat/c/tests/ is run by a part
+   of `make check` — the union of what the Makefiles name.
+7. The corpus floors name every file of the corpus manifest, at its size.
+8. A revision without its release notes is refused by tools/release.sh, and
+   the workflow has no fallback body.
+9. The constants LOCKS.md states as policy are the ones in force.
 
     python3 -B tools/test_gates.py
 
@@ -21,6 +28,7 @@ Authored with Claude Opus 5 (Claude Code), 2026-09-18.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -35,7 +43,10 @@ import profiles  # noqa: E402
 
 CODEC = ROOT / "adpat" / "c"
 CODEC_MAKEFILE = CODEC / "Makefile"
+ROOT_MAKEFILE = ROOT / "Makefile"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE = ROOT / ".github" / "workflows" / "release.yml"
+LOCKS = ROOT / "LOCKS.md"
 CADAPT = Path(os.environ.get("CADAPT", CODEC / "build" / "cadapt"))
 
 USAGE = "usage:\n  cadapt encode <input> [-o <output>] [--force] [--verify | --no-verify] [--explain] [--fast | --mid | --max] [-0 .. -11]\n"
@@ -153,6 +164,120 @@ class SuitesTest(unittest.TestCase):
             probe.unlink()
         self.assertIn("tests/test_zz_drift_probe.c", out, "the new suite is not compiled")
         self.assertRegex(out, r"build/test_zz_drift_probe\s+> build/runs/test_zz_drift_probe\.log", "the new suite is not run")
+
+
+class CoverageListsTest(unittest.TestCase):
+    def test_the_coverage_units_are_the_tree(self) -> None:
+        self.assertEqual(sorted(make_variable("COVUNITS")), sorted(p.stem for p in CODEC.glob("*.c")))
+
+    def test_the_coverage_pass_runs_every_suite_and_every_cli_class(self) -> None:
+        runs = set(make_variable("COVRUNS"))
+        self.assertTrue(set(make_variable("TESTRUNS")) <= runs, "a C suite make test runs is not run under coverage")
+        listed = subprocess.run([sys.executable, "-B", str(CODEC / "tests" / "test_cadapt.py"), "--classes"],
+                                capture_output=True, text=True, check=True).stdout.split()
+        declared = re.findall(r"^class (\w+)\(", (CODEC / "tests" / "test_cadapt.py").read_text(encoding="utf-8"), flags=re.M)
+        self.assertEqual(set(declared) - set(listed), {"CodecTest"}, "a class with tests is missing from --classes, or a base class has none")
+        for name in listed:
+            self.assertIn(f"cli-{name}", runs, f"the CLI class {name} is not run under coverage")
+        self.assertIn("safety", runs)
+
+
+class ToolTestsTest(unittest.TestCase):
+    """Every test file is run by some part of make check: the root Makefile's
+    parts name tools/ and bench/ files and patterns, the codec's Makefile the
+    suites under adpat/c/tests/."""
+
+    @staticmethod
+    def files_run_by(makefile: Path) -> set[str]:
+        # recipes only: a comment naming a file runs nothing
+        text = "\n".join(line for line in makefile.read_text(encoding="utf-8").split("\n") if not line.lstrip().startswith("#"))
+        found: set[str] = set()
+        for path in re.findall(r"(?:tools|bench|tests)/[\w/]+\.py", text):
+            found.add(path)
+        for directory, pattern in re.findall(r"discover -s (\S+) -p '([^']+)'", text):
+            for path in (ROOT / directory).glob(pattern):
+                found.add(f"{directory}/{path.name}")
+        return found
+
+    @classmethod
+    def unrun(cls) -> list[str]:
+        run = cls.files_run_by(ROOT_MAKEFILE)
+        files = {f"{p.parent.relative_to(ROOT)}/{p.name}" for d in ("tools", "tools/ltcb", "bench") for p in (ROOT / d).glob("test_*.py")}
+        return sorted(files - run)
+
+    def test_every_tool_and_bench_test_file_is_run_by_make_check(self) -> None:
+        self.assertEqual(self.unrun(), [], "test files no part of make check runs")
+
+    def test_every_codec_python_suite_is_named_by_the_codec_makefile(self) -> None:
+        text = CODEC_MAKEFILE.read_text(encoding="utf-8")
+        for path in (CODEC / "tests").glob("test_*.py"):
+            self.assertIn(f"tests/{path.name}", text, f"adpat/c/Makefile never runs {path.name}")
+
+    def test_a_new_tool_test_file_outside_every_pattern_is_reported(self) -> None:
+        probe = ROOT / "tools" / "test_zz_drift_probe.py"
+        self.assertFalse(probe.exists())
+        probe.write_text("import unittest\n")
+        try:
+            unrun = self.unrun()
+        finally:
+            probe.unlink()
+        self.assertEqual(unrun, ["tools/test_zz_drift_probe.py"])
+
+
+class CorpusFloorsTest(unittest.TestCase):
+    def test_the_corpus_floors_name_every_file_of_the_manifest_at_its_size(self) -> None:
+        manifest = json.loads((ROOT / "static" / "corpus" / "mixed" / "manifest.json").read_text(encoding="utf-8"))
+        files = {f"{corpus['name']}/{entry['name']}": entry["bytes"] for corpus in manifest["corpora"] for entry in corpus["files"]}
+        for floor_file in sorted((ROOT / "tools").glob("corpus_floor_*.json")):
+            floors = json.loads(floor_file.read_text(encoding="utf-8"))["floors"]
+            rows = {f["fixture"]: f["input_bytes"] for f in floors}
+            self.assertEqual(sorted(rows), sorted(files), f"{floor_file.name}: the rows are not the manifest's files")
+            for name, size in files.items():
+                self.assertEqual(rows[name], size, f"{floor_file.name}: {name} is {rows[name]:,} B, the manifest says {size:,}")
+
+
+class ReleaseNotesTest(unittest.TestCase):
+    def test_release_sh_refuses_a_revision_without_its_notes(self) -> None:
+        script = (ROOT / "tools" / "release.sh").read_text(encoding="utf-8")
+        self.assertIn('docs/release-notes/$VERSION.md', script)
+        # v0.11.0 predates the notes; the refusal comes before any export or build
+        has_tag = subprocess.run(["git", "rev-parse", "-q", "--verify", "v0.11.0^{commit}"], cwd=ROOT, capture_output=True)
+        if has_tag.returncode != 0:
+            self.skipTest("no v0.11.0 in this clone")
+        with tempfile.TemporaryDirectory() as scratch:
+            run = subprocess.run(["tools/release.sh", "--rev", "v0.11.0", "--no-tests", "--out", scratch], cwd=ROOT,
+                                 capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("no docs/release-notes/0.11.0.md", run.stderr)
+
+    def test_the_workflow_publishes_the_notes_with_no_fallback(self) -> None:
+        text = RELEASE.read_text(encoding="utf-8")
+        self.assertIn('cp "docs/release-notes/$version.md" notes.md', text)
+        self.assertFalse("awk" in text, "release.yml falls back to the changelog for the release body")
+
+
+class LocksTest(unittest.TestCase):
+    """The constants LOCKS.md states in the present tense are the ones in
+    force; a change to a source is a new lock entry, not a silent drift."""
+
+    def test_the_check_budget_is_the_makefiles_default(self) -> None:
+        stated = re.search(r"`make check` is held to (\d+) s of wall time", LOCKS.read_text(encoding="utf-8"))
+        self.assertIsNotNone(stated)
+        default = re.search(r"^CHECK_SECONDS \?= (\d+)", ROOT_MAKEFILE.read_text(encoding="utf-8"), flags=re.M)
+        self.assertEqual(int(stated.group(1)), int(default.group(1)), "LOCKS.md and the Makefile disagree on the check budget")
+
+    def test_the_tolerances_are_the_floor_files(self) -> None:
+        text = LOCKS.read_text(encoding="utf-8")
+        stays = re.search(r"The (\d+) % tolerance stays", text)
+        self.assertIsNotNone(stays)
+        ratio = json.loads((ROOT / "tools" / "ratio_floor.json").read_text(encoding="utf-8"))
+        self.assertEqual(round(ratio["throughput_tolerance"] * 100), int(stays.group(1)), "tools/ratio_floor.json's tolerance is not the locked one")
+        corpus = re.search(r"corpus floor files stay in wall seconds at their (\d+) % tolerance", text)
+        self.assertIsNotNone(corpus)
+        for floor_file in sorted((ROOT / "tools").glob("corpus_floor_*.json")):
+            data = json.loads(floor_file.read_text(encoding="utf-8"))
+            self.assertEqual(round(data["throughput_tolerance"] * 100), int(corpus.group(1)), floor_file.name)
+            self.assertTrue(all("wall_seconds" in f for f in data["floors"]), f"{floor_file.name}: not in wall seconds as locked")
 
 
 class ManifestTest(unittest.TestCase):

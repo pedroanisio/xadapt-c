@@ -259,6 +259,8 @@ class ChangelogTest(unittest.TestCase):
         self.assertEqual(tag.stdout.strip(), f"v{version}", f"HEAD is tagged {tag.stdout.strip()}, the changelog says {version}")
         unreleased = text[text.index("## [Unreleased]") : text.index(f"## [{version}]")]
         self.assertNotIn("\n- ", unreleased, "a tagged commit leaves nothing under [Unreleased]")
+        notes = ROOT / "docs" / "release-notes" / f"{version}.md"
+        self.assertTrue(notes.exists(), f"the tagged {version} has no {notes.relative_to(ROOT)}: the release's body")
 
 
 class MakeTargetsTest(unittest.TestCase):
