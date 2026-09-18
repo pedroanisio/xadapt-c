@@ -246,6 +246,11 @@ class LocksTest(unittest.TestCase):
         self.assertIsNotNone(stated)
         default = re.search(r"^CHECK_SECONDS \?= (\d+)", ROOT_MAKEFILE.read_text(encoding="utf-8"), flags=re.M)
         self.assertEqual(int(stated.group(1)), int(default.group(1)), "LOCKS.md and the Makefile disagree on the check budget")
+        ci_budget = re.search(r"^  CHECK_SECONDS: (\d+)$", CI.read_text(encoding="utf-8"), flags=re.M)
+        release_budget = re.search(r"^  CHECK_SECONDS: (\d+)$", RELEASE.read_text(encoding="utf-8"), flags=re.M)
+        self.assertIsNotNone(ci_budget)
+        self.assertIsNotNone(release_budget, "release builds need the hosted CI quality-suite allowance")
+        self.assertEqual(release_budget.group(1), ci_budget.group(1), "release and CI quality-suite allowances differ")
 
     def test_the_tolerances_are_the_floor_files(self) -> None:
         text = LOCKS.read_text(encoding="utf-8")

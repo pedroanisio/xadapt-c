@@ -19,6 +19,10 @@ on:
 permissions:
   contents: write
 
+# Source-export checks use the same hosted-runner allowance as ci.yml.
+env:
+  CHECK_SECONDS: 3600
+
 jobs:
   gates:
     name: the release gates
