@@ -1,0 +1,88 @@
+# A release: on a tag v<version>, the artifacts of that revision from
+# tools/release.sh on each supported platform — the binary tarball in the
+# layout `make install` writes, the source tarball, the SBOM, the build
+# manifest, the NOTICE, SHA256SUMS and a release manifest — after the
+# same gates ci.yml runs, published as a GitHub release
+# (docs/release-pipeline.md). The tag must name a revision whose cadapt.c
+# carries the same version; the script refuses otherwise.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      rev:
+        description: the revision to package (a tag v<version>, or any commit for a dry run)
+        default: HEAD
+
+permissions:
+  contents: write
+
+jobs:
+  gates:
+    name: the release gates
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  artifacts:
+    name: artifacts (${{ matrix.os }})
+    needs: gates
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: the artifacts of the revision, built from its export
+        run: |
+          rev=${{ github.event.inputs.rev || github.ref_name }}
+          tools/release.sh --rev "$rev" --out dist/release
+      - name: the binary tarball, installed from its unpacked layout and used
+        run: tools/test_install.sh --tarball dist/release/cadapt-*-$(uname -s | tr '[:upper:]' '[:lower:]')-*.tar.gz
+      - name: the build reproduces
+        run: |
+          rev=${{ github.event.inputs.rev || github.ref_name }}
+          mkdir -p reproduce && git archive "$rev" adpat/c tools Makefile | tar -x -C reproduce
+          cd reproduce && python3 -B tools/provenance.py reproduce --manifest ../dist/release/build-manifest.json --build build-reproduce
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cadapt-${{ matrix.os }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    needs: artifacts
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+      - name: one SHA256SUMS over every platform's artifacts
+        run: |
+          mkdir -p release
+          for d in assets/*/; do
+            os=$(basename "$d" | sed 's/^cadapt-//')
+            cp "$d"/cadapt-*-*.tar.gz release/ 2>/dev/null || true
+            cp "$d"/sbom.spdx.json "release/sbom-$os.spdx.json"
+            cp "$d"/build-manifest.json "release/build-manifest-$os.json"
+            cp "$d"/release-manifest.json "release/release-manifest-$os.json"
+            cp "$d"/NOTICE release/NOTICE
+          done
+          cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: the release notes, from the CHANGELOG's entry
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '/^## /{p = index($0, "[" v "]") || index($0, v)} p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "cadapt $version" > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          body_path: notes.md
+          fail_on_unmatched_files: true

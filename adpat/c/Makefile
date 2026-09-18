@@ -12,6 +12,8 @@
 #                   ADAPT_LONG_TESTS=1), for a landing, not every push
 #   make sanitize   the C suites under AddressSanitizer and
 #                   UndefinedBehaviorSanitizer, every fault fatal
+#   make install    the command, manual, library and header under PREFIX
+#                   (default /usr/local; DESTDIR for a staging root)
 #   make clean
 #
 # Outputs go to build/ here (git-ignored, as the crate's target/ is), where
@@ -274,8 +276,28 @@ fuzz-archive-smoke: $(BUILD)/fuzz_archive $(BUILD)/archive_seeds
 	$(BUILD)/archive_seeds $(BUILD)/fuzz-archive-corpus
 	$(BUILD)/fuzz_archive $(BUILD)/fuzz-archive-corpus -runs=$(FUZZ_RUNS) -max_len=4096 -seed=1 -print_final_stats=1
 
+# Installation: the command, its manual, the library and its header under
+# PREFIX (DESTDIR ahead of it for a package's staging root). Nothing else
+# is installed: the tests, the benchmarks and the fuzz harnesses stay in
+# the tree. `make uninstall` removes exactly what `make install` placed.
+PREFIX  ?= /usr/local
+DESTDIR ?=
+INSTALL ?= install
+BINDIR  = $(DESTDIR)$(PREFIX)/bin
+LIBDIR  = $(DESTDIR)$(PREFIX)/lib
+INCDIR  = $(DESTDIR)$(PREFIX)/include
+MANDIR  = $(DESTDIR)$(PREFIX)/share/man/man1
+install: all
+	$(INSTALL) -d $(BINDIR) $(LIBDIR) $(INCDIR) $(MANDIR)
+	$(INSTALL) -m 755 $(BIN) $(BINDIR)/cadapt
+	$(INSTALL) -m 644 $(LIB) $(LIBDIR)/libadapt.a
+	$(INSTALL) -m 644 adapt.h $(INCDIR)/adapt.h
+	$(INSTALL) -m 644 cadapt.1 $(MANDIR)/cadapt.1
+uninstall:
+	rm -f $(BINDIR)/cadapt $(LIBDIR)/libadapt.a $(INCDIR)/adapt.h $(MANDIR)/cadapt.1
+
 clean:
 	rm -rf $(BUILD) $(COV) $(SANITIZE_BUILD)
 
-.PHONY: all test coverage sanitize fuzz fuzz-smoke fuzz-header-smoke fuzz-archive-smoke examples check check-parts check-long clean
+.PHONY: all test coverage sanitize fuzz fuzz-smoke fuzz-header-smoke fuzz-archive-smoke examples install uninstall check check-parts check-long clean
 .PHONY: $(BUILD)/runs/gcov-tests

@@ -11,9 +11,12 @@ it might be.
 
 - **Platforms.** Linux and macOS, built with GCC or Clang from
   [adpat/c/Makefile](adpat/c/Makefile); the tests, the sanitizer and
-  coverage gates, the fuzz harness and the benchmark run there. Windows
-  builds are provided for and named in the code but have not been
-  validated; see the README's portability rules.
+  coverage gates, the fuzz harness and the benchmark run there, and the
+  release pipeline ([docs/release-pipeline.md](docs/release-pipeline.md))
+  builds, tests and packages on both on every push and tag. Windows
+  builds are provided for and named in the code and compile in an
+  informational job that gates nothing; they have not been validated.
+  See the README's portability rules.
 - **Versions.** The latest release on the main branch. The container
   format is versioned and every published version keeps decoding, so a
   file made by an older release is not stranded by an upgrade.
@@ -85,5 +88,7 @@ implied by the MIT licence, which provides the software as is.
 
 Every release carries an SPDX SBOM ([sbom.spdx.json](sbom.spdx.json)), a
 build manifest ([build-manifest.json](build-manifest.json)) that
-`make reproduce` rebuilds and checks byte for byte, and a
-[CHANGELOG.md](CHANGELOG.md).
+`make reproduce` rebuilds and checks byte for byte, a `NOTICE` generated
+from the SBOM, `SHA256SUMS` over every artifact, a release manifest, and a
+[CHANGELOG.md](CHANGELOG.md); `make release` makes them from an export of
+the tagged revision ([docs/release-pipeline.md](docs/release-pipeline.md)).

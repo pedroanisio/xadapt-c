@@ -8,9 +8,9 @@ BUILD ?= build
 CODEC_BUILD = $(if $(filter /%,$(BUILD)),$(BUILD),adpat/c/$(BUILD))
 GATE_ARGS ?=
 FLOOR_ARGS ?=
-.PHONY: all test check check-parts clean bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor ltcb ltcb-release
+.PHONY: all test check check-parts clean install uninstall bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor memory-gate release test-install ltcb ltcb-release
 
-all test clean:
+all test clean install uninstall:
 	$(MAKE) -C adpat/c $@
 
 # The gate is held to CHECK_SECONDS of wall time (LOCKS.md, 2026-09-15):
@@ -39,7 +39,7 @@ check:
 check-parts: _tmp/check/codec _tmp/check/provenance _tmp/check/floor-tool _tmp/check/fetch-corpus _tmp/check/docs _tmp/check/bench _tmp/check/ltcb
 _tmp/check/codec: ; @$(MAKE) -C adpat/c check > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/provenance: ; @$(PYTHON) -B tools/test_provenance.py > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
-_tmp/check/floor-tool: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_check_ratio_floor.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
+_tmp/check/floor-tool: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_check_*.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 _tmp/check/fetch-corpus: ; @$(PYTHON) -B -m unittest discover -s tools -p 'test_fetch_corpus.py' > $@.log 2>&1 && touch $@ || { cat $@.log; exit 1; }
 # The measurement tooling and the LTCB tooling. Both went ungated for weeks and
 # both rotted: telemetry drove the encoder with a decode-only option and its
@@ -79,6 +79,33 @@ corpus-floor: all
 	    --floor tools/corpus_floor_default.json --corpus static/corpus/mixed $(FLOOR_ARGS)
 	$(PYTHON) -B tools/check_ratio_floor.py --binary "$(abspath $(CODEC_BUILD))/cadapt" --verify \
 	    --floor tools/corpus_floor_max6.json --corpus static/corpus/mixed $(FLOOR_ARGS)
+
+# The memory promise (RUN-1, RUN-2): the peak resident set of an encode
+# and of a decode never exceeds what the container declares decoding
+# needs (`cadapt decode --max-memory 1` names the figure) plus 16 MiB for
+# the process itself. Measured on the gate's proxy under the default
+# profile, --fast, --mid, --max and --max -6; a resident set is bytes,
+# not a timing, so this gate holds on any host.
+memory-gate: all
+	unzip -p static/corpus/enwik8.zip enwik8 | head -c 8388608 > "$(CODEC_BUILD)/enwik8-8MiB"
+	$(PYTHON) -B tools/check_memory.py --binary "$(abspath $(CODEC_BUILD))/cadapt" \
+	    --fixture enwik8-8MiB="$(abspath $(CODEC_BUILD))/enwik8-8MiB" $(MEMORY_ARGS)
+MEMORY_ARGS ?=
+
+# The release artifacts of the committed HEAD (or RELEASE_REV), built from
+# an export of that revision alone — nothing reads the working tree — into
+# dist/<version>/: the binary tarball in the layout `make install` writes,
+# the source tarball, the SBOM, the build manifest, the NOTICE, SHA256SUMS
+# and a release manifest (tools/release.sh). test-install proves the flow
+# from a clean environment: an export built with cc and make alone,
+# installed under a prefix, used, and uninstalled; INSTALL_IMAGE=debian:bookworm-slim
+# runs the same inside a fresh container (docs/release-pipeline.md).
+RELEASE_REV ?= HEAD
+release:
+	tools/release.sh --rev $(RELEASE_REV)
+INSTALL_IMAGE ?=
+test-install:
+	tools/test_install.sh $(if $(INSTALL_IMAGE),--docker $(INSTALL_IMAGE),) --rev $(RELEASE_REV)
 
 sbom:
 	$(PYTHON) -B tools/provenance.py sbom

@@ -15,6 +15,42 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Added
 
+- The release pipeline (`docs/release-pipeline.md`). Two workflows:
+  `ci.yml` on every push and pull request — builds and the full suites
+  on Linux (GCC, Clang) and macOS (Clang) with the coverage gate, the
+  examples and the provenance and documentation tests; the sanitizers on
+  Clang, the CLI suite under them on Linux; identical bytes across GCC,
+  Clang and the AVX2 and baseline paths; the corpus and proxy size floors,
+  the memory promise and the throughput of the change against its base
+  commit in the same run on a hosted runner; the absolute CPU-second
+  floors on a self-hosted runner labelled `reference` (the host the floors
+  were locked on), skipped where none exists; the install flow from a
+  clean environment on Linux and macOS and inside a fresh Debian
+  container; a Windows MinGW build that gates nothing. `release.yml` on a
+  tag `v<version>` — the same gates, then the artifacts on both platforms,
+  each binary tarball installed from its layout and used, the build
+  reproduced from its manifest, and a GitHub release with one
+  `SHA256SUMS` and the CHANGELOG entry as its notes.
+- `make install` / `make uninstall` (`PREFIX`, `DESTDIR`): `cadapt`,
+  `cadapt.1`, `libadapt.a`, `adapt.h`. `make release` (`tools/release.sh`):
+  the artifacts of a committed revision from an export of it — the binary
+  tarball in the install layout with `LICENSE`, a `NOTICE` generated from
+  the SBOM, `CHANGELOG.md`, `sbom.spdx.json` and `build-manifest.json`;
+  the source tarball; `SHA256SUMS`; `release-manifest.json` — the C suites
+  run on the export first and the packaged binary made to round-trip a
+  file after; a tag `v<version>` must name a revision whose `cadapt.c`
+  says `<version>`. `make test-install` (`tools/test_install.sh`): an
+  export built with `cc` and `make` alone, installed under a prefix,
+  used (a file and a folder round trip, the manual, a program compiled
+  against the installed header and library), uninstalled clean; the same
+  for a release tarball (`--tarball`) or inside a container (`--docker
+  IMAGE`, `INSTALL_IMAGE=`).
+- `make memory-gate` (`tools/check_memory.py`, with its tests in the
+  `floor-tool` part of `make check`): the peak resident set of an encode
+  and of a decode, as the kernel accounts it to the child, against what
+  the container declares decoding needs plus 16 MiB for the process —
+  `RUN-1` and `RUN-2` as a gate that holds on any host. On the proxy every
+  measurement is 4.7–7.8 MB under its declaration.
 - The interface's contract, stated and executable. `adapt.h` opens with
   what every declaration is held to — ownership (a caller's buffers stay
   the caller's; `*out` is malloc'd and released with `adapt_free()`, and
@@ -72,6 +108,10 @@ The binary reports `0.12.0`; the tag is pending.
 
 ### Fixed
 
+- `tools/ltcb_release.sh` exported a fixed list of sources that stopped
+  at the split of `adapt_model.h` and `cadapt.c`: its build failed with
+  "No rule to make target 'adapt_constants.h'". It exports the codec
+  directory whole, as `tools/release.sh` does.
 - The memory bounds saturate. `adapt_threads_encode_memory_bound`,
   `adapt_parallel_encode_memory_bound` and
   `adapt_parallel_decode_memory_bound` multiplied a per-worker cost by the

@@ -1,0 +1,172 @@
+# The release gates, on every push to main and every pull request
+# (docs/release-pipeline.md). Bytes are the same on every machine (RUN-5),
+# so the correctness and size gates run on the hosted runners; a
+# throughput floor is a CPU-second figure locked on the reference host
+# (LOCKS.md), so on a hosted runner throughput is gated only relatively —
+# the pull request's binary against its base commit's, run by run in the
+# same job — and absolutely on the self-hosted reference runner, which a
+# fork does not have and the job therefore skips rather than fails.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call: # release.yml runs these gates before it packages
+
+permissions:
+  contents: read
+
+env:
+  # a hosted runner is slower and shared: the wall budget make check holds
+  # itself to on the reference host (120 s) is raised, not the gate
+  CHECK_SECONDS: 1200
+
+jobs:
+  check:
+    name: check (${{ matrix.os }}, ${{ matrix.cc }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, cc: gcc }
+          - { os: ubuntu-24.04, cc: clang }
+          - { os: macos-14, cc: clang }
+    steps:
+      - uses: actions/checkout@v4
+      - name: toolchain
+        run: |
+          ${{ matrix.cc }} --version | head -1
+          python3 --version
+      - name: the plotting tests' optional dependency (they skip without it)
+        if: matrix.cc == 'gcc'
+        run: python3 -m pip install --quiet -r bench/requirements.txt
+      - name: make check (tests, coverage gate, examples, provenance, docs)
+        if: matrix.cc == 'gcc'
+        run: make check CC=${{ matrix.cc }} CHECK_SECONDS=$CHECK_SECONDS
+      # the coverage gate needs GCC's gcov; the clang columns run the suites
+      # without it and the sanitizers with it
+      - name: make test (the C suites) and the CLI suite
+        if: matrix.cc != 'gcc'
+        run: |
+          make -C adpat/c all test CC=${{ matrix.cc }}
+          make -C adpat/c examples CC=${{ matrix.cc }} && for e in adpat/c/build/example-*; do $e > /dev/null; done
+          python3 -B adpat/c/tests/test_cadapt.py adpat/c/build/cadapt
+          python3 -B adpat/c/tests/test_cadapt_safety.py adpat/c/build/cadapt
+          python3 -B adpat/c/tests/test_platform_header.py
+      - name: make sanitize (AddressSanitizer and UndefinedBehaviorSanitizer, every fault fatal)
+        if: matrix.cc == 'clang'
+        run: make -C adpat/c sanitize SANITIZER_CC=clang
+      - name: the CLI suite under the sanitizers
+        if: matrix.cc == 'clang' && matrix.os == 'ubuntu-24.04'
+        run: |
+          make -C adpat/c BUILD=build-sanitize CC=clang \
+            CFLAGS="-std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra -Wpedantic -Werror -DADAPT_THREADS -pthread" all
+          ASAN_OPTIONS=detect_leaks=1 python3 -B adpat/c/tests/test_cadapt.py adpat/c/build-sanitize/cadapt
+
+  identical-bytes:
+    # RUN-5: gcc and clang, the AVX2 and the baseline per-bit paths, write
+    # the same container and decode each other's
+    name: identical bytes across compilers and instruction sets
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          make -C adpat/c BUILD=build-gcc CC=gcc all
+          make -C adpat/c BUILD=build-clang CC=clang all
+          unzip -p static/corpus/enwik8.zip enwik8 | head -c 8388608 > proxy
+          for flags in "" "--fast" "--mid" "--max --allocation context --contexts lean" "--max --allocation context -6"; do
+            adpat/c/build-gcc/cadapt encode proxy $flags --force --no-verify -o a.adpt
+            ADAPT_ISA=baseline adpat/c/build-clang/cadapt encode proxy $flags --force --no-verify -o b.adpt
+            cmp a.adpt b.adpt
+            ADAPT_ISA=baseline adpat/c/build-clang/cadapt decode a.adpt --force -o a.out && cmp a.out proxy
+            adpat/c/build-gcc/cadapt decode b.adpt --force -o b.out && cmp b.out proxy
+            echo "identical: cadapt encode $flags ($(stat -c %s a.adpt) bytes)"
+          done
+
+  size-and-memory-floors:
+    # DLV-3: every corpus row against its locked size floor under both gate
+    # commands, and the gate proxy's size floor; the memory promise on the
+    # proxy. Sizes and resident sets do not depend on the host. Throughput
+    # here is the pull request's binary against its base commit's, in the
+    # same run (tools/check_ratio_floor.py --baseline-binary); on a push to
+    # main the base is the previous commit.
+    name: size, memory and relative throughput floors
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: the corpus (fetched by script, pinned by its manifest)
+        uses: actions/cache@v4
+        with:
+          path: static/corpus/mixed
+          key: corpus-${{ hashFiles('static/corpus/mixed/manifest.json') }}
+      - name: the corpus, from the cache when it matches the manifest
+        run: python3 -B tools/fetch_corpus.py --check > /dev/null 2>&1 || make corpus
+      - run: make all
+      - name: the baseline binary, from the base commit
+        run: |
+          base=${{ github.event.pull_request.base.sha || github.event.before }}
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then base=$(git rev-parse HEAD~1); fi
+          echo "baseline: $base"
+          mkdir -p baseline && git archive "$base" adpat/c | tar -x -C baseline
+          make -C baseline/adpat/c all
+      - name: the gate proxy, size and relative throughput
+        run: make gate GATE_ARGS="--baseline-binary $PWD/baseline/adpat/c/build/cadapt"
+      - name: the corpus size floors, both gate commands
+        run: make corpus-floor
+      - name: the memory promise
+        run: make memory-gate
+
+  throughput-floors:
+    # The absolute throughput floors, on the reference host the floors were
+    # locked on (tools/ratio_floor.json names it): a self-hosted runner
+    # labelled `reference`. The job runs only where that runner exists;
+    # a fork or a pull request from one has none and skips it.
+    name: throughput floors on the reference host
+    if: github.repository == 'pedroanisio/xadapt-c' && github.event_name != 'pull_request'
+    runs-on: [self-hosted, linux, x64, reference]
+    steps:
+      - uses: actions/checkout@v4
+      - run: make all
+      - name: the gate proxy against its locked CPU-second floor
+        run: make gate
+      - name: the corpus floors, size and throughput
+        run: make corpus-floor
+
+  install:
+    # the packaging flow from a clean environment: an export of the
+    # revision, built with cc and make alone, installed, used, uninstalled
+    name: install from a clean environment (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - run: tools/test_install.sh
+      - name: the same inside a fresh Debian container
+        if: matrix.os == 'ubuntu-24.04'
+        run: tools/test_install.sh --docker debian:bookworm-slim
+
+  windows-build:
+    # Windows is not a supported platform (SUPPORT.md): the code names its
+    # calls and this job proves they still compile, without gating anything.
+    name: windows build (informational, unsupported)
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc make
+      - run: make -C adpat/c all CC=gcc
+      - run: adpat/c/build/cadapt --version

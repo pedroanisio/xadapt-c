@@ -66,7 +66,8 @@ refuses versions 10–18. The header of
 | [adpat/c/fuzz/](adpat/c/fuzz/) | libFuzzer harnesses: the two decoders, the same with the header checksum made good, the archive unpacker with its seeds |
 | [adpat/c/check-gcov.py](adpat/c/check-gcov.py) | The branch-coverage gate: 80 % for the library, 60 % for the CLI |
 | [bench/](bench/README.md) | Retained historical benchmark scripts, measurements and plots |
-| [docs/](docs/CONSTRAINTS.md) | What the codec is held to ([CONSTRAINTS.md](docs/CONSTRAINTS.md)) and the dated performance audits |
+| [docs/](docs/CONSTRAINTS.md) | What the codec is held to ([CONSTRAINTS.md](docs/CONSTRAINTS.md)), the release pipeline ([release-pipeline.md](docs/release-pipeline.md)) and the dated performance audits |
+| [.github/workflows/](.github/workflows/) | `ci.yml`, the gates on every push and pull request; `release.yml`, the artifacts and the GitHub release on a tag |
 | [LOCKS.md](LOCKS.md) | The decisions that are settled, each with the measurements that settled it |
 | [research/](research/README.md) | Dated research notes — the literature, the byte-only strategy, the adaptive experiments, the LTCB tables — indexed with their dates |
 | [static/corpus/](static/corpus/scripts/manifest.json) | The benchmark's fixtures: enwik8, text8, and the six per-script rows with their manifest |
@@ -550,6 +551,25 @@ make reproduce   # rebuild in a scratch directory; identical bytes, or the reaso
 `make check` fails when the committed SBOM is stale, so a source change
 carries its SBOM with it; `make reproduce` against the committed manifest
 confirms that the toolchain it names rebuilds the same bytes.
+
+The release itself — the binary tarball in the layout `make install`
+writes, the source tarball, the SBOM and build manifest of that build, a
+`NOTICE` generated from the SBOM, `SHA256SUMS` and a release manifest —
+comes from `make release` (`tools/release.sh`), built from an export of
+the committed revision, its C suites run and its packaged binary proven
+before anything is written to `dist/<version>/`; `make test-install`
+proves the install flow from a clean environment, and with
+`INSTALL_IMAGE=debian:bookworm-slim` inside a fresh container. The
+gates every change passes, the two workflows that run them on every push
+and tag, the reference runner the throughput floors need, and how a
+release is cut are in [docs/release-pipeline.md](docs/release-pipeline.md).
+
+```sh
+make install PREFIX=/usr/local   # cadapt, cadapt.1, libadapt.a, adapt.h (DESTDIR for a staging root)
+make memory-gate                 # peak resident sets against what each container declares
+make release                     # the artifacts of HEAD under dist/<version>/
+make test-install                # the packaging and installation flow, from an export
+```
 
 ## Format
 
