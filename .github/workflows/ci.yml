@@ -74,7 +74,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: the host, for the record
-        run: lscpu | grep -E 'Model name|Flags' | cut -c1-200; gcc --version | head -1; clang --version | head -1
+        run: |
+          lscpu | grep -E 'Model name|Flags' | cut -c1-400; gcc --version | head -1; clang --version | head -1
+          cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true; nproc; uname -r
       - run: |
           make -C adpat/c BUILD=build-gcc CC=gcc all
           make -C adpat/c BUILD=build-clang CC=clang all
@@ -92,8 +94,16 @@ jobs:
             ADAPT_ISA=baseline adpat/c/build-clang/cadapt decode gcc-v3.adpt --force -o a.out && cmp a.out proxy
             adpat/c/build-gcc/cadapt decode clang-base.adpt --force -o b.out && cmp b.out proxy
             echo "cadapt encode $flags: $(stat -c %s gcc-v3.adpt) bytes"
+            if [ $failed = 1 ]; then mkdir -p differing && cp gcc-v3.adpt gcc-base.adpt clang-v3.adpt clang-base.adpt differing/ && break; fi
           done
+          sha256sum adpat/c/build-gcc/cadapt adpat/c/build-clang/cadapt
           exit $failed
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: differing-containers
+          path: differing/
+          if-no-files-found: ignore
 
   size-and-memory-floors:
     # DLV-3: every corpus row against its locked size floor under both gate
