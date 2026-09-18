@@ -11,7 +11,32 @@ and announced as [SECURITY.md](SECURITY.md) describes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- The root `Makefile` forwards `sanitize`, `coverage` and `check-long`
+  to `adpat/c/Makefile`, as the documents that cite `make sanitize`
+  always said.
+- `tools/render_floors.py` renders the floors block into the release
+  notes of the version `cadapt.c` names, beside the README and the
+  manual, and refuses notes of that version that state the floors
+  without the block; `tools/release.sh` checks the blocks before it
+  packages.
+- `tools/ltcb_release.sh` records the commit an annotated tag names (not
+  the tag object), takes the verifier note's command from the revision's
+  `tools/ratio_floor.json` and its memory from `cadapt info` of the
+  enwik9 container instead of typed figures, reads the floor check's
+  CPU-seconds lines into the manifest, and refuses `--containers` from
+  under the directory it empties.
+- `tools/test_docs.py` holds four more things: the changelog's top entry
+  against `CADAPT_VERSION` and the tag, every cited `make` target against
+  the Makefile it is invoked in, every backticked path of a living
+  document against the tree or the tool that writes it, and the research
+  index against the notes.
+- The LTCB submission document carries the release build's assets and
+  update email; the two dated performance audits carry a status of
+  2026-09-18 under the dated-record rule; the throughput study of
+  2026-09-16 is tracked. The audit behind these is
+  `docs/doc-hygiene-report-2026-09-18.md`.
 
 ## [0.12.0] — 2026-09-18
 
@@ -205,9 +230,10 @@ otherwise source-compatible with 0.11.0's declarations it kept.
   marked block of the README and the manual — the prose no longer restates
   a number a re-lock would leave behind. `make ltcb` builds the LTCB
   renderings `research/ltcb-tables.md` links; `research/README.md` indexes
-  the dated notes and `research/current-baseline.md` is
-  `baseline-2026-09-14.md`, marked as the record it is. The audit that
-  found what these fix is `docs/doc-hygiene-report-2026-09-15.md`.
+  the dated notes and the note once named `research/current-baseline.md`
+  is `research/baseline-2026-09-14.md`, marked as the record it is. The
+  audit of 2026-09-15 that found what these fix was not committed; the
+  one of 2026-09-18 is `docs/doc-hygiene-report-2026-09-18.md`.
 - The text transform, container versions 62 to 66 (67 to 71 with
   metadata), ahead of the normal, fast, max, compact and lean models: a
   word both sides have seen written out three times becomes, from then

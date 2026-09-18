@@ -1,5 +1,26 @@
 # Performance opportunities — cadapt at HEAD `085dff0`, 2026-09-14
 
+> **Status, 2026-09-18 (9109c3f, cadapt 0.12.0).** A dated record: true of
+> the code at 085dff0, its status brought forward here and not promised
+> beyond it; the decisions are in `LOCKS.md`. Landed since 2026-09-15, each
+> bytes-identical or measured for bytes in the changelog's `[0.12.0]`
+> Performance entries: item 8 as the second max model's int16 arbiter
+> weights with `vpmaddwd` dot products and a rounded `vpmulhrsw` train
+> step (`LOCKS.md` 2026-09-15: −10.4 % instructions, decode −9 %, at
+> −0.11 % bytes — the earlier 16-bit form that grew the proxy 8.2 % is the
+> one the 2026-09-15 status below rejects); the max profile's vector lane
+> and learn paths running only the slot groups a file's context set fills
+> (the lean baseline 8–9 % faster on encode, 5 % on decode: enwik8 117.1 →
+> 107.4 CPU s, the floors re-locked, 2026-09-16); item 11's family — the
+> first block's width trials stopping after the first when the sample
+> declines the class context, and a model's arbiter weights initialized by
+> one row copied per set instead of a lane-by-lane call (45 % of a small
+> file's encode); and the mid profile (`--mid`, 2026-09-16, opt-in: a
+> tier below `--max` built anew as its own format versions, the route
+> `docs/throughput-study-2026-09-16.md` names for a 2–3× at the tiers
+> below `--max`).
+> Items 3, 4, 6, 7, 9, 10, 12, 13, 15, 16 and 17 stand as written.
+>
 > **Status, 2026-09-15.** Landed since: item 1 (segments on threads, 510aa16),
 > item 14 (parallel segment decoding, the same commit). Measured and rejected:
 > item 2 (branch-free run and recall lanes: bytes identical, branch misses

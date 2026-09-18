@@ -1319,9 +1319,10 @@ context` on this host (AMD Ryzen 5 5600X) are locked as floors:
 | enwik9 (1,000,000,000 B, md5 `e206c345…a12d`) | **155,906,798 B** (15.59 %) | 3,123 s | 320,205 B/s |
 
 A change that makes either container larger by one byte, or the throughput
-lower by more than the 10 % tolerance recorded in `bench/ratio_floor.json`, is
-a regression and does not ship. The floors are checked by
-`bench/check_ratio_floor.py` (`make ratio-floor`), which also refuses to run
+lower by more than the 10 % tolerance recorded in `bench/ratio_floor.json`
+(since 2026-09-14 `tools/ratio_floor.json`), is a regression and does not
+ship. The floors are checked by `bench/check_ratio_floor.py` (now
+`tools/check_ratio_floor.py`; `make ratio-floor`), which also refuses to run
 against any input whose size or MD5 differs from the locked one.
 
 **CI proxy.** No CI gate may run longer than 120 s, and the full inputs take

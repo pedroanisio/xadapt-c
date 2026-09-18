@@ -40,11 +40,18 @@ while [ $# -gt 0 ]; do
 done
 
 cd "$ROOT"
-FULL=$(git rev-parse "$REV")
-SHORT=$(git rev-parse --short "$REV")
+# the commit, not the tag object an annotated tag names: the manifest records
+# what was built and the directory carries its short hash
+FULL=$(git rev-parse "$REV^{commit}")
+SHORT=$(git rev-parse --short "$FULL")
 VERSION=$(git show "$FULL:adpat/c/cadapt.c" | sed -n 's/^#define CADAPT_VERSION "\(.*\)"/\1/p')
 [ -n "$VERSION" ] || { echo "no CADAPT_VERSION in $REV" >&2; exit 2; }
 OUT=${OUT:-dist/ltcb-$VERSION-$SHORT}
+# the containers taken over must not live under the directory about to be
+# emptied — a rerun into the same directory would delete what it takes over
+case "${CONTAINERS:-}" in
+    "$(readlink -m "$OUT")"/*) echo "--containers $CONTAINERS lies under $OUT, which this run empties; copy them elsewhere first" >&2; exit 2 ;;
+esac
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/containers"
 OUT=$(readlink -f "$OUT")
@@ -60,33 +67,12 @@ cp "$OUT/src/adpat/c/build/cadapt" "$OUT/cadapt"
 strip "$OUT/cadapt"
 "$OUT/cadapt" --version > "$OUT/version.txt"
 
-# 2. what a verifier needs to know, beside the binary
-cat > "$OUT/README-ltcb.txt" <<EOF
-cadapt $VERSION (commit $FULL) — Large Text Compression Benchmark entry
-Licence: MIT (LICENSE). Linux x86-64, needs only the C library and pthreads.
-
-Compress (the entry's command; the tier -9 is the default):
-    ./cadapt encode --max --allocation context enwik9 -o enwik9.adpt
-Decompress (no option changes the output; the container names its model):
-    ./cadapt decode enwik9.adpt -o enwik9
-Inspect a container:
-    ./cadapt info enwik9.adpt
-
-The decoder allocates the model the container's header names (about 661 MB
-for the entry above). Sizes, times and hashes are in manifest.json. The
-sources are not published; the binary is the entry, and anyone may run it
-on enwik8 and enwik9 to reproduce the sizes in the manifest.
-EOF
+# 2. the licence beside the binary; the exported sources go — only the binary is published
 cp "$OUT/src/LICENSE" "$OUT/LICENSE"
-
-# 3. the zip the benchmark counts: the decompressor and what it needs at run time — the binary alone
-#    runs; the licence names the terms and the note tells a verifier the commands. The exported
-#    sources go: only the binary is published.
-( cd "$OUT" && rm -f "cadapt-$VERSION-linux-x86_64.zip" && zip -9 -q "cadapt-$VERSION-linux-x86_64.zip" cadapt README-ltcb.txt LICENSE )
 rm -rf "$OUT/src"
 [ "$(strings "$OUT/cadapt" | grep -c 'adpat/c\|\.c:[0-9]')" = 0 ] || { echo "the binary names source files" >&2; exit 1; }
 
-# 4. the containers, verified against the locked floors — or taken over from an earlier run
+# 3. the containers, verified against the locked floors — or taken over from an earlier run
 if [ -n "$CONTAINERS" ]; then
     cp "$CONTAINERS"/*.adpt "$OUT/containers/"
     [ -f "$CONTAINERS/../floor-check.txt" ] && cp "$CONTAINERS/../floor-check.txt" "$OUT/floor-check.txt"
@@ -101,11 +87,42 @@ if [ ${#fixtures[@]} -gt 0 ]; then
     rm -f "$OUT"/containers/*.restored
 fi
 
+# 4. what a verifier needs to know, beside the binary — the entry's command
+#    is the locked one of the revision's tools/ratio_floor.json (the floor
+#    check above encoded with it) and the memory is what the binary reports
+#    for the enwik9 container it wrote; neither is typed here
+COMMAND=$(git show "$FULL:tools/ratio_floor.json" | python3 -c 'import json, sys; print(" ".join(json.load(sys.stdin)["arguments"]))')
+if [ -f "$OUT/containers/enwik9.adpt" ]; then
+    MEMORY="(enwik9.adpt: $("$OUT/cadapt" info "$OUT/containers/enwik9.adpt" | sed -n 's/^model memory *//p'))"
+else
+    MEMORY="(\`./cadapt info\` prints it)"
+fi
+cat > "$OUT/README-ltcb.txt" <<EOF
+cadapt $VERSION (commit $FULL) — Large Text Compression Benchmark entry
+Licence: MIT (LICENSE). Linux x86-64, needs only the C library and pthreads.
+
+Compress (the entry's command; the tier -9 is the default):
+    ./cadapt $COMMAND enwik9 -o enwik9.adpt
+Decompress (no option changes the output; the container names its model):
+    ./cadapt decode enwik9.adpt -o enwik9
+Inspect a container:
+    ./cadapt info enwik9.adpt
+
+The decoder allocates the model the container's header names
+$MEMORY. Sizes, times and hashes are in manifest.json. The
+sources are not published; the binary is the entry, and anyone may run it
+on enwik8 and enwik9 to reproduce the sizes in the manifest.
+EOF
+
+#    the zip the benchmark counts: the decompressor and what it needs at run time — the binary alone
+#    runs; the licence names the terms and the note tells a verifier the commands
+( cd "$OUT" && rm -f "cadapt-$VERSION-linux-x86_64.zip" && zip -9 -q "cadapt-$VERSION-linux-x86_64.zip" cadapt README-ltcb.txt LICENSE )
+
 # 5. hashes and the manifest
 ( cd "$OUT" && sha256sum cadapt "cadapt-$VERSION-linux-x86_64.zip" containers/* 2>/dev/null > SHA256SUMS || true )
-python3 - "$OUT" "$VERSION" "$FULL" <<'EOF'
+python3 - "$OUT" "$VERSION" "$FULL" "$COMMAND" <<'EOF'
 import hashlib, json, os, platform, re, subprocess, sys, datetime
-out, version, commit = sys.argv[1], sys.argv[2], sys.argv[3]
+out, version, commit, command = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 def sha(p):
     h = hashlib.sha256()
     with open(p, "rb") as f:
@@ -127,9 +144,9 @@ if os.path.exists(check):
         m = re.match(r"PASS (\S+) size: ([\d,]+) B", line)
         if m:
             results.setdefault(m.group(1), {})["container_bytes"] = int(m.group(2).replace(",", ""))
-        m = re.match(r"PASS (\S+) throughput: ([\d,]+) B/s in ([\d,.]+) s", line)
+        m = re.match(r"PASS (\S+) throughput: ([\d,]+) B/s in ([\d,.]+) (cpu|wall) s", line)
         if m:
-            results.setdefault(m.group(1), {})["encode_seconds"] = float(m.group(3).replace(",", ""))
+            results.setdefault(m.group(1), {})[f"encode_{m.group(4)}_seconds"] = float(m.group(3).replace(",", ""))
         m = re.match(r"PASS (\S+) round trip verified", line)
         if m:
             results.setdefault(m.group(1), {})["round_trip"] = "verified byte for byte"
@@ -139,7 +156,7 @@ manifest = {
     "program": f"cadapt {version}",
     "commit": commit,
     "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-    "command": "cadapt encode --max --allocation context <input> -o <output>; cadapt decode <output>",
+    "command": f"cadapt {command} <input> -o <output>; cadapt decode <output>",
     "decompressor": files,
     "counted_zip": f"cadapt-{version}-linux-x86_64.zip",
     "sources_published": False,

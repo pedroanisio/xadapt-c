@@ -75,7 +75,7 @@ refuses versions 10–18. The header of
 | [sbom.spdx.json](sbom.spdx.json), [build-manifest.json](build-manifest.json) | What the codec is made of, and the build it reproduces |
 | [LICENSE](LICENSE), [SECURITY.md](SECURITY.md), [SUPPORT.md](SUPPORT.md), [CHANGELOG.md](CHANGELOG.md) | The terms, the security policy, what support exists, and what changed |
 | [CLAUDE.md](CLAUDE.md) | Working rules for contributors and agents |
-| [Makefile](Makefile) | The root targets: build, `test`, `check`, `gate`, `ratio-floor`, `sbom`, `manifest`, `reproduce`, `ltcb` |
+| [Makefile](Makefile) | The root targets: build, `test`, `check`, `sanitize`, `coverage`, `gate`, `corpus-floor`, `memory-gate`, `ratio-floor`, `release`, `test-install`, `sbom`, `manifest`, `reproduce`, `ltcb` |
 
 ## Build
 
@@ -105,11 +105,11 @@ From a checkout or the source tarball, `make install PREFIX=/usr/local`
 (`DESTDIR=` for a staging root; `make uninstall` removes exactly what it
 placed). Nothing but a C99 compiler and `make` is needed.
 
-Two more targets live in [adpat/c/Makefile](adpat/c/Makefile): `make coverage`
-(the branch-coverage gate on its own) and `make sanitize` (the C suites under
-the sanitizers); both are described under *Tests and gates*.
+Three more targets, `make coverage` (the branch-coverage gate on its own),
+`make sanitize` (the C suites under the sanitizers) and `make check-long`
+(the CLI suite's long cases), are described under *Tests and gates*.
 
-The root `Makefile` forwards these to [adpat/c/Makefile](adpat/c/Makefile),
+The root `Makefile` forwards all of these to [adpat/c/Makefile](adpat/c/Makefile),
 which honours `CC`, `CFLAGS`, `LDFLAGS` and `BUILD=`. The defaults are the
 strictest the code is written for: `-std=c99 -O3 -Wall -Wextra -Wpedantic
 -Werror`. Two build switches:

@@ -8,9 +8,12 @@ BUILD ?= build
 CODEC_BUILD = $(if $(filter /%,$(BUILD)),$(BUILD),adpat/c/$(BUILD))
 GATE_ARGS ?=
 FLOOR_ARGS ?=
-.PHONY: all test check check-parts clean install uninstall bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor memory-gate release test-install ltcb ltcb-release
+.PHONY: all test check check-parts clean install uninstall sanitize coverage check-long bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor memory-gate release test-install ltcb ltcb-release
 
-all test clean install uninstall:
+# Forwarded to the codec's Makefile as written: SUPPORT.md and SECURITY.md
+# say `make sanitize`, and the documents' tests hold every cited target to
+# the Makefile it is invoked in.
+all test clean install uninstall sanitize coverage check-long:
 	$(MAKE) -C adpat/c $@
 
 # The gate is held to CHECK_SECONDS of wall time (LOCKS.md, 2026-09-15):

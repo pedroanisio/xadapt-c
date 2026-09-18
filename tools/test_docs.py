@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """The documents against the code they describe.
 
-Source: Claude Opus 5 via Claude Code, 2026-09-15 (the doc-hygiene audit,
-docs/doc-hygiene-report-2026-09-15.md). Each test pins one thing a document
-hand-copies from a source of truth: the README's usage block against
-`cadapt --help`, the flags of the manual and the README against the binary,
-the container versions of adapt.h against the README and the manual, the
-floors block against tools/ratio_floor.json (render_floors.py), the README's
-layout table against the tracked tree, and every relative link against the
-tree. A failure names what moved.
+Source: Claude Opus 5 via Claude Code, 2026-09-15 (a doc-hygiene audit of
+that day, not committed) and 2026-09-18 (docs/doc-hygiene-report-2026-09-18.md).
+Each test pins one thing a document hand-copies from a source of truth: the
+README's usage block against `cadapt --help`, the flags of the manual and the
+README against the binary, the container versions of adapt.h against the
+README and the manual, the floors blocks against tools/ratio_floor.json
+(render_floors.py), the README's layout table against the tracked tree, every
+relative link and every backticked path against the tree (or the script that
+writes it), every cited `make` target against the Makefile it is invoked in,
+the changelog's top entry against CADAPT_VERSION and the tag, and the research
+index against the notes. A failure names what moved.
 
     python3 -B -m unittest discover -s tools -p 'test_docs.py'
 
@@ -34,6 +37,9 @@ import render_floors as floors  # noqa: E402
 README = ROOT / "README.md"
 MANUAL = ROOT / "adpat" / "c" / "cadapt.1"
 HEADER = ROOT / "adpat" / "c" / "adapt.h"
+SOURCE = ROOT / "adpat" / "c" / "cadapt.c"
+CHANGELOG = ROOT / "CHANGELOG.md"
+RESEARCH = ROOT / "research"
 CADAPT = Path(os.environ.get("CADAPT", ROOT / "adpat" / "c" / "build" / "cadapt"))
 FLAG = re.compile(r"--[a-z][a-z-]*")
 
@@ -41,6 +47,40 @@ FLAG = re.compile(r"--[a-z][a-z-]*")
 def tracked() -> list[str]:
     out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
     return out.split()
+
+
+def tracked_documents() -> list[str]:
+    """Every tracked Markdown file and the manual page."""
+    return [path for path in tracked() if path.endswith(".md")] + ["adpat/c/cadapt.1"]
+
+
+def dated_record(path: str) -> bool:
+    """A document that declares itself true of its date and not kept
+    current: the changelog, the lock log, the dated audits under docs/ and
+    every research note but the index and the CSV note (research/README.md)."""
+    name = path.rsplit("/", 1)[-1]
+    if path in ("CHANGELOG.md", "LOCKS.md"):
+        return True
+    if path.startswith("research/"):
+        return name not in ("README.md", "ltcb-tables.md")
+    return path.startswith("docs/") and re.search(r"-\d{4}-\d{2}-\d{2}\.md$", name) is not None
+
+
+def cadapt_version() -> str:
+    match = re.search(r'^#define CADAPT_VERSION "([^"]+)"', SOURCE.read_text(encoding="utf-8"), flags=re.M)
+    if match is None:
+        raise AssertionError(f"{SOURCE}: no CADAPT_VERSION")
+    return match.group(1)
+
+
+def make_targets(makefile: Path) -> set[str]:
+    """The names a rule line of the Makefile makes: `a b c:` names three."""
+    names: set[str] = set()
+    for line in makefile.read_text(encoding="utf-8").split("\n"):
+        match = re.match(r"^([a-z][a-z -]*):(?!=)", line)
+        if match:
+            names.update(match.group(1).split())
+    return names
 
 
 def help_text() -> str:
@@ -170,6 +210,99 @@ class GoalTest(unittest.TestCase):
                        f"{least_mb:,.0f} MB", least_who, "tools/ltcb/ltcb_goal.py"):
             self.assertIn(figure, section, f"the README's benchmark section does not state {figure!r}")
         self.assertTrue(g.leads_memory_above, "the README claims the least memory above; the snapshot says otherwise")
+
+
+class ChangelogTest(unittest.TestCase):
+    def test_top_entry_is_the_source_version_and_the_tag(self) -> None:
+        """The first versioned heading names CADAPT_VERSION with a date; when
+        HEAD carries a release tag it is v<that version> and nothing waits
+        under [Unreleased]."""
+        text = CHANGELOG.read_text(encoding="utf-8")
+        headings = re.findall(r"^## \[([^\]]+)\](?: — (\S+))?", text, flags=re.M)
+        self.assertEqual(headings[0][0], "Unreleased", "CHANGELOG.md does not open with [Unreleased]")
+        version, date = headings[1]
+        self.assertEqual(version, cadapt_version(), f"CHANGELOG.md's top entry is {version}, cadapt.c says {cadapt_version()}")
+        self.assertRegex(date, r"^\d{4}-\d{2}-\d{2}$", f"the {version} entry has no date")
+        tag = subprocess.run(["git", "describe", "--exact-match", "--tags", "HEAD"], cwd=ROOT, capture_output=True, text=True)
+        if tag.returncode != 0:
+            return  # not a tagged commit: the entry may be in the making
+        self.assertEqual(tag.stdout.strip(), f"v{version}", f"HEAD is tagged {tag.stdout.strip()}, the changelog says {version}")
+        unreleased = text[text.index("## [Unreleased]") : text.index(f"## [{version}]")]
+        self.assertNotIn("\n- ", unreleased, "a tagged commit leaves nothing under [Unreleased]")
+
+
+class MakeTargetsTest(unittest.TestCase):
+    def test_every_cited_make_target_exists_where_it_is_cited(self) -> None:
+        """`make x` cited in backticks is a rule of the root Makefile, and
+        `make -C adpat/c x` one of the codec's; the changelog's entries are
+        history and are not held."""
+        root, codec = make_targets(ROOT / "Makefile"), make_targets(ROOT / "adpat" / "c" / "Makefile")
+        citation = re.compile(r"`make(?: (-C adpat/c))?(?: -j\d*)?(?: [A-Z_]+=\S+)* ([a-z][a-z-]*)[^`]*`")
+        problems = []
+        for path in tracked_documents():
+            if path == "CHANGELOG.md":
+                continue
+            text = (ROOT / path).read_text(encoding="utf-8")
+            for line_number, line in enumerate(text.split("\n"), 1):
+                for directory, target in citation.findall(line):
+                    known = codec if directory else root
+                    if target not in known:
+                        problems.append(f"{path}:{line_number}: `make {directory + ' ' if directory else ''}{target}` is not a rule of "
+                                        f"{'adpat/c/Makefile' if directory else 'Makefile'}")
+        self.assertEqual(problems, [])
+
+
+class PathsTest(unittest.TestCase):
+    # what a document may name that the tree does not hold: an install
+    # layout, a build or release directory, a run's output, an absolute path
+    OUTPUT_PREFIXES = ("bin/", "lib/", "include/", "share/", "build", "dist/", "_tmp", "out/", "runs/", "plots/",
+                       "containers/", "/", "adpat/c/build")
+    SUFFIX = re.compile(r"\.(c|h|py|sh|json|md|1|yml|yaml|csv|txt|zip|svg|png|html)$")
+
+    def test_every_backticked_path_in_a_living_document_resolves(self) -> None:
+        """A backticked token with a slash or a source suffix names a tracked
+        file or directory (by its path, relative to the document, or by its
+        bare name), a corpus file the corpus manifests name, or a file a
+        tracked script writes (by its name or its stem: the scripts build
+        `ltcb-phases.png` from `ltcb-phases.svg`, and the release's
+        `cadapt-<version>-…` from `$VERSION`). Dated records are true of
+        their date and are not held; CLAUDE.md names files that apply when
+        present and is policy, not a description of the tree."""
+        files = tracked()
+        paths = set(files)
+        directories = {str(parent) for path in files for parent in Path(path).parents if str(parent) != "."}
+        basenames = {Path(path).name for path in files}
+        writers = "\n".join((ROOT / path).read_text(encoding="utf-8", errors="replace") for path in files
+                             if path.endswith((".py", ".sh", ".yml")) or path.endswith("Makefile")
+                             or (path.startswith("static/corpus/") and path.endswith(".json")))
+        version = cadapt_version()
+        problems = []
+        for doc in tracked_documents():
+            if dated_record(doc) or doc == "CLAUDE.md":
+                continue
+            text = (ROOT / doc).read_text(encoding="utf-8")
+            for token in sorted(set(re.findall(r"`([A-Za-z0-9_./-]+)`", text))):
+                if "/" not in token and not self.SUFFIX.search(token):
+                    continue
+                if token.startswith(self.OUTPUT_PREFIXES) or re.fullmatch(r"[\d/kn]+", token):
+                    continue
+                name = token.rstrip("/")
+                candidates = {name, name.lstrip("./"), str(Path(doc).parent / name)}
+                if candidates & paths or candidates & directories or Path(name).name in basenames:
+                    continue
+                leaf = Path(name).name.replace(version, "$VERSION")
+                if leaf in writers or Path(leaf).stem in writers:
+                    continue  # written by a tool of the tree, or a corpus row its manifest names
+                problems.append(f"{doc}: `{token}`")
+        self.assertEqual(problems, [], "paths named by a document that neither the tree nor a tool of the tree holds")
+
+
+class ResearchIndexTest(unittest.TestCase):
+    def test_every_research_note_is_indexed(self) -> None:
+        index = (RESEARCH / "README.md").read_text(encoding="utf-8")
+        for path in sorted(RESEARCH.glob("*.md")):
+            if path.name != "README.md":
+                self.assertTrue(f"({path.name})" in index, f"research/README.md does not link {path.name}")
 
 
 class LayoutTest(unittest.TestCase):

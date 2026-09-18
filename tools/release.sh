@@ -70,7 +70,10 @@ git archive "$FULL" adpat/c tools docs Makefile LICENSE README.md CHANGELOG.md S
 rm -rf "$SRC/adpat/c/build" "$SRC/tools/__pycache__"
 ( cd "$WORK" && tar -czf "$OUT/cadapt-$VERSION-src.tar.gz" "cadapt-$VERSION" )
 
-# 2. the build, its tests, and the record of it
+# 2. the build, its tests, and the record of it — after the documents'
+#    floors blocks (the README, the manual, this version's release notes,
+#    which become the published release's body) are proven current
+( cd "$SRC" && python3 -B tools/render_floors.py check ) || { echo "the floors blocks are stale in $REV: run python3 tools/render_floors.py update and commit" >&2; exit 1; }
 ( cd "$SRC/adpat/c" && make -s all ) > "$OUT/build.log" 2>&1 || { cat "$OUT/build.log"; exit 1; }
 if [ "$TESTS" = 1 ]; then
     ( cd "$SRC/adpat/c" && make -s test ) >> "$OUT/build.log" 2>&1 || { cat "$OUT/build.log"; exit 1; }

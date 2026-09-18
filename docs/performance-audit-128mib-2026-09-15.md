@@ -1,6 +1,25 @@
 # Performance audit — cadapt `--max` within 128 MiB, toward 17 MB on enwik8
 
-> **Status, 2026-09-15 (kept current by whoever lands or rejects an item).**
+> **Status, 2026-09-18 (9109c3f, cadapt 0.12.0).** A dated record: true of
+> the code on 2026-09-15, its status brought forward here and not promised
+> beyond it; the decisions are in `LOCKS.md`. Landed since 2026-09-15: item
+> 7 as the second max model's int16 arbiters (`LOCKS.md` 2026-09-15, bit 7
+> of the sizing byte: −0.11 % bytes at −10.4 % instructions — the earlier
+> 16-bit form the changelog records as rejected lost 8.2 %; the rounding is
+> what made it pay), with four re-purposed context slots, a four-way recall
+> bucket (item 9's reach, in the same table) and a fifth first-layer
+> arbiter; item 13's mechanism, the first-block trial, proving the
+> class-history width (2026-09-15) and choosing the arbiters' keys per file
+> — the keyed arbiters, versions 80–83 for `--max` (2026-09-16) and 84/85
+> for the normal profile (2026-09-17); `--contexts lean` (2026-09-16), on
+> which the floors are locked; the mid profile (2026-09-16, opt-in); and
+> the default allocation growing the table before the window where the
+> window would starve it (2026-09-17). Measured and not taken since: a
+> window halved for a table eighth (2026-09-15). Items 3, 8, 15–19 and 21
+> stand as written. At 9109c3f the floors are enwik8 17,800,141 B and
+> enwik9 145,784,134 B under `--max --allocation context --contexts lean`.
+>
+> **Status, 2026-09-15.**
 > Landed: items 1 and 2 as the compact side tables, versions 53/56 (f9300d6,
 > `LOCKS.md`), followed by the lean context set (195efae) and the sized table
 > (e71fc23, versions 58/61); item 20's family as the online text transform
