@@ -600,6 +600,9 @@
     "research/ltcb-textdata-text8-fil9.csv": {
       "classification": "production"
     },
+    "research/ltcb-time-study.md": {
+      "classification": "documentation"
+    },
     "sbom.spdx.json": {
       "classification": "production"
     },

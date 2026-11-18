@@ -9,6 +9,8 @@ about the current encoder or live external rankings.
 - [Additional measurements](ltcb-local-entries.csv): historical codec measurements,
   separate from the published table.
 - [Schema and reproduction](ltcb-tables.md): column meanings and rendering commands.
+- [Time study](ltcb-time-study.md): the design that beats the time of place 39 within
+  1 GiB, with its measured sizes.
 
 Algorithm and format guidance is in [ADAPTIVE.md](../docs/ADAPTIVE.md),
 [MODEL.md](../docs/MODEL.md), and the [format reference](../README.md#format).
