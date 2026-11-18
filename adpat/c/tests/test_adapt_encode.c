@@ -43,8 +43,8 @@ static const char *vectors_dir;
 
 /* The versions a current max encode writes: 86 with the classic arbiter
  * keys, 87 and 88 with the text and binary key policies, whichever the
- * first block chose — the models of 72, 80 and 81 under the sixteen-bit
- * coder (adapt.h, ADAPT_MAX_PRECISE_VERSION). */
+ * first block chose — the models of 72, 80 and 81, each block under the
+ * twelve-bit or the sixteen-bit coder (adapt.h, ADAPT_MAX_PRECISE_VERSION). */
 static int is_max_version(uint8_t version) {
     return version == ADAPT_MAX_PRECISE_VERSION || version == ADAPT_MAX_PRECISE_KEYS_VERSION ||
            version == ADAPT_MAX_PRECISE_KEYS_BINARY_VERSION;
@@ -1414,16 +1414,13 @@ static void test_segments(void) {
 }
 
 /* The arbiters' key policy is the encoder's choice from the first block
- * (choose_keys): text.bin takes the text keys (version 87) and
- * samples.bin, sixteen-bit samples of a random walk, the binary keys
- * (88), whatever the caller's sizes say (the source is 4096 little-endian
- * int16 values v, from 0, each v + (x >> 16) % 257 - 128 held to +-30000,
- * x the generator x = (1103515245 x + 12345) mod 2^31 from 12345); each decodes; a header's policy
- * and coder are what the sizes read back; the max profile's adaptive
- * variant keeps the classic keys, the twelve-bit coder and its own
- * version. */
+ * (choose_keys): text.bin takes the text keys (version 87) and abc.bin,
+ * a repeating pattern recall predicts, the binary keys (88), whatever
+ * the caller's sizes say; each decodes; a header's policy and coder are
+ * what the sizes read back; the max profile's adaptive variant keeps the
+ * classic keys, the twelve-bit coder and its own version. */
 static void test_keys_choice(void) {
-    static const char *const sources[2] = {"text.bin", "samples.bin"};
+    static const char *const sources[2] = {"text.bin", "abc.bin"};
     static const uint8_t versions[2] = {ADAPT_MAX_PRECISE_KEYS_VERSION, ADAPT_MAX_PRECISE_KEYS_BINARY_VERSION};
     static const uint8_t policies[2] = {ADAPT_KEYS_TEXT, ADAPT_KEYS_BINARY};
     size_t which;
@@ -1472,6 +1469,38 @@ static void test_keys_choice(void) {
         CHECK(parsed.keys == ADAPT_KEYS_CLASSIC && parsed.precise == 0);
         free(coded);
         free(src);
+    }
+}
+
+/* The precise coder against the twelve-bit one, file for file: the trials
+ * measure the twelve-bit coding, so a version 86 to 88 file names the
+ * model its version 72, 80 or 81 counterpart names, and every block is
+ * the shorter of its two codings, so the file is never the longer. The
+ * committed max3 vectors are the twelve-bit files of the same sources. */
+static void test_precise_never_longer(void) {
+    static const char *const pairs[2][3] = {{"text-max3.adpt", "text-max4.adpt", "text.bin"},
+                                            {"abc-max3.adpt", "abc-max4.adpt", "abc.bin"}};
+    size_t which;
+    for (which = 0; which < 2; which++) {
+        size_t old_len, new_len;
+        uint8_t *old = read_file(pairs[which][0], &old_len);
+        uint8_t *now = read_file(pairs[which][1], &new_len);
+        adapt_sizes was, is;
+        adapt_error error;
+        CHECK_STATUS(adapt_read_header(old, old_len, &was, &error), ADAPT_OK);
+        CHECK_STATUS(adapt_read_header(now, new_len, &is, &error), ADAPT_OK);
+        CHECK(new_len <= old_len);
+        CHECK(was.precise == 0 && is.precise == 1);
+        CHECK(was.table_log == is.table_log && was.match_log == is.match_log && was.window_log == is.window_log &&
+              was.class_code == is.class_code && was.set_code == is.set_code && was.keys == is.keys &&
+              was.period == is.period && was.lean == is.lean && was.compact == is.compact &&
+              was.table_frac == is.table_frac && was.text == is.text && was.low_start == is.low_start &&
+              was.model2 == is.model2);
+        /* the header differs in its version byte alone */
+        CHECK(adapt_header_len(old) == adapt_header_len(now) && old[4] + 7 == now[4]);
+        CHECK(memcmp(old + 5, now + 5, adapt_header_len(old) - 5) == 0);
+        free(old);
+        free(now);
     }
 }
 
@@ -2244,7 +2273,9 @@ int main(int argc, char **argv) {
     SHARD(test_vector_profile("text-keyed.adpt", "text.bin", 0));
     SHARD(test_vector_profile("text-fast.adpt", "text.bin", 1));
     SHARD(test_vector_profile("text-max4.adpt", "text.bin", 2));
-    SHARD(test_vector_profile("samples-max4.adpt", "samples.bin", 2));
+    SHARD(test_vector_profile("cyrillic-max4.adpt", "cyrillic.bin", 2));
+    SHARD(test_vector_profile("gradient-max4.adpt", "gradient.bmp", 2));
+    SHARD(test_precise_never_longer());
     SHARD(test_vector_profile("text-mid.adpt", "text.bin", 3));
     SHARD(test_mid_profile());
     SHARD(test_vector_profile("records-keyed.adpt", "records.bin", 0));

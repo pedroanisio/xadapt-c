@@ -686,23 +686,46 @@ static int model_has_repeat(const model *m, const uint8_t *block, size_t n, uint
  * to store is made only after measuring all of it; once the coded prefix
  * alone exceeds the raw size it cannot shrink, so the rest is observed
  * without retaining unusable output. Returns the payload length, or 0
- * when the raw block wins — both sides still observe every byte then. */
-static size_t code_block(model *m, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap) {
-    arith_enc e;
-    size_t i, payload;
+ * when the raw block wins — both sides still observe every byte then.
+ *
+ * Under the precise coder (ADAPT_MAX_PRECISE_VERSION) the block is coded
+ * twice from the one pass of the model — by the twelve-bit probabilities
+ * into `coded` and by the sixteen-bit ones into `wide`, `wide_cap` bytes
+ * of scratch, at least n — and the shorter payload is the block's, the
+ * twelve-bit one on a tie: `*precise` says which, and the payload is in
+ * `coded` either way. A block is therefore never longer than the
+ * twelve-bit coder alone writes it. `wide` may be NULL elsewhere. A
+ * coding that reaches n bytes has lost to the raw block, so n bytes of
+ * scratch are enough: past them the coder counts and writes nothing. */
+static size_t code_block(model *m, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap, uint8_t *wide,
+                         size_t wide_cap, int *precise) {
+    arith_enc e, e16;
+    const int dual = m->precise && wide != NULL;
+    size_t i, payload, payload16;
+    int ok, ok16;
     arith_enc_init(&e, coded, coded_cap);
+    arith_enc_init(&e16, wide, dual ? wide_cap : 0);
+    *precise = 0;
     for (i = 0; i < n; i++) {
-        if (e.len >= n) {
+        if (e.len >= n && (!dual || e16.len >= n)) {
             observe_bytes(m, block + i, 1);
             continue;
         }
-        encode_byte(m, &e, block[i]);
+        encode_byte(m, &e, dual ? &e16 : NULL, block[i]);
     }
     payload = arith_enc_finish(&e);
-    if (e.overflow || payload >= n) {
-        return 0;
+    ok = !e.overflow && payload < n;
+    if (!dual) {
+        return ok ? payload : 0;
     }
-    return payload;
+    payload16 = arith_enc_finish(&e16);
+    ok16 = !e16.overflow && payload16 < n;
+    if (ok16 && (!ok || payload16 < payload)) {
+        memcpy(coded, wide, payload16);
+        *precise = 1;
+        return payload16;
+    }
+    return ok ? payload : 0;
 }
 
 /* Code one block of `n` bytes that begins `position` bytes into the
@@ -726,9 +749,13 @@ static size_t frame_block(model *m, adapt_sizes sizes, uint8_t *block, size_t n,
         payload_len = n;
         method = METHOD_STORED_SKIPPED;
     } else {
-        payload_len = code_block(m, block, n, framed + ADAPT_BLOCK_HEADER_BYTES, framed_cap - ADAPT_BLOCK_HEADER_BYTES);
+        /* the repeat scan's slots are free once the scan is done: they
+         * are the second coding's scratch, a block's length of bytes */
+        int precise;
+        payload_len = code_block(m, block, n, framed + ADAPT_BLOCK_HEADER_BYTES, framed_cap - ADAPT_BLOCK_HEADER_BYTES,
+                                 (uint8_t *)scan, SCAN_SLOTS * sizeof(uint32_t), &precise);
         if (payload_len != 0) {
-            method = METHOD_MODELED;
+            method = precise ? METHOD_MODELED_PRECISE : METHOD_MODELED;
         } else {
             memcpy(framed + ADAPT_BLOCK_HEADER_BYTES, block, n);
             payload_len = n;
@@ -795,11 +822,16 @@ typedef struct trial_job {
 static void trial_run(trial_job *j) {
     model *m = model_new(j->sizes);
     size_t payload;
+    int precise;
     if (m == NULL) {
         j->failed = 1;
         return;
     }
-    payload = code_block(m, j->sample, j->n, j->coded, j->coded_cap);
+    /* A trial measures the twelve-bit coding alone, under the precise
+     * coder too: the model chosen for a file is then the one versions 72,
+     * 80 and 81 were given, and since no block is longer under the
+     * precise coder than under theirs, neither is the file. */
+    payload = code_block(m, j->sample, j->n, j->coded, j->coded_cap, NULL, 0, &precise);
     j->size = payload == 0 ? j->n : payload;
     model_free(m);
 }
@@ -1683,7 +1715,7 @@ static void verify_segment(segment_job *j) {
             j->status = fail_verification(&j->error, &cause);
             break;
         }
-        if (method > METHOD_STORED_SKIPPED || raw > j->n - seen) {
+        if (!method_is_block(method) || raw > j->n - seen) {
             fail(&cause, ADAPT_ERROR_BAD_BLOCK, 0, 0);
             j->status = fail_verification(&j->error, &cause);
             break;
@@ -2117,7 +2149,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
      * The adaptive and BMP variants of the max profile have no sizing byte
      * and keep the first model, whatever the caller's sizes say. */
     sizes.model2 = (uint8_t)(sizes.max && !sizes.adaptive && !sizes.bmp);
-    /* and with it the sixteen-bit coder (ADAPT_MAX_PRECISE_VERSION) */
+    /* and with it the precise coder (ADAPT_MAX_PRECISE_VERSION) */
     sizes.precise = sizes.model2;
     if (!sizes_valid(sizes)) {
         return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);

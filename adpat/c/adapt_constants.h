@@ -218,6 +218,11 @@ static const char *const CONTEXT_NAMES[HASHED] = {"o1",    "o2",     "o3",      
  * the byte before its segment table. */
 #define METHOD_SEGMENT 4
 #define METHOD_TABLE 5
+/* A modeled block whose payload the coder split by sixteen-bit
+ * probabilities (ADAPT_MAX_PRECISE_VERSION); METHOD_MODELED is the same
+ * block under the twelve-bit coder. Only a version of the precise coder
+ * carries it. */
+#define METHOD_MODELED_PRECISE 6
 #define TRAILER_PAYLOAD 12
 /* Slots of the encoder's per-block repeat scan; counted in the workspace
  * bound the two sides share. */

@@ -16,8 +16,11 @@ Versions 58/61 can identify two historical predictors for small tables. The
 decoder tries them sequentially and checks the recovered checksum before
 publishing bytes. One model is live at a time; tentative output uses temporary
 storage. Versions 72/75 distinguish the current predictor without this fallback.
-Versions 86–91 are the models of 72, 80 and 81 with the final probability
-coded in 16 bits; versions 19–85 keep the 12-bit coder they were written with.
+Versions 86–91 are the models of 72, 80 and 81; each modeled block is coded
+with 12-bit and with 16-bit probabilities and carries the shorter payload, its
+method byte naming the coder. First-block trials measure the 12-bit coding, so
+the model chosen equals the one versions 72, 80 and 81 were given and a file is
+never larger than under them. Versions 19–85 keep the 12-bit coder alone.
 
 Integer rounding, update order, context hashes and policy bits are format
 semantics. The baseline and accelerated instruction paths, compilers and

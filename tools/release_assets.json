@@ -225,7 +225,7 @@
     "adpat/c/tests/vectors/abc-max4.adpt": {
       "classification": "production",
       "content": "fixture",
-      "sha256": "c11ffe7c9bebd09b341fdc5930f7c3e72a8d3fb970bf1502d82018dbbb8deb6f"
+      "sha256": "a5dbf5b07148c985404edfe89b90ad2bcacbe47c00aa1afcd89faaa7810347e9"
     },
     "adpat/c/tests/vectors/abc.adpt": {
       "classification": "production",
@@ -256,6 +256,11 @@
       "classification": "production",
       "content": "fixture",
       "sha256": "c2272d38db710b509e46f257128824e44227d9b1cb98783f6727b500a426f5d2"
+    },
+    "adpat/c/tests/vectors/cyrillic-max4.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "8f4fdaac4855fa1e67e9a5eb29de94d2f570abc181a2c9f704deb940b3c5e4ff"
     },
     "adpat/c/tests/vectors/cyrillic.adpt": {
       "classification": "production",
@@ -317,10 +322,20 @@
       "content": "fixture",
       "sha256": "f175ba990d2dc6d46f7f8f68be38423e0494c191af0373abe8601bd4db92400b"
     },
+    "adpat/c/tests/vectors/gradient-max4.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "b745f5028651f279aa0c5d461678406efde7b5da3679c072f7214627f512f87f"
+    },
     "adpat/c/tests/vectors/gradient.bmp": {
       "classification": "production",
       "content": "fixture",
       "sha256": "c2059814578481065d699072a7dcdc91db325f500af91ddb426bb921bea6585d"
+    },
+    "adpat/c/tests/vectors/hello-max4.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "188908e30133dd409db3f77ac8eadc963fc40ac7a2ad370ece9f0c88aa63c46f"
     },
     "adpat/c/tests/vectors/hello.adpt": {
       "classification": "production",
@@ -366,16 +381,6 @@
       "classification": "production",
       "content": "fixture",
       "sha256": "e851e1157c4e4e99b6f707d2568d3853052044ef5ec4b6562d3e798fa3406032"
-    },
-    "adpat/c/tests/vectors/samples-max4.adpt": {
-      "classification": "production",
-      "content": "fixture",
-      "sha256": "c2241395742a70c8b0e3fcf6b7fe13eb62bfb55b8a1a168eaf510504e955c3b8"
-    },
-    "adpat/c/tests/vectors/samples.bin": {
-      "classification": "production",
-      "content": "fixture",
-      "sha256": "70949674019cec6d2494b7ffafd834606fed23506074a9424efffe216c17a691"
     },
     "adpat/c/tests/vectors/segmented-keyed.adpt": {
       "classification": "production",
@@ -470,7 +475,7 @@
     "adpat/c/tests/vectors/text-max4.adpt": {
       "classification": "production",
       "content": "fixture",
-      "sha256": "952ef7bd1f758207913a1975dd4c1a3a630bcde7b6f913ba28681f58e9101e8d"
+      "sha256": "e34d2046e09e529deef5e2318aaca38a8e2a438c262627970b21f117baf39d7e"
     },
     "adpat/c/tests/vectors/text-mid-words.adpt": {
       "classification": "production",

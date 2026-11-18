@@ -110,6 +110,7 @@ static inline adapt_status parse_block_header(const uint8_t *header, uint8_t *me
     }
     switch (m) {
         case METHOD_MODELED:
+        case METHOD_MODELED_PRECISE:
             if (!(p >= 4 && p < r)) {
                 return fail(error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
             }
@@ -347,6 +348,12 @@ static inline adapt_status counter_end(const segment_counter *c, adapt_error *er
     return ADAPT_OK;
 }
 
+/* Whether a method byte is a block's — stored, modeled, or modeled under
+ * the precise coder — rather than a marker's. */
+static inline int method_is_block(uint8_t method) {
+    return method <= METHOD_STORED_SKIPPED || method == METHOD_MODELED_PRECISE;
+}
+
 typedef struct block_decoder {
     model *m;
 } block_decoder;
@@ -356,10 +363,16 @@ typedef struct block_decoder {
 static inline adapt_status decode_block(block_decoder *d, uint8_t method, size_t raw, const uint8_t *payload, size_t payload_len,
                                  uint8_t *out, adapt_error *error) {
     switch (method) {
+        case METHOD_MODELED_PRECISE:
+            /* only a version of the precise coder carries it */
+            if (!d->m->precise) {
+                return fail(error, ADAPT_ERROR_BAD_METHOD, method, 0);
+            }
+            /* fall through */
         case METHOD_MODELED: {
             arith a;
             arith_init(&a, payload, payload_len);
-            decode_bytes(d->m, &a, raw, out);
+            decode_bytes(d->m, &a, raw, out, method == METHOD_MODELED_PRECISE);
             if (!arith_consumed_exactly(&a)) {
                 return fail(error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
             }

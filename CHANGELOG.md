@@ -16,9 +16,12 @@ and `adapt_version_info` gained the field `precise`.
 ### Added
 
 - Container versions 86 to 88 (89 to 91 with metadata): the max-profile models
-  of versions 72, 80 and 81 with the final probability passed to the arithmetic
-  coder in 16 bits instead of 12. Every max encode that is neither adaptive nor
-  BMP writes them. `cadapt info` reports the coder's probability width.
+  of versions 72, 80 and 81, whose modeled blocks can pass the final probability
+  to the arithmetic coder in 16 bits instead of 12. The encoder codes each block
+  both ways in one pass and keeps the shorter payload, and it chooses the model
+  as 0.12.0 does, so a max container is never larger than the one 0.12.0 writes
+  for the same input and options. Every max encode that is neither adaptive nor
+  BMP writes these versions. `cadapt info` reports the coder.
 - `--threads n` with n of at least two runs the independent first-block model
   trials concurrently, within the memory already granted to the workers. The
   container bytes equal those of the sequential trials.

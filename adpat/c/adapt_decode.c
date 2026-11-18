@@ -1034,7 +1034,7 @@ static void *decode_segment(void *arg) {
         /* a block the segment's bytes cut short is the table's fault: the
          * file itself was whole */
         if (read_block(j->coded, j->coded_len, &pos, &method, &raw, &payload, &payload_len, &j->error) != ADAPT_OK ||
-            method > METHOD_STORED_SKIPPED || raw > j->raw - j->produced) {
+            !method_is_block(method) || raw > j->raw - j->produced) {
             j->status = fail(&j->error, ADAPT_ERROR_BAD_BLOCK, 0, 0);
             break;
         }

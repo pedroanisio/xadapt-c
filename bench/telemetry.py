@@ -580,12 +580,13 @@ def inspect_container(path: Path) -> dict[str, Any]:
                 if int.from_bytes(read(4), "little") != result["segments"]:
                     raise ValueError("inconsistent segment count")
                 table_seen = True
-            elif method in (0, 1, 2) and not table_seen:
+            elif method in (0, 1, 2, 6) and not table_seen:
                 block = read(8)
                 raw, payload = int.from_bytes(block[:4], "little"), int.from_bytes(block[4:], "little")
                 if not 0 < raw <= 262144 or not 0 < payload <= 262144 or source.tell() + payload > size:
                     raise ValueError("invalid block lengths")
-                result[("stored_observed_blocks", "modeled_blocks", "stored_skipped_blocks")[method]] += 1
+                # method 6 is a modeled block under the sixteen-bit coder (versions 86 to 91)
+                result[{0: "stored_observed_blocks", 1: "modeled_blocks", 2: "stored_skipped_blocks", 6: "modeled_blocks"}[method]] += 1
                 result["payload_bytes"] += payload
                 total += raw
                 source.seek(payload, 1)

@@ -1935,7 +1935,7 @@ static int info_command(int argc, char **argv) {
     if (!sizes.fast && !sizes.mid) {
         printf("arbiter keys    %s\n", sizes.keys == ADAPT_KEYS_TEXT ? "classes and nesting" : sizes.keys == ADAPT_KEYS_BINARY ? "classes and recall" : "classic");
     }
-    printf("coder           %u-bit probabilities\n", sizes.precise ? ADAPT_CODER_BITS_PRECISE : ADAPT_CODER_BITS);
+    printf("coder           %s\n", sizes.precise ? "12-bit or 16-bit probabilities, by block" : "12-bit probabilities");
     if (sizes.bmp) printf("bmp transform   %lu x %lu, pixel offset %lu\n", (unsigned long)sizes.bmp_width,
                           (unsigned long)sizes.bmp_rows, (unsigned long)sizes.bmp_offset);
     printf("holds           %s\n", sizes.archive ? "a folder (an adapt archive)" : "a file");

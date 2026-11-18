@@ -44,8 +44,8 @@ VERSIONS = {int(m[1]): dict(stream=int(m[2]), metadata=bool(int(m[3])), profile=
             for m in _ROW.finditer(ADAPT_H.read_text(encoding="utf-8"))}
 assert len(VERSIONS) >= 55, "the version table of adapt.h did not parse"
 # the versions a current max / normal encode writes, as streams and named
-# (the sixteen-bit coder's 86 to 88; 72, 80 and 81, the same models under
-# the twelve-bit coder, are read and no longer written)
+# (the precise coder's 86 to 88; 72, 80 and 81, the same models under
+# the twelve-bit coder alone, are read and no longer written)
 MAX_STREAM = tuple(v for v, r in VERSIONS.items() if not r["metadata"] and r["profile"] == "MAX" and r["trailing"] == "SIZING" and v >= 86)
 MAX_NAMED = tuple(v for v, r in VERSIONS.items() if r["metadata"] and r["stream"] in MAX_STREAM)
 NORMAL_STREAM = tuple(v for v, r in VERSIONS.items() if not r["metadata"] and r["profile"] == "NORMAL" and r["adaptive"] == 0 and not r["bmp"])
@@ -304,10 +304,10 @@ class AllocationTest(CodecTest):
     def test_max_arbiter_keys_are_chosen_per_file_and_named(self):
         # The max profile's arbiter keys are the first block's choice
         # (adapt.h, ADAPT_MAX_PRECISE_VERSION): the text vector takes the
-        # class and nesting keys (version 87, 90 named), the sampled
-        # random walk the recall keys (88, 91), and info names each; both
+        # class and nesting keys (version 87, 90 named), the repeating
+        # abc vector the recall keys (88, 91), and info names each; both
         # decode. A version-72 file, the classic keys, still reads.
-        for source, version, keys in (("text.bin", 87, b"classes and nesting"), ("samples.bin", 88, b"classes and recall")):
+        for source, version, keys in (("text.bin", 87, b"classes and nesting"), ("abc.bin", 88, b"classes and recall")):
             with self.subTest(source=source):
                 piped = self.run_codec("encode", "-", "--max", data=(VECTORS / source).read_bytes())
                 self.assertEqual(piped.returncode, 0, piped.stderr)
@@ -1873,9 +1873,10 @@ class CommandTest(CodecTest):
             "text-max.adpt": (b"format          adapt container version 21", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter start   1/4\n", b"arbiter keys    classic\n"),
             "text-max3.adpt": (b"format          adapt container version 80", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter keys    classes and nesting\n"),
             "abc-max3.adpt": (b"format          adapt container version 81", b"profile         max\n", b"arbiter keys    classes and recall\n", b"coder           12-bit probabilities\n"),
-            "abc-max4.adpt": (b"format          adapt container version 86", b"profile         max\n", b"arbiter keys    classic\n", b"coder           16-bit probabilities\n"),
-            "text-max4.adpt": (b"format          adapt container version 87", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter keys    classes and nesting\n", b"coder           16-bit probabilities\n"),
-            "samples-max4.adpt": (b"format          adapt container version 88", b"profile         max\n", b"arbiter keys    classes and recall\n", b"coder           16-bit probabilities\n"),
+            "hello-max4.adpt": (b"format          adapt container version 86", b"profile         max\n", b"arbiter keys    classic\n", b"coder           12-bit or 16-bit probabilities, by block\n"),
+            "text-max4.adpt": (b"format          adapt container version 87", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter keys    classes and nesting\n", b"coder           12-bit or 16-bit probabilities, by block\n"),
+            "cyrillic-max4.adpt": (b"format          adapt container version 87", b"profile         max\n", b"coder           12-bit or 16-bit probabilities, by block\n"),
+            "abc-max4.adpt": (b"format          adapt container version 88", b"profile         max\n", b"arbiter keys    classes and recall\n", b"coder           12-bit or 16-bit probabilities, by block\n"),
             "text-compact.adpt": (b"format          adapt container version 53", b"contexts        all but word, field\n", b"profile         max (compact side tables)\n"),
             "text-lean.adpt": (b"format          adapt container version 54", b"contexts        all but word, field, o8, word3, wordc\n", b"profile         max (compact side tables, lean contexts)\n"),
             "text-words.adpt": (b"format          adapt container version 62", b"profile         normal\n", b"text transform  yes\n"),

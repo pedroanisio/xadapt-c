@@ -41,8 +41,9 @@ static inline void arith_init(arith *d, const uint8_t *src, size_t len) {
 }
 
 /* The point that divides [x1, x2] by p1 / 2^bits: `bits` is twelve, or
- * sixteen under the precise coder (ADAPT_MAX_PRECISE_VERSION), read once
- * per block. Either way the range's high part times p1 fits 32 bits. */
+ * sixteen for a block of the precise coder (METHOD_MODELED_PRECISE), a
+ * constant of each call. Either way the range's high part times p1 fits
+ * 32 bits. */
 static inline uint32_t arith_split(uint32_t x1, uint32_t x2, uint32_t p1, unsigned bits) {
     uint32_t r = x2 - x1;
     return x1 + (r >> bits) * p1 + (((r & (((uint32_t)1 << bits) - 1)) * p1) >> bits);

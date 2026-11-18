@@ -270,11 +270,11 @@ static void test_keys_versions(void) {
 }
 
 /* The precise coder's versions: 86, 87 and 88 the models of 72, 80 and
- * 81 with the probability coded in sixteen bits, 89 to 91 the same with
- * metadata, each with version 72's sizing byte (the second max model's
- * bit required); 92 is no version; as sizes the coder goes only with the
- * second max model, never with an experimental predictor or the BMP
- * transform; no earlier version names it. */
+ * 81 whose blocks may be coded by sixteen-bit probabilities, 89 to 91 the
+ * same with metadata, each with version 72's sizing byte (the second max
+ * model's bit required); 92 is no version; as sizes the coder goes only
+ * with the second max model, never with an experimental predictor or the
+ * BMP transform; no earlier version names it. */
 static void test_precise_versions(void) {
     static const uint8_t keys[3] = {ADAPT_KEYS_CLASSIC, ADAPT_KEYS_TEXT, ADAPT_KEYS_BINARY};
     uint8_t file[ADAPT_HEADER_BYTES + ADAPT_SIZING_BYTES];
@@ -322,6 +322,66 @@ static void test_precise_versions(void) {
     sizes.model2 = 1;
     sizes.precise = 2;
     CHECK(!adapt_sizes_valid(sizes));
+}
+
+/* A block of the precise coder is method 6: cyrillic-max4.adpt, version
+ * 87, holds one and decodes, and gradient-max4.adpt three; the same payload read by the twelve-bit coder
+ * (the method byte turned to 1) is not the source, and neither is a
+ * twelve-bit block read by the sixteen-bit one; method 6 in a version
+ * without the precise coder (text-max3.adpt, version 80) is refused as a
+ * bad method before a byte is published. */
+static void test_precise_blocks(void) {
+    size_t len, old_len, src_len, records_len, out_len = 0, at;
+    uint8_t *file = read_file("cyrillic-max4.adpt", &len);
+    uint8_t *old = read_file("text-max3.adpt", &old_len);
+    uint8_t *src = read_file("text.bin", &src_len);
+    uint8_t *records = read_file("cyrillic.bin", &records_len);
+    uint8_t *out = NULL;
+    adapt_error error;
+    at = adapt_header_len(file);
+    CHECK(file[4] == ADAPT_MAX_PRECISE_KEYS_VERSION && len > at && file[at] == 6);
+    CHECK_STATUS(adapt_decode(file, len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == records_len && memcmp(out, records, records_len) == 0);
+    adapt_free(out);
+    out = NULL;
+    file[at] = 1;
+    CHECK(adapt_decode(file, len, adapt_default_limits(), &out, &out_len, &error) != ADAPT_OK && out == NULL);
+    {
+        /* every block of the gradient is the sixteen-bit coder's */
+        size_t g_len, bmp_len, blocks = 0;
+        uint8_t *g = read_file("gradient-max4.adpt", &g_len);
+        uint8_t *bmp = read_file("gradient.bmp", &bmp_len);
+        size_t pos = adapt_header_len(g);
+        while (pos + ADAPT_BLOCK_HEADER_BYTES <= g_len && g[pos] == 6) {
+            pos += ADAPT_BLOCK_HEADER_BYTES + ((size_t)g[pos + 5] | (size_t)g[pos + 6] << 8 | (size_t)g[pos + 7] << 16 | (size_t)g[pos + 8] << 24);
+            blocks++;
+        }
+        CHECK(blocks == 3 && pos + ADAPT_TRAILER_BYTES == g_len);
+        CHECK_STATUS(adapt_decode(g, g_len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+        CHECK(out_len == bmp_len && memcmp(out, bmp, bmp_len) == 0);
+        adapt_free(out);
+        out = NULL;
+        free(g);
+        free(bmp);
+    }
+    at = adapt_header_len(old);
+    CHECK(old[4] == ADAPT_MAX_KEYS_VERSION && old_len > at && old[at] == 1);
+    old[at] = 6;
+    CHECK_STATUS(adapt_decode(old, old_len, adapt_default_limits(), &out, &out_len, &error), ADAPT_ERROR_BAD_METHOD);
+    CHECK(out == NULL && error.detail == 6);
+    /* a twelve-bit block of a precise version, read as a sixteen-bit one */
+    old[at] = 1;
+    old[4] = ADAPT_MAX_PRECISE_KEYS_VERSION;
+    CHECK_STATUS(adapt_decode(old, old_len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
+    CHECK(out_len == src_len && memcmp(out, src, src_len) == 0);
+    adapt_free(out);
+    out = NULL;
+    old[at] = 6;
+    CHECK(adapt_decode(old, old_len, adapt_default_limits(), &out, &out_len, &error) != ADAPT_OK && out == NULL);
+    free(file);
+    free(old);
+    free(src);
+    free(records);
 }
 
 /* The keyed normal profile: version 84 with its policy byte (the key
@@ -417,9 +477,9 @@ static const published_version PUBLISHED[] = {
     {80, "text-max3.adpt", "text.bin", 1},
     {81, "abc-max3.adpt", "abc.bin", 1},
     {84, "text-keyed.adpt", "text.bin", 1},
-    {86, "abc-max4.adpt", "abc.bin", 1},
+    {86, "hello-max4.adpt", "hello.bin", 1},
     {87, "text-max4.adpt", "text.bin", 1},
-    {88, "samples-max4.adpt", "samples.bin", 1},
+    {88, "abc-max4.adpt", "abc.bin", 1},
 };
 static const uint8_t NEVER_WRITTEN[] = {65, 70};
 
@@ -2021,6 +2081,7 @@ int main(int argc, char **argv) {
     SHARD(test_keys_versions());
     SHARD(test_normal_keys_versions());
     SHARD(test_precise_versions());
+    SHARD(test_precise_blocks());
     SHARD(test_version_table());
     SHARD(test_published_versions());
     SHARD(test_vector("text-keyed.adpt", "text.bin"));

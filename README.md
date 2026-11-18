@@ -159,8 +159,9 @@ Archive versions **1–4** are readable; the CLI writes archive version **4**.
 The exact wire layouts and model policies are defined by `ADAPT_VERSIONS` and
 the accompanying declarations in [adapt.h](adpat/c/adapt.h).
 
-Max-profile files written by this release carry versions 86–91, which pass
-the final probability to the coder in 16 bits; cadapt 0.12.0 cannot decode them.
+Max-profile files written by this release carry versions 86–91, whose blocks
+are coded with 12-bit or 16-bit probabilities, whichever is shorter; cadapt
+0.12.0 cannot decode them.
 Versions 13–15, written by cadapt 0.11.0, require that release to decode. See the
 [upgrade procedure](docs/release-notes/0.12.0.md#upgrading-from-0110) before
 replacing an older installation. Unknown format numbers are rejected.

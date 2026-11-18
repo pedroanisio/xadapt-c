@@ -94,11 +94,11 @@ typedef struct model {
      * buckets and a fifth arbiter. Read once per block; the per-bit path
      * has it constant. */
     int model2;
-    /* Bits of the probability predict() returns and the coder splits by:
-     * ADAPT_CODER_BITS, or ADAPT_CODER_BITS_PRECISE under model2 with the
-     * precise coder, where the estimation stages keep their sixteen. */
+    /* 1 under model2 with the precise coder (ADAPT_MAX_PRECISE_VERSION):
+     * predict() leaves the probability in sixteen bits in p16 beside the
+     * twelve it returns, and a block is coded by either. */
     int precise;
-    unsigned coder_bits;
+    uint32_t p16;
     /* model2's pressure-gated parts (MODEL2_PRESSURE_LOG): the o8 and
      * word3 slots re-purposed, and the fifth arbiter */
     int slots_on, extra_on;

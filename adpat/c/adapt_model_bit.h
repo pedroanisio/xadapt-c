@@ -8,8 +8,8 @@
 #ifndef ADAPT_MODEL_BIT_H
 #define ADAPT_MODEL_BIT_H
 
-/* Probability that the next bit is one, in 1..=4095 — in 1..=65535 under
- * the precise coder (model.coder_bits says which). The body, with the
+/* Probability, in 1..=4095, that the next bit is one; under the precise
+ * coder the same in 1..=65535 is left in model.p16. The body, with the
  * profile a constant; predict() and predict_fast() below are its two
  * instantiations, each compiled per instruction set. */
 static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast, const int max, const int v3, const int m2) {
@@ -189,37 +189,36 @@ estimate:
     row = m->apm[ctx];
     a = row[j];
     b = row[j + 1];
-    if (m2 && m->precise) {
-        /* The precise coder (ADAPT_MAX_PRECISE_VERSION): the stages'
-         * cells are sixteen bits and stay so — each interpolation shifted
-         * by the seven bits of its weight alone, their rounded mean,
-         * three parts of it to one of the arbiters' twelve-bit verdict
-         * times sixteen, held to 1..65535. The stages learn as they do
-         * under every version; only the number coded is finer. */
-        size_t ctx2 = (m->apm2_row | m->c0) & m->apm2_mask;
-        const uint16_t *row2 = m->apm2[ctx2];
-        int32_t papm2 = ((int32_t)row2[j] * (128 - w) + (int32_t)row2[j + 1] * w) >> 7;
-        m->apm2_ctx = ctx2;
-        m->apm2_j = j;
-        papm = (a * (128 - w) + b * w) >> 7;
-        papm = (papm + papm2 + 1) >> 1;
-        p = (m->pfinal * 16 + 3 * papm + 2) >> 2;
-        if (p < 1) {
-            p = 1;
-        }
-        if (p > 65535) {
-            p = 65535;
-        }
-        return (uint32_t)p;
-    }
-    papm = (a * (128 - w) + b * w) >> 11;
     {
         size_t ctx2 = (m->apm2_row | m->c0) & m->apm2_mask;
         const uint16_t *row2 = m->apm2[ctx2];
-        int32_t papm2 = ((int32_t)row2[j] * (128 - w) + (int32_t)row2[j + 1] * w) >> 11;
+        /* each stage's interpolation in the sixteen bits of its cells,
+         * before the shift to twelve */
+        int32_t wide = a * (128 - w) + b * w;
+        int32_t wide2 = (int32_t)row2[j] * (128 - w) + (int32_t)row2[j + 1] * w;
+        int32_t papm2 = wide2 >> 11;
         m->apm2_ctx = ctx2;
         m->apm2_j = j;
+        papm = wide >> 11;
         papm = (papm + papm2 + 1) >> 1;
+        if (m2 && m->precise) {
+            /* The precise coder (ADAPT_MAX_PRECISE_VERSION) beside the
+             * twelve-bit one: the stages' interpolations shifted by the
+             * seven bits of their weight alone, their rounded mean, three
+             * parts of it to one of the arbiters' twelve-bit verdict
+             * times sixteen, held to 1..65535. The model learns as it
+             * does under every version; a block's coder takes this
+             * number or the twelve-bit one (METHOD_MODELED_PRECISE). */
+            int32_t q = ((wide >> 7) + (wide2 >> 7) + 1) >> 1;
+            q = (m->pfinal * 16 + 3 * q + 2) >> 2;
+            if (q < 1) {
+                q = 1;
+            }
+            if (q > 65535) {
+                q = 65535;
+            }
+            m->p16 = (uint32_t)q;
+        }
     }
     p = (m->pfinal + 3 * papm + 2) >> 2;
     if (p < 1) {
