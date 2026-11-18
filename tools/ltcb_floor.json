@@ -1,0 +1,43 @@
+{
+  "schema": "cadapt.ratio-floor.v2",
+  "locked_on": "2026-11-18",
+  "host": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "arguments": [
+    "encode",
+    "--max",
+    "--allocation",
+    "context",
+    "--contexts",
+    "lean",
+    "-10"
+  ],
+  "throughput_tolerance": 0.1,
+  "floors": [
+    {
+      "fixture": "enwik8",
+      "input_bytes": 100000000,
+      "input_md5": "a1fa5ffddb56f4953e226637dabbb36a",
+      "max_container_bytes": 17772852,
+      "cpu_seconds": 128.7,
+      "min_bytes_per_second": 777000.7770007771,
+      "provenance": {
+        "definition_revision": "a058f9b2cdfe1a80404fbabbd691bd6a4a0536fc",
+        "timing_measure": "cpu_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
+    },
+    {
+      "fixture": "enwik9",
+      "input_bytes": 1000000000,
+      "input_md5": "e206c3450ac99950df65bf70ef61a12d",
+      "max_container_bytes": 143751760,
+      "cpu_seconds": 1325.8,
+      "min_bytes_per_second": 754261.577915221,
+      "provenance": {
+        "definition_revision": "a058f9b2cdfe1a80404fbabbd691bd6a4a0536fc",
+        "timing_measure": "cpu_seconds",
+        "verification": "Byte-exact round trip recorded with the threshold."
+      }
+    }
+  ]
+}

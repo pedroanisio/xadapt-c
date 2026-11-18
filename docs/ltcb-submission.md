@@ -4,6 +4,13 @@
 Compression Benchmark. The decompressor ZIP includes the executable, license
 and usage instructions; sources use the separate [release pipeline](release-pipeline.md).
 
+The entry's command and the largest container it may write for each fixture
+are in `tools/ltcb_floor.json`: `encode --max --allocation context --contexts
+lean -10`, the 1 GiB tier, with enwik8 at 17,772,852 B and enwik9 at
+143,751,760 B. The script encodes with that command and fails if a container
+is larger. Encode time is gated only on the host the file names; on any other
+host it is reported.
+
 Provide ENWIK8 and ENWIK9 as paths to the verified, uncompressed benchmark
 fixtures. The script checks their identities and verifies each round trip
 using the executable being submitted. Choose a fresh output directory:

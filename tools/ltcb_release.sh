@@ -3,7 +3,7 @@
 # revision: the decompressor as the benchmark counts it — a zip of the
 # stripped Linux binary with its licence and a note for the verifier (the
 # sources use the separate source-release package) —
-# the containers the locked command writes for the fixtures given, every
+# the containers the entry's command (tools/ltcb_floor.json) writes for the fixtures given, every
 # file's SHA-256, and a manifest containing verifiable submission measurements. Nothing here
 # reads the working tree: the revision is exported with `git archive` into
 # the release directory and built there, so what is published is what is
@@ -14,7 +14,9 @@
 # Defaults: REV = HEAD, DIR = dist/ltcb-<version>-<short rev> (git-ignored).
 # With a fixture, the container is written by the release binary through
 # tools/check_ratio_floor.py --verify — encoded, decoded and compared byte
-# for byte against the locked floors — and its size, time and hash go into
+# for byte against the entry's floors (tools/ltcb_floor.json of the
+# revision: the command and the largest container it may write, the time
+# gated only on the host the file names) — and its size, time and hash go into
 # the manifest. With --containers, the .adpt files and the floor-check.txt
 # of an earlier run of this script are taken over instead of encoding
 # again (they were written by the same revision's binary, which the
@@ -71,7 +73,7 @@ cp "$OUT/src/LICENSE" "$OUT/LICENSE"
 rm -rf "$OUT/src"
 [ "$(strings "$OUT/cadapt" | grep -c 'adpat/c\|\.c:[0-9]')" = 0 ] || { echo "the binary names source files" >&2; exit 1; }
 
-# 3. the containers, verified against the locked floors — or taken over from an earlier run
+# 3. the containers, verified against the entry's floors — or taken over from an earlier run
 if [ -n "$CONTAINERS" ]; then
     cp "$CONTAINERS"/*.adpt "$OUT/containers/"
     [ -f "$CONTAINERS/../floor-check.txt" ] && cp "$CONTAINERS/../floor-check.txt" "$OUT/floor-check.txt"
@@ -80,17 +82,19 @@ fi
 fixtures=()
 [ -n "$ENWIK8" ] && fixtures+=(--fixture "enwik8=$ENWIK8")
 [ -n "$ENWIK9" ] && fixtures+=(--fixture "enwik9=$ENWIK9")
+git show "$FULL:tools/ltcb_floor.json" > "$OUT/ltcb_floor.json"
 if [ ${#fixtures[@]} -gt 0 ]; then
-    python3 -B tools/check_ratio_floor.py --binary "$OUT/cadapt" "${fixtures[@]}" --verify --timeout 14400 \
+    python3 -B tools/check_ratio_floor.py --binary "$OUT/cadapt" --floor "$OUT/ltcb_floor.json" "${fixtures[@]}" --verify --timeout 14400 \
         --output-dir "$OUT/containers" | tee "$OUT/floor-check.txt"
     rm -f "$OUT"/containers/*.restored
 fi
 
 # 4. what a verifier needs to know, beside the binary — the entry's command
-#    is the locked one of the revision's tools/ratio_floor.json (the floor
-#    check above encoded with it) and the memory is what the binary reports
-#    for the enwik9 container it wrote; neither is typed here
-COMMAND=$(git show "$FULL:tools/ratio_floor.json" | python3 -c 'import json, sys; print(" ".join(json.load(sys.stdin)["arguments"]))')
+#    is the one of the revision's tools/ltcb_floor.json (the floor check
+#    above encoded with it) and the memory is what the binary reports for
+#    the enwik9 container it wrote; neither is typed here
+COMMAND=$(python3 -c 'import json, sys; print(" ".join(json.load(open(sys.argv[1]))["arguments"]))' "$OUT/ltcb_floor.json")
+rm -f "$OUT/ltcb_floor.json"
 if [ -f "$OUT/containers/enwik9.adpt" ]; then
     MEMORY="(enwik9.adpt: $("$OUT/cadapt" info "$OUT/containers/enwik9.adpt" | sed -n 's/^model memory *//p'))"
 else
@@ -100,7 +104,7 @@ cat > "$OUT/README-ltcb.txt" <<EOF
 cadapt $VERSION (commit $FULL) — Large Text Compression Benchmark entry
 Licence: MIT (LICENSE). Linux x86-64, needs only the C library and pthreads.
 
-Compress (the entry's command; the tier -9 is the default):
+Compress (the entry's command):
     ./cadapt $COMMAND enwik9 -o enwik9.adpt
 Decompress (no option changes the output; the container names its model):
     ./cadapt decode enwik9.adpt -o enwik9
