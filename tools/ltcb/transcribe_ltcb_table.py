@@ -40,7 +40,8 @@ ROW = re.compile(
     rf"^(?P<label>\S.*?)\s+(?:(?P<enwik8>{SIZE})\s+)?(?P<enwik9>{SIZE})\s+(?P<zip>\d{{1,3}}(?:,\d{{3}})*)\s+"
     rf"(?:(?P<flags>[a-z]+)\s+)?(?P<total>{SIZE})(?P<tail>(?:\s+\S+)*)\s*$"
 )
-NUMBER = re.compile(r"^~?[0-9]+(?:\.[0-9]+)?$")
+# a time below one nanosecond per byte is printed without its zero (".746")
+NUMBER = re.compile(r"^~?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$")
 DATE = re.compile(r"Last update(?:d)?:?\s*([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4})", re.I)
 
 

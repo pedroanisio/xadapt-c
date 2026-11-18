@@ -15,7 +15,7 @@ import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_SOURCE = "mattmahoney.net/dc/text.html, page dated Sept 15, 2026"
+DEFAULT_SOURCE = "mattmahoney.net/dc/text.html, page dated Nov. 17, 2026"
 RESEARCH = Path(__file__).resolve().parents[2] / "research"  # tracked data and ignored renderings
 ENWIK8_BYTES = 100_000_000
 ENWIK9_BYTES = 1_000_000_000

@@ -6,7 +6,7 @@ time only in either column, two figures run together, `~` values, Pareto
 underlines, no algorithm, an entity in a label, the three labels that do
 not split — and every row that breaks a rule is a typed error, never a
 skipped row. The published snapshot is checked for what the transcription
-of 2026-09-15 established: 226 rows, cadapt at rank 30.
+of 2026-11-18 established: 238 rows, cadapt at rank 41.
 """
 
 import csv
@@ -111,16 +111,26 @@ class TranscribeTest(unittest.TestCase):
             self.assertEqual(rows, self.rows())
             self.assertEqual(tr.main(["--html", str(html / "missing"), "--output", str(out)]), 2)
 
-    def test_published_snapshot_is_the_page_of_2026_09_15(self):
+    def test_a_time_below_one_nanosecond_is_read_without_its_zero(self):
+        """The page prints a decompression time under 1 ns/byte as `.746`."""
+        self.assertIsNotNone(tr.NUMBER.match(".746"))
+        self.assertIsNotNone(tr.NUMBER.match("~.5"))
+        self.assertIsNotNone(tr.NUMBER.match("9.4"))
+        for token in (".", "1.", "x.5", "..5"):
+            self.assertIsNone(tr.NUMBER.match(token), token)
+
+    def test_published_snapshot_is_the_page_of_2026_11_17(self):
         snapshot = Path(__file__).resolve().parents[2] / "research" / "ltcb-main-table.csv"
         with open(snapshot, newline="", encoding="utf-8") as handle:
             rows = list(csv.DictReader(handle))
-        self.assertEqual(len(rows), 226)
+        self.assertEqual(len(rows), 238)
+        fastest = [r for r in rows if r["program"] == "nakamichi washigan+++"]
+        self.assertEqual([r["decomp_ns_per_byte"] for r in fastest], [".746"])
         cadapt = [r for r in rows if r["program"] == "cadapt 0.12.0"]
         self.assertEqual(len(cadapt), 1)
         self.assertEqual((cadapt[0]["rank"], cadapt[0]["enwik8_bytes"], cadapt[0]["enwik9_bytes"],
                           cadapt[0]["decompressor_zip_bytes"], cadapt[0]["enwik9_plus_prog_bytes"], cadapt[0]["note"]),
-                         ("30", "18207203", "150063628", "209893", "150273521", "114"))
+                         ("41", "18207203", "150063628", "209893", "150273521", "114"))
 
 
 if __name__ == "__main__":

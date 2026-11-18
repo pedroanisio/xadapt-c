@@ -4,7 +4,7 @@
 Computes a ranking threshold and memory comparison from the published snapshot.
 The selected place is a query parameter, not an encoder acceptance policy.
 
-    python3 tools/ltcb/ltcb_goal.py            # the figures for cadapt 0.12.0, place 20
+    python3 tools/ltcb/ltcb_goal.py            # the figures for cadapt 0.12.0, place 30
 
 The threshold is the total (enwik9 plus the decompressor zip, the ranked
 quantity) of the entry holding the place; the enwik9 target is that total
@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TABLE = ROOT / "research" / "ltcb-main-table.csv"
 PROGRAM = "cadapt 0.12.0"
-PLACE = 20
+PLACE = 30
 
 
 class GoalError(ValueError):

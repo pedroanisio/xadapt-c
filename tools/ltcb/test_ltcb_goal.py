@@ -74,15 +74,15 @@ class GoalTest(unittest.TestCase):
         entries = [(f"p{i}", 100_000_000 + i * 1_000_000, 1000, "3000") for i in range(1, 21)]
         entries.append(("cadapt 0.12.0", 150_000_000, 209_893, "661"))
         out = io.StringIO()
-        code = goal.main(["--table", str(self.write(table(entries))), "--program", "cadapt 0.12.0"], out)
+        code = goal.main(["--table", str(self.write(table(entries))), "--program", "cadapt 0.12.0", "--place", "20"], out)
         self.assertEqual(code, 0)
         text = out.getvalue()
         for figure in ("rank 21 of 21", "150,000,000", "120,000,000", "119,790,106", "661 MB", "3,000 MB", "p1"):
             self.assertIn(figure, text)
 
     def test_published_snapshot_gives_the_documented_figures(self):
-        g = goal.compute(goal.TABLE, program="cadapt 0.12.0", place=20)
-        self.assertEqual((g.rank, g.entries, g.total, g.decompressor_bytes), (30, 226, 150_273_521, 209_893))
+        g = goal.compute(goal.TABLE, program="cadapt 0.12.0", place=30)
+        self.assertEqual((g.rank, g.entries, g.total, g.decompressor_bytes), (41, 238, 150_273_521, 209_893))
         self.assertEqual((g.threshold_program, g.threshold_total), ("paq8px_v206fix1", 125_099_359))
         self.assertEqual(g.target_enwik9, 124_889_465)
         self.assertEqual((g.memory_mb, g.least_memory_above), (661.0, (1542.0, "drt|lpaq9m")))

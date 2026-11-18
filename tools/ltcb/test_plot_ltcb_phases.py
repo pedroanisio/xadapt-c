@@ -70,7 +70,7 @@ class FrontierPhaseTest(unittest.TestCase):
     def test_published_table_has_the_documented_phase_sequence(self):
         rows = ltcb.load_rows(HERE / "ltcb-main-table.csv")
         comp = phases.phases(phases.frontier_points(rows, "comp_ns_per_byte"))
-        self.assertEqual([p.family for p in comp], ["LZ", "BWT", "CM", "PPM", "CM", "Neural"])
+        self.assertEqual([p.family for p in comp], ["LZ", "BWT", "CM", "PPM", "Neural"])
         cliff = phases.transitions(comp)[0]
         self.assertEqual(cliff.entry.program, "bsc 3.25")
         self.assertGreater(cliff.bpb_drop, 1.8)

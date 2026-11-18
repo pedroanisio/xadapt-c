@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--template", type=Path, default=HERE / "ltcb-interactive.template.html")
     parser.add_argument("--output", type=Path, default=RESEARCH / "ltcb-interactive.html")
     parser.add_argument("--source", default=ltcb.DEFAULT_SOURCE)
-    parser.add_argument("--fetched", default="2026-09-15 23:25 UTC")
+    parser.add_argument("--fetched", default="2026-11-18 09:46 UTC")
     args = parser.parse_args(argv)
     try:
         html = build(args.table, args.local if args.local.exists() else None, args.phases,

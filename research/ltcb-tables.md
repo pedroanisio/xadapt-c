@@ -9,7 +9,7 @@ repository. Additional codec measurements are identified separately in
 
 | File | Source page | Page "Last update" | Rows |
 | --- | --- | --- | ---: |
-| [ltcb-main-table.csv](ltcb-main-table.csv) | <https://mattmahoney.net/dc/text.html> | Sept 15, 2026 | 226 |
+| [ltcb-main-table.csv](ltcb-main-table.csv) | <https://mattmahoney.net/dc/text.html> | Nov. 17, 2026 | 238 |
 | [ltcb-textdata-text8-fil9.csv](ltcb-textdata-text8-fil9.csv) | <https://mattmahoney.net/dc/textdata.html> | Sept. 1, 2011 | 27 |
 
 What is tracked and what is not: the two transcribed CSVs, the local
@@ -24,8 +24,8 @@ nothing quotes a number from them that the CSVs do not carry.
 
 ## Snapshot provenance
 
-The main source page was captured on 2026-09-15 at 23:25 UTC, SHA-256
-`7ea13d26b7c8e67427361a333dfe0eae82981f4e24cf1b7fddeb6affaaf76866`.
+The main source page was captured on 2026-11-18 at 09:46 UTC, SHA-256
+`16e78a9b7e153dd3eeb4f8699a018dbc92e2c9ead946f4d8085d78c4f2ffbc19`.
 The textdata page was captured on 2026-09-14 at 20:02 UTC, SHA-256
 `b91ee875eb9d9b17ba825dc59ad8789b65f6d12661df0e5dffcb578668ac6822`.
 These are dated snapshots. Fetch and validate a new source before presenting
@@ -39,16 +39,29 @@ python3 -B tools/ltcb/transcribe_ltcb_table.py --html "$snapshot_dir/text.html" 
 
 ## Snapshot comparison
 
-In the 2026-09-15 snapshot, cadapt 0.12.0 --max --allocation context has
+In the 2026-11-18 snapshot, cadapt 0.12.0 --max --allocation context has
 150,063,628 B of enwik9 data plus a 209,893 B decompressor ZIP:
-**150,273,521 B total, rank 30 of 226**, with reported memory of 661 MB.
+**150,273,521 B total, rank 41 of 238**, with reported memory of 661 MB.
 The least reported memory among higher-ranked entries is 1,542 MB for drt|lpaq9m.
+Thirteen entries published since the 2026-09-15 snapshot rank above it and
+two that did were withdrawn, which moved the same submission from rank 30 to
+rank 41.
 These statistics describe that submission, not the current development build.
 
 `tools/ltcb/ltcb_goal.py` computes comparison thresholds from the CSV. For
-place 20, paq8px_v206fix1 totals 125,099,359 B. A 209,893 B decompressor
+place 30, paq8px_v206fix1 totals 125,099,359 B. A 209,893 B decompressor
 would require at most 124,889,465 B of enwik9 data to overtake it. This is
 arithmetic on the snapshot, not a product acceptance target.
+
+The snapshot bounds what each resource has bought so far. Among the 30
+entries at or above place 30, the fastest compresses at 71,210 ns/byte and
+decompresses at 9,517 ns/byte (DNA-4), and the least memory is 3,751 MB
+(gmix v1). Among the 135 entries reported at 1,024 MB or less, this
+submission has the smallest total. Among the 72 entries faster than place 39
+(mcm 0.83 -x11: 394 ns/byte compression, 281 ns/byte decompression) in both
+directions, the smallest total is 160,364,392 B (bsc-m03 0.4.0, place 49),
+and the smallest at 1,024 MB or less is 209,035,641 B (GRZipII 0.2.4,
+place 114). Times are reported by each tester on their own hardware.
 
 ## How the tables were transcribed
 
@@ -83,10 +96,10 @@ Column meanings follow the page's own definitions.
 
 | Column | Meaning |
 | --- | --- |
-| `rank` | Position in the published table. The page states the table is ranked by `enwik9_plus_prog_bytes`; one adjacent inversion exists on the page (positions 95–96). |
+| `rank` | Position in the published table. The page states the table is ranked by `enwik9_plus_prog_bytes`; one adjacent inversion exists on the page (positions 108–109). |
 | `published_label` | Program and options exactly as printed. |
 | `program`, `options` | Heuristic split of `published_label` (see above). |
-| `enwik8_bytes` | Compressed size of the first 10^8 bytes. Empty for 9 rows the page lists without an enwik8 result. Not part of the ranking. |
+| `enwik8_bytes` | Compressed size of the first 10^8 bytes. Empty for 19 rows the page lists without an enwik8 result. Not part of the ranking. |
 | `enwik9_bytes` | Compressed size of the first 10^9 bytes. |
 | `decompressor_zip_bytes` | Size of a zip archive holding the decompressor and everything it needs (dictionaries, model files). |
 | `decompressor_flags` | Page letters: `x` executable size, `s` source size (when smaller), `d` separate decompression program; `0` with `xd` means a self-extracting archive. |
