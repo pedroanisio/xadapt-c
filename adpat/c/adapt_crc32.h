@@ -83,6 +83,7 @@ static inline int sizes_valid(adapt_sizes s) {
            s.text <= ADAPT_TEXT_OFF && (s.text != ADAPT_TEXT_ON || (!s.adaptive && !s.bmp && !s.x86)) &&
            s.low_start <= 1 && (!s.low_start || (s.max && !s.adaptive && !s.bmp)) &&
            s.model2 <= 1 && (!s.model2 || s.max) &&
+           s.precise <= 1 && (!s.precise || (s.model2 && !s.adaptive && !s.bmp)) &&
            s.mid <= 1 && (!s.mid || (!s.fast && !s.max && !s.adaptive && !s.bmp && s.set_code == 0)) &&
            s.keys <= ADAPT_KEYS_BINARY &&
            (s.keys == ADAPT_KEYS_CLASSIC || (s.max ? s.model2 != 0 : !s.fast && !s.mid && !s.adaptive && !s.bmp));

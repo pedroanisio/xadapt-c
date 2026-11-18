@@ -53,7 +53,7 @@ enum { ALLOCATION_AUTO = 0, ALLOCATION_CONTEXT = 1, ALLOCATION_WINDOW = 2 };
 
 /* The command line's own version, not a portability detail: it stays here,
  * where tools/provenance.py reads it. */
-#define CADAPT_VERSION "0.12.0"
+#define CADAPT_VERSION "0.13.0"
 
 /* Only the command thread reads cancellation state. A handler, including
  * one delivered to a codec worker, only writes to this nonblocking pipe.
@@ -1935,6 +1935,7 @@ static int info_command(int argc, char **argv) {
     if (!sizes.fast && !sizes.mid) {
         printf("arbiter keys    %s\n", sizes.keys == ADAPT_KEYS_TEXT ? "classes and nesting" : sizes.keys == ADAPT_KEYS_BINARY ? "classes and recall" : "classic");
     }
+    printf("coder           %u-bit probabilities\n", sizes.precise ? ADAPT_CODER_BITS_PRECISE : ADAPT_CODER_BITS);
     if (sizes.bmp) printf("bmp transform   %lu x %lu, pixel offset %lu\n", (unsigned long)sizes.bmp_width,
                           (unsigned long)sizes.bmp_rows, (unsigned long)sizes.bmp_offset);
     printf("holds           %s\n", sizes.archive ? "a folder (an adapt archive)" : "a file");

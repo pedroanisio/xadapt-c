@@ -297,6 +297,30 @@ extern "C" {
 #define ADAPT_NORMAL_KEYS_VERSION 84u
 #define ADAPT_NORMAL_KEYS_METADATA_VERSION 85u
 #define ADAPT_NORMAL_KEYS_METADATA_OFFSET 1u
+/* The precise coder (86 to 88; 89 to 91 with metadata,
+ * ADAPT_PRECISE_METADATA_OFFSET): the models of versions 72, 80 and 81,
+ * in that order, with the final probability handed to the arithmetic
+ * coder in sixteen bits instead of twelve. The estimation stages' cells
+ * hold sixteen bits; versions 19 to 85 shift their interpolation down
+ * to twelve before the coder sees it, which bounds a nearly certain bit
+ * at 1/4096 of a bit however sure the model is. Here the two stages'
+ * interpolations stay in sixteen bits, their rounded mean is taken three
+ * parts to one of the final arbiter's twelve-bit verdict times sixteen,
+ * the result is held to 1..65535, and the coder splits its interval by
+ * sixteen bits. The model, its learning, the sizing byte and every
+ * other field are those of 72, 80 and 81; only the number coded differs.
+ * The encoder writes these for every max encode that is neither adaptive
+ * nor BMP (adapt_sizes.precise). */
+#define ADAPT_MAX_PRECISE_VERSION 86u
+#define ADAPT_MAX_PRECISE_KEYS_VERSION 87u
+#define ADAPT_MAX_PRECISE_KEYS_BINARY_VERSION 88u
+#define ADAPT_PRECISE_METADATA_OFFSET 3u
+#define ADAPT_MAX_PRECISE_METADATA_VERSION 89u
+#define ADAPT_MAX_PRECISE_KEYS_METADATA_VERSION 90u
+#define ADAPT_MAX_PRECISE_KEYS_BINARY_METADATA_VERSION 91u
+/* Bits of the probability the coder splits its interval by. */
+#define ADAPT_CODER_BITS 12u
+#define ADAPT_CODER_BITS_PRECISE 16u
 #define ADAPT_POLICY_BYTES 1u
 #define ADAPT_POLICY_KEYS_MASK 3u
 #define ADAPT_POLICY_TEXT 4u
@@ -335,6 +359,7 @@ typedef struct adapt_version_info {
     /* the byte after the fixed header and the period: none, sizing, policy */
     uint8_t trailing; /* ADAPT_TRAILING_* */
     uint8_t keys;     /* ADAPT_KEYS_* fixed by the version (the policy byte's under ADAPT_TRAILING_POLICY) */
+    uint8_t precise;  /* 1 when the coder takes the probability in sixteen bits (ADAPT_MAX_PRECISE_VERSION) */
 } adapt_version_info;
 #define ADAPT_PROFILE_NORMAL 0u
 #define ADAPT_PROFILE_FAST 1u
@@ -343,7 +368,9 @@ typedef struct adapt_version_info {
 #define ADAPT_TRAILING_NONE 0u
 #define ADAPT_TRAILING_SIZING 1u
 #define ADAPT_TRAILING_POLICY 2u
-#define ADAPT_VERSION_ROW(v, st, md, prof, ad, bm, tx, cp, ln, mi, tr, ky) {v, st, md, prof, ad, bm, tx, cp, ln, mi, tr, ky}
+#define ADAPT_VERSION_ROW(v, st, md, prof, ad, bm, tx, cp, ln, mi, tr, ky) {v, st, md, prof, ad, bm, tx, cp, ln, mi, tr, ky, 0}
+/* the same row for a version of the sixteen-bit coder */
+#define ADAPT_VERSION_ROW_PRECISE(v, st, md, prof, ad, bm, tx, cp, ln, mi, tr, ky) {v, st, md, prof, ad, bm, tx, cp, ln, mi, tr, ky, 1}
 static const adapt_version_info ADAPT_VERSIONS[] = {
     /* the three profiles as streams and as named files or folders */
     ADAPT_VERSION_ROW(19, 19, 0, ADAPT_PROFILE_NORMAL, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_NONE, 0),
@@ -418,6 +445,13 @@ static const adapt_version_info ADAPT_VERSIONS[] = {
     /* the normal profile keyed the same way: the policy byte names the keys and the transform */
     ADAPT_VERSION_ROW(84, 84, 0, ADAPT_PROFILE_NORMAL, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_POLICY, 0),
     ADAPT_VERSION_ROW(85, 84, 1, ADAPT_PROFILE_NORMAL, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_POLICY, 0),
+    /* the second max model, classic and keyed, with the sixteen-bit coder */
+    ADAPT_VERSION_ROW_PRECISE(86, 86, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, 0),
+    ADAPT_VERSION_ROW_PRECISE(87, 87, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, ADAPT_KEYS_TEXT),
+    ADAPT_VERSION_ROW_PRECISE(88, 88, 0, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, ADAPT_KEYS_BINARY),
+    ADAPT_VERSION_ROW_PRECISE(89, 86, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, 0),
+    ADAPT_VERSION_ROW_PRECISE(90, 87, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, ADAPT_KEYS_TEXT),
+    ADAPT_VERSION_ROW_PRECISE(91, 88, 1, ADAPT_PROFILE_MAX, 0, 0, 0, 0, 0, 0, ADAPT_TRAILING_SIZING, ADAPT_KEYS_BINARY),
 };
 #define ADAPT_VERSION_COUNT (sizeof(ADAPT_VERSIONS) / sizeof(ADAPT_VERSIONS[0]))
 
@@ -669,6 +703,11 @@ typedef struct adapt_sizes {
      * neither adaptive nor BMP, whatever the caller's value, and a decoder
      * from the sizing byte; see ADAPT_MAX_SIZED_VERSION. */
     uint8_t model2;
+    /* 1 when the coder takes the probability in sixteen bits
+     * (ADAPT_MAX_PRECISE_VERSION): the encoder sets it with `model2`,
+     * whatever the caller's value, and a decoder from the version. Only
+     * with `model2`. */
+    uint8_t precise;
 } adapt_sizes;
 
 /* Blocks of the context table `sizes` describes: 2^table_log, or with a

@@ -222,6 +222,11 @@
       "content": "fixture",
       "sha256": "73c00f7ab184b7dd39b0b90266733d4ebb247c371c9f0ca58881e489ff1eae9a"
     },
+    "adpat/c/tests/vectors/abc-max4.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "c11ffe7c9bebd09b341fdc5930f7c3e72a8d3fb970bf1502d82018dbbb8deb6f"
+    },
     "adpat/c/tests/vectors/abc.adpt": {
       "classification": "production",
       "content": "fixture",
@@ -362,6 +367,16 @@
       "content": "fixture",
       "sha256": "e851e1157c4e4e99b6f707d2568d3853052044ef5ec4b6562d3e798fa3406032"
     },
+    "adpat/c/tests/vectors/samples-max4.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "c2241395742a70c8b0e3fcf6b7fe13eb62bfb55b8a1a168eaf510504e955c3b8"
+    },
+    "adpat/c/tests/vectors/samples.bin": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "70949674019cec6d2494b7ffafd834606fed23506074a9424efffe216c17a691"
+    },
     "adpat/c/tests/vectors/segmented-keyed.adpt": {
       "classification": "production",
       "content": "fixture",
@@ -451,6 +466,11 @@
       "classification": "production",
       "content": "fixture",
       "sha256": "0594133f8c468575700e4a49dc04a9766918a97b7828ae12c31054b0dd608907"
+    },
+    "adpat/c/tests/vectors/text-max4.adpt": {
+      "classification": "production",
+      "content": "fixture",
+      "sha256": "952ef7bd1f758207913a1975dd4c1a3a630bcde7b6f913ba28681f58e9101e8d"
     },
     "adpat/c/tests/vectors/text-mid-words.adpt": {
       "classification": "production",

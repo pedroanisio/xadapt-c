@@ -234,6 +234,11 @@ static inline uint8_t encode_header_version(adapt_sizes sizes) {
     if (sizes.adaptive) {
         return (uint8_t)((sizes.max ? ADAPT_MAX_ADAPTIVE_VERSION : ADAPT_ADAPTIVE_VERSION) + sizes.adaptive - 1);
     }
+    if (sizes.max && sizes.precise) {
+        return sizes.keys == ADAPT_KEYS_TEXT     ? ADAPT_MAX_PRECISE_KEYS_VERSION
+               : sizes.keys == ADAPT_KEYS_BINARY ? ADAPT_MAX_PRECISE_KEYS_BINARY_VERSION
+                                                 : ADAPT_MAX_PRECISE_VERSION;
+    }
     if (sizes.max) {
         return sizes.keys == ADAPT_KEYS_TEXT     ? ADAPT_MAX_KEYS_VERSION
                : sizes.keys == ADAPT_KEYS_BINARY ? ADAPT_MAX_KEYS_BINARY_VERSION

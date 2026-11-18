@@ -16,6 +16,8 @@ Versions 58/61 can identify two historical predictors for small tables. The
 decoder tries them sequentially and checks the recovered checksum before
 publishing bytes. One model is live at a time; tentative output uses temporary
 storage. Versions 72/75 distinguish the current predictor without this fallback.
+Versions 86–91 are the models of 72, 80 and 81 with the final probability
+coded in 16 bits; versions 19–85 keep the 12-bit coder they were written with.
 
 Integer rounding, update order, context hashes and policy bits are format
 semantics. The baseline and accelerated instruction paths, compilers and
@@ -50,7 +52,9 @@ supported model is raised to that minimum. Decoder allocation comes from the
 container; --max-memory and --max-output apply only when explicitly supplied.
 Peak resident memory is held to the declared model requirement plus 16 MiB of
 process headroom by the memory gate. Optional search/proof work documents its
-extra memory and temporary-disk requirements.
+extra memory and temporary-disk requirements. First-block model trials keep one
+model live at a time; a threaded encode runs independent trials concurrently
+within the memory its workers were granted, and writes the same bytes.
 
 Named outputs are staged and published after validation. Stream callbacks and
 standard output may receive a prefix before a later failure. Filesystem

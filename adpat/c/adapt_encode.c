@@ -110,6 +110,7 @@ adapt_sizes adapt_sizes_mid(adapt_sizes sizes) {
     sizes.table_frac = 0;
     sizes.low_start = 0;
     sizes.model2 = 0;
+    sizes.precise = 0;
     sizes.adaptive = 0;
     sizes.bmp = 0;
     sizes.bmp_offset = sizes.bmp_width = sizes.bmp_rows = 0;
@@ -128,6 +129,7 @@ adapt_sizes adapt_sizes_fast(adapt_sizes sizes) {
     sizes.table_frac = 0;
     sizes.low_start = 0;
     sizes.model2 = 0;
+    sizes.precise = 0;
     sizes.adaptive = 0;
     sizes.bmp = 0;
     sizes.bmp_offset = sizes.bmp_width = sizes.bmp_rows = 0;
@@ -766,26 +768,148 @@ typedef struct model_choice {
     /* the trials that decided it: sample codings, and the bytes they coded */
     uint32_t trials;
     uint64_t trial_bytes;
+    /* trials that may run at once: 1, or the workers of a threaded encode */
+    uint64_t workers;
 } model_choice;
 
-/* One trial: code `sample` under a fresh model with these codes and return
- * the coded length, or the sample's length when the raw bytes win. */
-static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_code, const uint8_t *sample, size_t n,
-                          uint8_t *coded, size_t coded_cap, size_t *size_out, model_choice *choice, adapt_error *error) {
-    model *m;
+/* One trial: code the first `n` bytes of the first block under a fresh
+ * model of `sizes` and report the coded length, or `n` when the raw bytes
+ * win. A plain value, so a batch of them can run at once. */
+typedef struct trial_job {
+    adapt_sizes sizes;
+    const uint8_t *sample;
+    size_t n;
+    uint8_t *coded;
+    size_t coded_cap;
+    /* the result: the size, or `failed` when no model could be made */
+    size_t size;
+    int failed;
+    /* the job owns `coded` (a batch's second and later jobs) */
+    int owns;
+#ifdef ADAPT_THREADS
+    pthread_t thread;
+    int threaded;
+#endif
+} trial_job;
+
+static void trial_run(trial_job *j) {
+    model *m = model_new(j->sizes);
     size_t payload;
-    choice->trials += 1;
-    choice->trial_bytes += n;
+    if (m == NULL) {
+        j->failed = 1;
+        return;
+    }
+    payload = code_block(m, j->sample, j->n, j->coded, j->coded_cap);
+    j->size = payload == 0 ? j->n : payload;
+    model_free(m);
+}
+
+#ifdef ADAPT_THREADS
+static void *trial_thread(void *arg) {
+    trial_run(arg);
+    return NULL;
+}
+#endif
+
+/* The most trials one batch holds: the two families' later sets. */
+#define TRIAL_BATCH 8
+
+/* Run `count` trials whose results do not depend on one another, in
+ * order when `choice->workers` is 1 and otherwise that many at a time,
+ * each on a thread with a model and an output buffer of its own. The
+ * caller reads the sizes in the order it would have run the trials, so
+ * the choice — and the file — is the same however they were scheduled
+ * (RUN-5). Only an encode already granted the memory of several models
+ * runs them at once (adapt_encode_stream_threads: the trials come before
+ * any segment is in flight, so a trial's model stands where a worker's
+ * will); every other encode keeps one model live at a time. A thread or
+ * a buffer that cannot be had costs time only: that trial runs in line. */
+static adapt_status trials_run(trial_job *jobs, size_t count, const uint8_t *block, uint8_t *coded, size_t coded_cap,
+                               model_choice *choice, adapt_error *error) {
+    size_t i, wave = choice->workers < 1 ? 1 : (size_t)choice->workers, at;
+    adapt_status status = ADAPT_OK;
+    for (i = 0; i < count; i++) {
+        jobs[i].sample = block;
+        jobs[i].coded = NULL;
+        jobs[i].coded_cap = 0;
+        jobs[i].size = 0;
+        jobs[i].failed = 0;
+        jobs[i].owns = 0;
+#ifdef ADAPT_THREADS
+        jobs[i].threaded = 0;
+#endif
+        choice->trials += 1;
+        choice->trial_bytes += jobs[i].n;
+    }
+    for (at = 0; at < count; at += wave) {
+        size_t end = at + wave < count ? at + wave : count;
+        /* the wave's last job runs here, on the caller's buffer; the
+         * others on threads, where a thread and a buffer can be had */
+        for (i = at; i + 1 < end; i++) {
+#ifdef ADAPT_THREADS
+            jobs[i].coded_cap = jobs[i].n + CODED_SLACK;
+            jobs[i].coded = malloc(jobs[i].coded_cap);
+            if (jobs[i].coded != NULL) {
+                jobs[i].owns = 1;
+                if (pthread_create(&jobs[i].thread, NULL, trial_thread, &jobs[i]) == 0) {
+                    jobs[i].threaded = 1;
+                }
+            }
+#endif
+        }
+        for (i = at; i < end; i++) {
+            int threaded = 0;
+#ifdef ADAPT_THREADS
+            threaded = jobs[i].threaded;
+#endif
+            if (!threaded) {
+                if (!jobs[i].owns) {
+                    jobs[i].coded = coded;
+                    jobs[i].coded_cap = coded_cap;
+                }
+                trial_run(&jobs[i]);
+            }
+        }
+        for (i = at; i < end; i++) {
+#ifdef ADAPT_THREADS
+            if (jobs[i].threaded) {
+                pthread_join(jobs[i].thread, NULL);
+            }
+#endif
+            if (jobs[i].owns) {
+                free(jobs[i].coded);
+            }
+            if (jobs[i].failed) {
+                status = fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+            }
+        }
+        if (status != ADAPT_OK) {
+            break;
+        }
+    }
+    return status;
+}
+
+/* A job for the codes: `sizes` with this width and set, on `n` bytes. */
+static trial_job trial_of(adapt_sizes sizes, uint8_t class_code, uint8_t set_code, size_t n) {
+    trial_job j;
+    memset(&j, 0, sizeof(j));
     sizes.class_code = class_code;
     sizes.set_code = set_code;
-    m = model_new(sizes);
-    if (m == NULL) {
-        return fail(error, ADAPT_ERROR_ALLOCATION, 0, 0);
+    j.sizes = sizes;
+    j.n = n;
+    return j;
+}
+
+/* One trial alone. */
+static adapt_status trial(adapt_sizes sizes, uint8_t class_code, uint8_t set_code, const uint8_t *sample, size_t n,
+                          uint8_t *coded, size_t coded_cap, size_t *size_out, model_choice *choice, adapt_error *error) {
+    trial_job j = trial_of(sizes, class_code, set_code, n);
+    adapt_status status = trials_run(&j, 1, sample, coded, coded_cap, choice, error);
+    if (status == ADAPT_OK) {
+        *size_out = j.size;
     }
-    payload = code_block(m, sample, n, coded, coded_cap);
-    *size_out = payload == 0 ? n : payload;
-    model_free(m);
-    return ADAPT_OK;
+    return status;
 }
 
 /* The class-history width and the context set for a file, as header
@@ -818,18 +942,20 @@ static adapt_status prove_set(adapt_sizes sizes, uint8_t class_code, uint8_t *se
                               adapt_error *error) {
     size_t lean;
     adapt_status status;
+    trial_job jobs[2];
     if (*set_code == 0) {
         return ADAPT_OK;
     }
-    status = trial(sizes, class_code, *set_code, block, n, coded, coded_cap, &lean, choice, error);
+    /* the lean set on the block, and the full set where no proof coded it */
+    jobs[0] = trial_of(sizes, class_code, *set_code, n);
+    jobs[1] = trial_of(sizes, class_code, 0, n);
+    status = trials_run(jobs, *have_whole ? 1 : 2, block, coded, coded_cap, choice, error);
     if (status != ADAPT_OK) {
         return status;
     }
+    lean = jobs[0].size;
     if (!*have_whole) {
-        status = trial(sizes, class_code, 0, block, n, coded, coded_cap, whole, choice, error);
-        if (status != ADAPT_OK) {
-            return status;
-        }
+        *whole = jobs[1].size;
         *have_whole = 1;
     }
     if (lean > PROOF_MARGIN(*whole)) {
@@ -856,28 +982,36 @@ static adapt_status choose_keys(adapt_sizes sizes, const uint8_t *block, size_t 
                                 model_choice *choice, adapt_error *error) {
     size_t head = n < CLASS_SAMPLE ? n : CLASS_SAMPLE;
     int deep = n > 2 * head;
-    size_t classic = choice->sample, size, best_size;
+    size_t classic = choice->sample, best_size, count = 0, first_keyed;
     uint8_t k, best = ADAPT_KEYS_CLASSIC;
     adapt_status status;
+    trial_job jobs[3];
     choice->keys = ADAPT_KEYS_CLASSIC;
     if ((sizes.max ? !sizes.model2 : sizes.fast || sizes.mid) || sizes.adaptive || sizes.bmp) {
         return ADAPT_OK;
     }
     sizes.period = choice->period;
+    /* the classic keys where no trial coded them, then the two keyed
+     * policies: none depends on another's size */
     if (classic == 0) {
         sizes.keys = ADAPT_KEYS_CLASSIC;
-        status = trial(sizes, choice->class_code, choice->set_code, block, head, coded, coded_cap, &classic, choice, error);
-        if (status != ADAPT_OK) {
-            return status;
-        }
+        jobs[count++] = trial_of(sizes, choice->class_code, choice->set_code, head);
+    }
+    first_keyed = count;
+    for (k = ADAPT_KEYS_TEXT; k <= ADAPT_KEYS_BINARY; k++) {
+        sizes.keys = k;
+        jobs[count++] = trial_of(sizes, choice->class_code, choice->set_code, head);
+    }
+    status = trials_run(jobs, count, block, coded, coded_cap, choice, error);
+    if (status != ADAPT_OK) {
+        return status;
+    }
+    if (first_keyed != 0) {
+        classic = jobs[0].size;
     }
     best_size = deep ? SET_MARGIN(classic) : classic;
     for (k = ADAPT_KEYS_TEXT; k <= ADAPT_KEYS_BINARY; k++) {
-        sizes.keys = k;
-        status = trial(sizes, choice->class_code, choice->set_code, block, head, coded, coded_cap, &size, choice, error);
-        if (status != ADAPT_OK) {
-            return status;
-        }
+        size_t size = jobs[first_keyed + (size_t)(k - ADAPT_KEYS_TEXT)].size;
         if (size < best_size) {
             best_size = size;
             best = k;
@@ -891,7 +1025,7 @@ static adapt_status choose_keys(adapt_sizes sizes, const uint8_t *block, size_t 
  * set and the keys, in that order, each chosen on what the earlier
  * choices fixed (the comment above choose_keys says how the keys are). */
 static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t n, uint8_t *coded, size_t coded_cap,
-                                 model_choice *choice, adapt_error *error) {
+                                 uint64_t workers, model_choice *choice, adapt_error *error) {
     /* ADAPT_CONTEXTS_LEAN: the set is given (set 3, and `lean` under the
      * max profile, both already in `sizes`); the width is still chosen.
      * The mid profile's set is the profile's (set 0 with MID_DROPPED). */
@@ -909,6 +1043,7 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
     choice->sample = 0;
     choice->trials = 0;
     choice->trial_bytes = 0;
+    choice->workers = workers < 1 ? 1 : (workers > TRIAL_BATCH ? TRIAL_BATCH : workers);
     /* The period first: the contexts every trial runs depend on it. */
     sizes.period = sizes.fast ? 0 : adapt_detect_period(block, head);
     choice->period = sizes.period;
@@ -930,11 +1065,17 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         choice->sample = none;
         goto chosen;
     }
-    for (code = 1; code < 3; code++) {
-        status = trial(sizes, code, width_set, block, head, coded, coded_cap, &coded_len[code], choice, error);
+    {
+        /* the two widths: neither depends on the other */
+        trial_job jobs[2];
+        jobs[0] = trial_of(sizes, 1, width_set, head);
+        jobs[1] = trial_of(sizes, 2, width_set, head);
+        status = trials_run(jobs, 2, block, coded, coded_cap, choice, error);
         if (status != ADAPT_OK) {
             return status;
         }
+        coded_len[1] = jobs[0].size;
+        coded_len[2] = jobs[1].size;
     }
     best_size = none - none / 1024;
     for (code = 1; code < 3; code++) {
@@ -950,14 +1091,15 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         size_t favorite = coded_len[candidate], band = none / CLASS_BAND;
         if (favorite <= none + band && favorite + band >= none) {
             size_t without, with;
-            status = trial(sizes, 0, width_set, block, n, coded, coded_cap, &without, choice, error);
+            trial_job jobs[2];
+            jobs[0] = trial_of(sizes, 0, width_set, n);
+            jobs[1] = trial_of(sizes, candidate, width_set, n);
+            status = trials_run(jobs, 2, block, coded, coded_cap, choice, error);
             if (status != ADAPT_OK) {
                 return status;
             }
-            status = trial(sizes, candidate, width_set, block, n, coded, coded_cap, &with, choice, error);
-            if (status != ADAPT_OK) {
-                return status;
-            }
+            without = jobs[0].size;
+            with = jobs[1].size;
             class_code = with < without ? candidate : 0;
             whole = with < without ? with : without;
             have_whole = 1;
@@ -983,12 +1125,16 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
          * beat the first set by SET_MARGIN of the sample, and a choice on a
          * block longer than two samples is proved on the block. */
         size_t choice_size = SET_MARGIN(full);
+        trial_job jobs[ADAPT_FAST_SETS];
         for (code = 1; code < ADAPT_FAST_SETS; code++) {
-            size_t size;
-            status = trial(sizes, class_code, code, block, head, coded, coded_cap, &size, choice, error);
-            if (status != ADAPT_OK) {
-                return status;
-            }
+            jobs[code - 1] = trial_of(sizes, class_code, code, head);
+        }
+        status = trials_run(jobs, ADAPT_FAST_SETS - 1, block, coded, coded_cap, choice, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        for (code = 1; code < ADAPT_FAST_SETS; code++) {
+            size_t size = jobs[code - 1].size;
             if (size < choice_size) {
                 choice_size = size;
                 set_code = code;
@@ -1009,22 +1155,56 @@ static adapt_status choose_model(adapt_sizes sizes, const uint8_t *block, size_t
         size_t choice_size = SET_MARGIN(full);
         unsigned choice_contexts = HASHED + 1;
         size_t f, k;
+        /* the sample's size under each set tried, by code */
+        size_t set_size[ADAPT_CONTEXT_SETS];
+        int tried[ADAPT_CONTEXT_SETS];
+        trial_job jobs[TRIAL_BATCH];
+        size_t count;
+        memset(tried, 0, sizeof(tried));
+        /* The trials: both families' heads, which nothing decides, then
+         * the later sets of each family whose head beat the full set, on
+         * a block longer than two samples. A family's pursuit depends on
+         * its own head alone, so the trials run are the ones the ranking
+         * below asks for, whatever their order. */
+        jobs[0] = trial_of(sizes, class_code, families[0][0], head);
+        jobs[1] = trial_of(sizes, class_code, families[1][0], head);
+        status = trials_run(jobs, 2, block, coded, coded_cap, choice, error);
+        if (status != ADAPT_OK) {
+            return status;
+        }
+        for (f = 0; f < 2; f++) {
+            set_size[families[f][0]] = jobs[f].size;
+            tried[families[f][0]] = 1;
+        }
+        count = 0;
+        for (f = 0; f < 2; f++) {
+            if (!deep || set_size[families[f][0]] > SET_MARGIN(full)) {
+                continue;
+            }
+            for (k = 1; k < 4 && families[f][k] != 0; k++) {
+                jobs[count++] = trial_of(sizes, class_code, families[f][k], head);
+            }
+        }
+        if (count != 0) {
+            status = trials_run(jobs, count, block, coded, coded_cap, choice, error);
+            if (status != ADAPT_OK) {
+                return status;
+            }
+            for (k = 0; k < count; k++) {
+                set_size[jobs[k].sizes.set_code] = jobs[k].size;
+                tried[jobs[k].sizes.set_code] = 1;
+            }
+        }
         for (f = 0; f < 2; f++) {
             for (k = 0; k < 4; k++) {
                 size_t size;
                 unsigned contexts;
                 int beats, better;
                 code = families[f][k];
-                if (code == 0) {
+                if (code == 0 || !tried[code]) {
                     break;
                 }
-                if (k > 0 && !deep) {
-                    break;
-                }
-                status = trial(sizes, class_code, code, block, head, coded, coded_cap, &size, choice, error);
-                if (status != ADAPT_OK) {
-                    return status;
-                }
+                size = set_size[code];
                 contexts = HASHED + 1 - popcount16(CONTEXT_SETS[code]);
                 beats = size <= SET_MARGIN(full);
                 better = size < choice_size ||
@@ -1937,6 +2117,8 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
      * The adaptive and BMP variants of the max profile have no sizing byte
      * and keep the first model, whatever the caller's sizes say. */
     sizes.model2 = (uint8_t)(sizes.max && !sizes.adaptive && !sizes.bmp);
+    /* and with it the sixteen-bit coder (ADAPT_MAX_PRECISE_VERSION) */
+    sizes.precise = sizes.model2;
     if (!sizes_valid(sizes)) {
         return fail(error, ADAPT_ERROR_BAD_HEADER, 0, 0);
     }
@@ -2002,7 +2184,10 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         sizes.period = 0;
     } else {
         model_choice choice;
-        status = choose_model(sizes, block, n, framed, framed_cap, &choice, error);
+        /* a threaded encode holds the memory of `workers` models; no
+         * segment is in flight yet, so its trials may use it */
+        status = choose_model(sizes, block, n, framed, framed_cap, workers >= 2 && sizes.segmented ? workers : 1, &choice,
+                              error);
         if (status != ADAPT_OK) {
             goto done;
         }
@@ -2053,8 +2238,7 @@ static adapt_status encode_blocks(adapt_read_fn read, void *read_context, adapt_
         header[9] = (uint8_t)(sizes.period >> 8);
         header_len += ADAPT_PERIOD_BYTES;
     }
-    if (header[4] == ADAPT_MAX_SIZED_VERSION || header[4] == ADAPT_MAX_PRESSURE_VERSION || header[4] == ADAPT_MAX_KEYS_VERSION ||
-        header[4] == ADAPT_MAX_KEYS_BINARY_VERSION) {
+    if (adapt_version_lookup(header[4])->trailing == ADAPT_TRAILING_SIZING) {
         header[header_len] = (uint8_t)((sizes.compact ? ADAPT_SIZING_COMPACT : 0) | (sizes.lean ? ADAPT_SIZING_LEAN : 0) |
                                        (text ? ADAPT_SIZING_TEXT : 0) | (unsigned)sizes.table_frac << ADAPT_SIZING_FRAC_SHIFT |
                                        (sizes.low_start ? ADAPT_SIZING_LOW_START : 0) |

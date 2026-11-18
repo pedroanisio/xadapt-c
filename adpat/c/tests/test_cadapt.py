@@ -38,17 +38,19 @@ SOURCE = b"optional verification\n" * 128
 # it is the metadata form of, whether it carries metadata, the profile,
 # the BMP descriptor and the trailing sizing or policy byte.
 ADAPT_H = Path(__file__).resolve().parent.parent / "adapt.h"
-_ROW = re.compile(r"ADAPT_VERSION_ROW\((\d+), (\d+), (\d+), ADAPT_PROFILE_(\w+), (\d+), (\d+), (\d+), (\d+), (\d+), (\d+), ADAPT_TRAILING_(\w+), (\w+)\)")
+_ROW = re.compile(r"ADAPT_VERSION_ROW(?:_PRECISE)?\((\d+), (\d+), (\d+), ADAPT_PROFILE_(\w+), (\d+), (\d+), (\d+), (\d+), (\d+), (\d+), ADAPT_TRAILING_(\w+), (\w+)\)")
 VERSIONS = {int(m[1]): dict(stream=int(m[2]), metadata=bool(int(m[3])), profile=m[4], adaptive=int(m[5]), bmp=bool(int(m[6])),
                             text=bool(int(m[7])), trailing=m[11])
             for m in _ROW.finditer(ADAPT_H.read_text(encoding="utf-8"))}
 assert len(VERSIONS) >= 55, "the version table of adapt.h did not parse"
 # the versions a current max / normal encode writes, as streams and named
-MAX_STREAM = tuple(v for v, r in VERSIONS.items() if not r["metadata"] and r["profile"] == "MAX" and r["trailing"] == "SIZING" and v != 58)
+# (the sixteen-bit coder's 86 to 88; 72, 80 and 81, the same models under
+# the twelve-bit coder, are read and no longer written)
+MAX_STREAM = tuple(v for v, r in VERSIONS.items() if not r["metadata"] and r["profile"] == "MAX" and r["trailing"] == "SIZING" and v >= 86)
 MAX_NAMED = tuple(v for v, r in VERSIONS.items() if r["metadata"] and r["stream"] in MAX_STREAM)
 NORMAL_STREAM = tuple(v for v, r in VERSIONS.items() if not r["metadata"] and r["profile"] == "NORMAL" and r["adaptive"] == 0 and not r["bmp"])
 NORMAL_NAMED = tuple(v for v, r in VERSIONS.items() if r["metadata"] and r["stream"] in NORMAL_STREAM)
-assert MAX_STREAM == (72, 80, 81) and MAX_NAMED == (75, 82, 83) and NORMAL_STREAM == (19, 62, 84) and NORMAL_NAMED == (22, 67, 85)
+assert MAX_STREAM == (86, 87, 88) and MAX_NAMED == (89, 90, 91) and NORMAL_STREAM == (19, 62, 84) and NORMAL_NAMED == (22, 67, 85)
 
 
 def hole_report(path) -> str:
@@ -301,11 +303,11 @@ class AllocationTest(CodecTest):
 
     def test_max_arbiter_keys_are_chosen_per_file_and_named(self):
         # The max profile's arbiter keys are the first block's choice
-        # (adapt.h, ADAPT_MAX_KEYS_VERSION): the text vector takes the
-        # class and nesting keys (version 80, 82 named), the repeating
-        # abc vector the recall keys (81, 83), and info names each; both
+        # (adapt.h, ADAPT_MAX_PRECISE_VERSION): the text vector takes the
+        # class and nesting keys (version 87, 90 named), the sampled
+        # random walk the recall keys (88, 91), and info names each; both
         # decode. A version-72 file, the classic keys, still reads.
-        for source, version, keys in (("text.bin", 80, b"classes and nesting"), ("abc.bin", 81, b"classes and recall")):
+        for source, version, keys in (("text.bin", 87, b"classes and nesting"), ("samples.bin", 88, b"classes and recall")):
             with self.subTest(source=source):
                 piped = self.run_codec("encode", "-", "--max", data=(VECTORS / source).read_bytes())
                 self.assertEqual(piped.returncode, 0, piped.stderr)
@@ -316,7 +318,7 @@ class AllocationTest(CodecTest):
                 named = self.root / (source + ".adpt")
                 run = self.run_codec("encode", VECTORS / source, "-o", named, "--max")
                 self.assertEqual(run.returncode, 0, run.stderr)
-                self.assertEqual(named.read_bytes()[4], version + 2)
+                self.assertEqual(named.read_bytes()[4], version + 3)  # ADAPT_PRECISE_METADATA_OFFSET
                 info = self.run_codec("info", named)
                 self.assertIn(b"arbiter keys    " + keys + b"\n", info.stdout)
         info = self.run_codec("info", VECTORS / "text-max2.adpt")
@@ -377,7 +379,7 @@ class AllocationTest(CodecTest):
         self.assertNotEqual(named_sized.read_bytes()[8] >> 2 & 7, 0, "no fraction was taken at -5")
         run = self.run_codec("info", named_sized)
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertRegex(run.stdout, rb"adapt container version (75|82|83)")
+        self.assertRegex(run.stdout, rb"adapt container version (89|90|91)")
         self.assertIn(b"/8 past 2^", run.stdout)
         self.assertIn(b"profile         max (compact side tables, lean contexts)\n", run.stdout)
         restored_sized = self.root / "big-sized.restored"
@@ -476,7 +478,7 @@ class AdaptiveTest(CodecTest):
         named.write_bytes(asked.stdout)
         info = self.run_codec("info", named)
         self.assertEqual(info.returncode, 0, info.stderr)
-        self.assertRegex(info.stdout, rb"format          adapt container version (75|82|83)")
+        self.assertRegex(info.stdout, rb"format          adapt container version (89|90|91)")
         self.assertIn(b"profile         max\n", info.stdout)
         self.assertIn(b"text transform  yes", info.stdout)
         self.assertIn(b"arbiter start   1/32", info.stdout)
@@ -1004,7 +1006,7 @@ class InstructionSetTest(unittest.TestCase):
                 written.append(payload_stream((root / "o.adpt").read_bytes()))
             self.assertEqual(written[0], written[1])
             self.assertEqual(written[1], written[2])
-            self.assertEqual(written[0], (VECTORS / "text-max3.adpt").read_bytes())
+            self.assertEqual(written[0], (VECTORS / "text-max4.adpt").read_bytes())
 
 
 class FolderTest(unittest.TestCase):
@@ -1870,7 +1872,10 @@ class CommandTest(CodecTest):
             "text-mid.adpt": (b"format          adapt container version 76", b"contexts        all but o1, field, sparse\n", b"profile         mid\n"),
             "text-max.adpt": (b"format          adapt container version 21", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter start   1/4\n", b"arbiter keys    classic\n"),
             "text-max3.adpt": (b"format          adapt container version 80", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter keys    classes and nesting\n"),
-            "abc-max3.adpt": (b"format          adapt container version 81", b"profile         max\n", b"arbiter keys    classes and recall\n"),
+            "abc-max3.adpt": (b"format          adapt container version 81", b"profile         max\n", b"arbiter keys    classes and recall\n", b"coder           12-bit probabilities\n"),
+            "abc-max4.adpt": (b"format          adapt container version 86", b"profile         max\n", b"arbiter keys    classic\n", b"coder           16-bit probabilities\n"),
+            "text-max4.adpt": (b"format          adapt container version 87", b"contexts        all but word, field\n", b"profile         max\n", b"arbiter keys    classes and nesting\n", b"coder           16-bit probabilities\n"),
+            "samples-max4.adpt": (b"format          adapt container version 88", b"profile         max\n", b"arbiter keys    classes and recall\n", b"coder           16-bit probabilities\n"),
             "text-compact.adpt": (b"format          adapt container version 53", b"contexts        all but word, field\n", b"profile         max (compact side tables)\n"),
             "text-lean.adpt": (b"format          adapt container version 54", b"contexts        all but word, field, o8, word3, wordc\n", b"profile         max (compact side tables, lean contexts)\n"),
             "text-words.adpt": (b"format          adapt container version 62", b"profile         normal\n", b"text transform  yes\n"),
@@ -1915,7 +1920,7 @@ class CommandTest(CodecTest):
     def test_encode_switches_and_reports(self) -> None:
         text = VECTORS / "text.bin"
         # a file to standard output, and the profiles' version bytes
-        for flags, version in (((), 85), (("--fast",), 23), (("--max",), 82)):
+        for flags, version in (((), 85), (("--fast",), 23), (("--max",), 90)):
             with self.subTest(flags=flags):
                 run = self.run_codec("encode", text, "-o", "-", *flags)
                 self.assertEqual(run.returncode, 0, run.stderr)

@@ -97,6 +97,8 @@ static inline model *model_new_policy(adapt_sizes sizes, int legacy_model2) {
     m->compact = sizes.compact != 0;
     m->low_start = sizes.low_start != 0;
     m->model2 = sizes.model2 != 0;
+    m->precise = m->model2 && sizes.precise != 0;
+    m->coder_bits = m->precise ? ADAPT_CODER_BITS_PRECISE : ADAPT_CODER_BITS;
     m->slots_on = m->model2 && (legacy_model2 || sizes.table_log >= MODEL2_PRESSURE_LOG);
 #ifdef ADAPT_SIZES_OVERRIDE
     {

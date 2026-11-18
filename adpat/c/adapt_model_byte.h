@@ -8,6 +8,25 @@
 #ifndef ADAPT_MODEL_BYTE_H
 #define ADAPT_MODEL_BYTE_H
 
+/* Model2's two slots that read recall — the recalled byte with its length
+ * and the next two recalled bytes — from a view. Apart from hash_kinds()
+ * because a view made ahead of a byte guesses recall after it (view_after),
+ * so start_byte() makes these two again from the model as it stands when
+ * it takes the rest from the hashes made ahead. */
+static inline void hash_recall_kinds(const model *m, const byte_view *v, uint64_t hk[HASHED]) {
+    uint64_t c = v->c8;
+    uint64_t len = v->mlen < 15 ? v->mlen : 15;
+    if (m->on[H_WORD3] && m->slots_on) {
+        hk[H_WORD3] = v->mlen > 0 ? mix64((uint64_t)v->mbyte | len << 8 | (c & 0xFF) << 12 | ((uint64_t)25 << 56))
+                                  : mix64((c & 0xFF) | ((uint64_t)26 << 56));
+    }
+    if (m->on[H_SPARSE2]) {
+        hk[H_SPARSE2] = v->mlen > 0 ? mix64((uint64_t)v->mbyte | (uint64_t)v->mbyte2 << 8 | (c & 0xFF) << 16 |
+                                            len << 24 | ((uint64_t)31 << 56))
+                                    : mix64((c & 0xFFFF) | ((uint64_t)32 << 56));
+    }
+}
+
 /* Every kind's hash from a view, the kinds this file does not run left
  * 0, and the word run's hash. */
 static inline void hash_kinds(const model *m, const byte_view *v, int fast, uint64_t hk[HASHED], uint64_t *rh) {
@@ -73,22 +92,13 @@ static inline void hash_kinds(const model *m, const byte_view *v, int fast, uint
     if (m->model2) {
         /* Model2 assigns indirect/class/recall contexts to four slots.
          * The selected set mask still determines which slots run. */
-        uint64_t len = v->mlen < 15 ? v->mlen : 15;
-        if (m->on[H_WORD3] && m->slots_on) {
-            hk[H_WORD3] = v->mlen > 0 ? mix64((uint64_t)v->mbyte | len << 8 | (c & 0xFF) << 12 | ((uint64_t)25 << 56))
-                                      : mix64((c & 0xFF) | ((uint64_t)26 << 56));
-        }
         if (m->on[H_O5]) {
             hk[H_O5] = mix64((v->classes & (((uint64_t)1 << 63) - 1)) | ((uint64_t)27 << 56));
         }
         if (m->on[H_O8] && m->slots_on) {
             hk[H_O8] = mix64((c & 0xFF) | (uint64_t)v->followed1 << 8 | ((uint64_t)28 << 56));
         }
-        if (m->on[H_SPARSE2]) {
-            hk[H_SPARSE2] = v->mlen > 0 ? mix64((uint64_t)v->mbyte | (uint64_t)v->mbyte2 << 8 | (c & 0xFF) << 16 |
-                                                len << 24 | ((uint64_t)31 << 56))
-                                        : mix64((c & 0xFFFF) | ((uint64_t)32 << 56));
-        }
+        hash_recall_kinds(m, v, hk);
     }
     *rh = mix64(v->word != 0 ? (v->word ^ ((uint64_t)13 << 56)) : ((c & 0xFF) | ((uint64_t)13 << 56)));
 }
@@ -148,33 +158,56 @@ static inline void start_byte(model *m, int fast) {
     m->node = 1;
     m->o0_blk = 0;
     view_now(m, &v);
-    hash_kinds(m, &v, fast, hk, &rh);
+    {
+        /* The hashes prefetch_byte() made ahead for exactly this byte —
+         * the same position, the same last eight bytes — are the hashes
+         * of this view: view_after() moves every field as end_byte()
+         * does, recall alone guessed, and the two slots that read recall
+         * are made again here. Nothing else is hashed twice. A byte no
+         * view was made for (the first, the fast profile's, one after a
+         * skipped block) is hashed here in full. */
+        const size_t slot = (size_t)(c & 1);
+        if (m->ahead_valid[slot] && m->ahead_c8[slot] == c && m->ahead_n[slot] == m->n) {
+            memcpy(hk, m->ahead_hk[slot], sizeof(hk));
+            rh = m->ahead_rh[slot];
+            if (m->model2) {
+                hash_recall_kinds(m, &v, hk);
+            }
 #ifdef ADAPT_SHADOW_CHECK
-    /* A check build: the view prefetch_byte() advanced for this byte must
-     * agree with the real one, hash for hash, or the prefetch is aimed
-     * wrong — a speed fault, never a bytes fault, but one to catch. */
-    if (m->shadow_valid) {
-        for (i = 0; i < m->hashed; i++) {
-            /* model2's two recall-derived slots are guessed after a byte
-             * that breaks a match (view_after: the index may offer another
-             * candidate), so their lines are aimed wrong at match
-             * boundaries — a wasted prefetch there, by design */
-            if (m->model2 && (m->kind[i] == H_WORD3 || m->kind[i] == H_SPARSE2)) {
-                continue;
+            {
+                /* A check build: the hashes taken must be the hashes of
+                 * the model as it stands, kind for kind, or the bytes
+                 * written would differ from the format's. */
+                uint64_t real[HASHED], real_rh;
+                hash_kinds(m, &v, fast, real, &real_rh);
+                for (i = 0; i < m->hashed; i++) {
+                    if (real[m->kind[i]] != hk[m->kind[i]]) {
+                        fprintf(stderr, "shadow hash mismatch: kind %s at byte %llu\n", CONTEXT_NAMES[m->kind[i]],
+                                (unsigned long long)m->n);
+                        abort();
+                    }
+                }
+                if (m->runs > BASE_RUNS) {
+                    static const uint8_t run_kinds[RUNS - BASE_RUNS] = {H_O1, H_O3, H_O4, H_O6};
+                    for (i = 0; i < RUNS - BASE_RUNS; i++) {
+                        if (real[run_kinds[i]] != hk[run_kinds[i]]) {
+                            fprintf(stderr, "shadow run-kind mismatch at byte %llu\n", (unsigned long long)m->n);
+                            abort();
+                        }
+                    }
+                }
+                if (real_rh != rh) {
+                    fprintf(stderr, "shadow run hash mismatch at byte %llu\n", (unsigned long long)m->n);
+                    abort();
+                }
             }
-            if (m->shadow_hk[m->kind[i]] != hk[m->kind[i]]) {
-                fprintf(stderr, "shadow hash mismatch: kind %s at byte %llu\n", CONTEXT_NAMES[m->kind[i]],
-                        (unsigned long long)m->n);
-                abort();
-            }
-        }
-        if (m->shadow_rh != rh) {
-            fprintf(stderr, "shadow run hash mismatch at byte %llu\n", (unsigned long long)m->n);
-            abort();
-        }
-        m->shadow_valid = 0;
-    }
 #endif
+        } else {
+            hash_kinds(m, &v, fast, hk, &rh);
+        }
+        m->ahead_valid[0] = 0;
+        m->ahead_valid[1] = 0;
+    }
     for (i = 0; i < m->hashed; i++) {
         m->h[i] = hk[m->kind[i]];
     }
@@ -222,13 +255,15 @@ static inline void prefetch_byte(model *m, uint8_t b, int fast, int now) {
     size_t i;
     view_after(m, b, fast, &v);
     hash_kinds(m, &v, fast, hk, &rh);
-#ifdef ADAPT_SHADOW_CHECK
-    if (m->coding_known) {
-        memcpy(m->shadow_hk, hk, sizeof(hk));
-        m->shadow_rh = rh;
-        m->shadow_valid = 1;
+    {
+        /* kept for start_byte(), which takes them when the byte is this one */
+        const size_t slot = (size_t)(b & 1);
+        memcpy(m->ahead_hk[slot], hk, sizeof(hk));
+        m->ahead_rh[slot] = rh;
+        m->ahead_c8[slot] = v.c8;
+        m->ahead_n[slot] = v.n;
+        m->ahead_valid[slot] = 1;
     }
-#endif
     /* The claims' lines: issued now, or kept for the caller to issue a
      * few at a time — a burst of forty outstanding misses is more than
      * the core's fill buffers hold, and the rest of a burst is lost. */
@@ -449,7 +484,9 @@ static inline ADAPT_TARGET_V3 void context_lanes_v3(model *m) {
     const int *cells = (const int *)&m->maps[0][0];
     const __m256i one = _mm256_set1_epi32(1), c512 = _mm256_set1_epi32(512), c4096 = _mm256_set1_epi32(4096);
     const __m256i zero = _mm256_setzero_si256(), two = _mm256_set1_epi32(2), three = _mm256_set1_epi32(3);
-    __m256i l1[3], l2[3];
+    /* every group is written before it is read; the zeros say so to a
+     * compiler that cannot see the group count is at least one */
+    __m256i l1[3] = {zero, zero, zero}, l2[3] = {zero, zero, zero};
     /* the groups the file's slots fill: a set that leaves kinds out ends
      * short of the third, and its lanes past the last slot stay zero */
     const int groups = m->lane_groups;
@@ -473,17 +510,29 @@ static inline ADAPT_TARGET_V3 void context_lanes_v3(model *m) {
         l2[g] = _mm256_or_si256(_mm256_and_si256(q, _mm256_cmpeq_epi32(mode, one)),
                                 _mm256_and_si256(down, _mm256_cmpeq_epi32(mode, two)));
     }
-    for (g = 0; g < groups; g++) {
-        _mm256_storeu_si256((__m256i *)(void *)(m->st + (1 + HASHED) + 8 * g), l1[g]);
+    /* The planes' stores and the zeroing below are written one store at
+     * a time: as counted loops a compiler turns them into memcpy and
+     * memset calls, five library calls a bit for a few words each. */
+    _mm256_storeu_si256((__m256i *)(void *)(m->st + (1 + HASHED)), l1[0]);
+    if (groups > 1) {
+        _mm256_storeu_si256((__m256i *)(void *)(m->st + (1 + HASHED) + 8), l1[1]);
     }
-    for (g = 0; g < groups; g++) {
-        _mm256_storeu_si256((__m256i *)(void *)(m->st + 2 * (1 + HASHED) + 8 * g), l2[g]);
+    if (groups > 2) {
+        _mm256_storeu_si256((__m256i *)(void *)(m->st + (1 + HASHED) + 16), l1[2]);
+    }
+    _mm256_storeu_si256((__m256i *)(void *)(m->st + 2 * (1 + HASHED)), l2[0]);
+    if (groups > 1) {
+        _mm256_storeu_si256((__m256i *)(void *)(m->st + 2 * (1 + HASHED) + 8), l2[1]);
+    }
+    if (groups > 2) {
+        _mm256_storeu_si256((__m256i *)(void *)(m->st + 2 * (1 + HASHED) + 16), l2[2]);
     }
     {
         /* the last group's lanes past the last slot, in each plane, up
          * to the plane's end (a third group spills into the next plane,
          * which is stored after it); the lanes beyond the groups were
-         * zeroed once, at model_new, and no store reaches them */
+         * zeroed once, at model_new, and no store reaches them. At most
+         * seven lanes a plane: the groups end within eight of the slots. */
         int32_t *st_ = m->st;
         const size_t from = 1 + m->hashed;
         const size_t to = (size_t)groups * 8 < 1 + HASHED ? (size_t)groups * 8 : 1 + HASHED;
@@ -491,6 +540,9 @@ static inline ADAPT_TARGET_V3 void context_lanes_v3(model *m) {
             st_[i] = 0;
             st_[(1 + HASHED) + i] = 0;
             st_[2 * (1 + HASHED) + i] = 0;
+#if defined(__GNUC__) && !defined(__clang__)
+            __asm__ volatile("");
+#endif
         }
     }
 }

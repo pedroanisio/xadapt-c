@@ -94,6 +94,11 @@ typedef struct model {
      * buckets and a fifth arbiter. Read once per block; the per-bit path
      * has it constant. */
     int model2;
+    /* Bits of the probability predict() returns and the coder splits by:
+     * ADAPT_CODER_BITS, or ADAPT_CODER_BITS_PRECISE under model2 with the
+     * precise coder, where the estimation stages keep their sixteen. */
+    int precise;
+    unsigned coder_bits;
     /* model2's pressure-gated parts (MODEL2_PRESSURE_LOG): the o8 and
      * word3 slots re-purposed, and the fifth arbiter */
     int slots_on, extra_on;
@@ -210,11 +215,15 @@ typedef struct model {
     /* Lines prefetch_byte() and nibble_plan() chose, issued a half at a
      * time over the following bits. */
     const uint8_t *planned[HASHED];
-#ifdef ADAPT_SHADOW_CHECK
-    uint64_t shadow_hk[HASHED];
-    uint64_t shadow_rh;
-    int shadow_valid;
-#endif
+    /* The hashes prefetch_byte() made for the byte to come, kept for
+     * start_byte(): one set for the encoder's known byte, two for the
+     * decoder's candidates, filed by the byte's low bit and stamped with
+     * the position and the bytes they are of (see ahead_take). */
+    uint64_t ahead_hk[2][HASHED];
+    uint64_t ahead_rh[2];
+    uint64_t ahead_c8[2];
+    uint64_t ahead_n[2];
+    int ahead_valid[2];
     /* The arena every table above points into: what was mapped or
      * allocated, and its length, for model_free. */
     void *arena_base;

@@ -141,6 +141,7 @@ adapt_status adapt_read_header(const uint8_t *header, size_t len, adapt_sizes *s
     s.mid = stream->mid;
     s.text = stream->text ? ADAPT_TEXT_ON : 0;
     s.keys = stream->keys;
+    s.precise = stream->precise;
     s.adaptive = stream->adaptive;
     s.bmp = stream->bmp;
     s.compact = stream->compact;

@@ -5,6 +5,31 @@ migration instructions are in the [release notes](docs/release-notes/0.12.0.md).
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-18
+
+The decoder supports container versions 19 to 91, excluding 55, 59, 60, 73
+and 74. Files written by 0.12.0 decode unchanged. A max-profile file written
+by this release carries version 86 to 91 and requires this release or a later
+one to decode. Rebuild C callers against the matching header: `adapt_sizes`
+and `adapt_version_info` gained the field `precise`.
+
+### Added
+
+- Container versions 86 to 88 (89 to 91 with metadata): the max-profile models
+  of versions 72, 80 and 81 with the final probability passed to the arithmetic
+  coder in 16 bits instead of 12. Every max encode that is neither adaptive nor
+  BMP writes them. `cadapt info` reports the coder's probability width.
+- `--threads n` with n of at least two runs the independent first-block model
+  trials concurrently, within the memory already granted to the workers. The
+  container bytes equal those of the sequential trials.
+
+### Changed
+
+- Encoding and decoding under the normal, mid and max profiles hash each
+  byte's contexts once: the hashes computed for the prefetch are reused when
+  the byte starts. The decoder prefetches a single candidate where recall
+  names the byte. Containers of versions 19 to 85 are byte for byte unchanged.
+
 ### Fixed
 
 - Release packaging validates the source inventory and installed payload,

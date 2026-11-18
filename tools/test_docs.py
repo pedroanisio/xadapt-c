@@ -130,7 +130,7 @@ def named_versions(text: str) -> set[int]:
 class VersionTest(unittest.TestCase):
     def test_documented_supported_sets_match_the_version_table(self) -> None:
         header = HEADER.read_text(encoding="utf-8")
-        expected = {int(v) for v in re.findall(r"ADAPT_VERSION_ROW\((\d+),", header)}
+        expected = {int(v) for v in re.findall(r"ADAPT_VERSION_ROW(?:_PRECISE)?\((\d+),", header)}
         self.assertGreater(len(expected), 20)
         for path in (README, MANUAL):
             match = re.search(r"Supported container versions: (.+)", path.read_text(encoding="utf-8"))

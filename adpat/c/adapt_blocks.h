@@ -67,12 +67,13 @@ static inline void decode_bytes(model *m, arith *d, size_t raw, uint8_t *out) {
     size_t i;
     int k;
     ADAPT_PROFILE(m, predict_p, update_p);
+    const unsigned bits = m->coder_bits;
     m->coding_known = 0;
     for (i = 0; i < raw; i++) {
         uint32_t byte = 0;
         for (k = 0; k < 8; k++) {
             uint32_t p = predict_p(m);
-            uint32_t bit = arith_decode(d, p);
+            uint32_t bit = arith_decode(d, p, bits);
             update_p(m, bit);
             byte = (byte << 1) | bit;
         }
@@ -89,7 +90,7 @@ static inline void encode_byte(model *m, arith_enc *e, uint8_t byte) {
     for (k = 7; k >= 0; k--) {
         uint32_t bit = ((uint32_t)byte >> k) & 1;
         uint32_t p = predict_p(m);
-        arith_encode(e, bit, p);
+        arith_encode(e, bit, p, m->coder_bits);
         update_p(m, bit);
     }
 }

@@ -8,7 +8,8 @@
 #ifndef ADAPT_MODEL_BIT_H
 #define ADAPT_MODEL_BIT_H
 
-/* Probability, in 1..=4095, that the next bit is one. The body, with the
+/* Probability that the next bit is one, in 1..=4095 — in 1..=65535 under
+ * the precise coder (model.coder_bits says which). The body, with the
  * profile a constant; predict() and predict_fast() below are its two
  * instantiations, each compiled per instruction set. */
 static inline ADAPT_ALWAYS_INLINE uint32_t predict_impl(model *m, const int fast, const int max, const int v3, const int m2) {
@@ -188,6 +189,29 @@ estimate:
     row = m->apm[ctx];
     a = row[j];
     b = row[j + 1];
+    if (m2 && m->precise) {
+        /* The precise coder (ADAPT_MAX_PRECISE_VERSION): the stages'
+         * cells are sixteen bits and stay so — each interpolation shifted
+         * by the seven bits of its weight alone, their rounded mean,
+         * three parts of it to one of the arbiters' twelve-bit verdict
+         * times sixteen, held to 1..65535. The stages learn as they do
+         * under every version; only the number coded is finer. */
+        size_t ctx2 = (m->apm2_row | m->c0) & m->apm2_mask;
+        const uint16_t *row2 = m->apm2[ctx2];
+        int32_t papm2 = ((int32_t)row2[j] * (128 - w) + (int32_t)row2[j + 1] * w) >> 7;
+        m->apm2_ctx = ctx2;
+        m->apm2_j = j;
+        papm = (a * (128 - w) + b * w) >> 7;
+        papm = (papm + papm2 + 1) >> 1;
+        p = (m->pfinal * 16 + 3 * papm + 2) >> 2;
+        if (p < 1) {
+            p = 1;
+        }
+        if (p > 65535) {
+            p = 65535;
+        }
+        return (uint32_t)p;
+    }
     papm = (a * (128 - w) + b * w) >> 11;
     {
         size_t ctx2 = (m->apm2_row | m->c0) & m->apm2_mask;
@@ -260,6 +284,17 @@ static inline void issue_planned(const model *m, int second) {
     for (i = from; i < to; i++) {
         ADAPT_PREFETCH(m->planned[i]);
     }
+}
+
+/* Whether recall names the byte being decoded: a match is live and no
+ * bit so far has contradicted it. The decoder, which cannot know the
+ * byte, then brings in the lines of recall's byte alone instead of both
+ * values the next bit leaves possible — half the hashing and half the
+ * prefetches where recall is right, late lines where it is wrong, the
+ * same bytes either way. Measured on the reference inputs the guess pays
+ * from the shortest match on, text and machine code alike. */
+static inline int recall_names_byte(const model *m) {
+    return m->mlen > 0 && !m->mmiss;
 }
 
 /* Learn from `bit`, which must be the bit predict() was asked about. The
@@ -420,7 +455,8 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
          * known, the twenty exact lines of the second nibble go out over
          * bits 1 and 2 and the next byte's over bits 5 and 6, ten at a
          * time, which the fill buffers hold; when it is not, the two
-         * candidates' lines go out at bits 3 and 7.
+         * candidates' lines go out at bits 3 and 7 — one candidate's
+         * where recall names the byte (recall_names_byte).
          * Nothing for the fast profile, whose two contexts' lines the core
          * keeps up with. */
         if (m->coding_known) {
@@ -438,16 +474,30 @@ static inline ADAPT_ALWAYS_INLINE void update_impl(model *m, uint32_t bit, const
             uint64_t hi0 = (m->c0 << 1) & 15;
             uint64_t salt0 = (hi0 + 1) * 0x2545F4914F6CDD1Dull;
             uint64_t salt1 = (hi0 + 2) * 0x2545F4914F6CDD1Dull;
-            for (i = 0; i < m->hashed; i++) {
-                uint64_t x0 = (m->h[i] + salt0) * 0x9E3779B97F4A7C15ull;
-                uint64_t x1 = (m->h[i] + salt1) * 0x9E3779B97F4A7C15ull;
-                ADAPT_PREFETCH(m->table + block_line(m, x0 ^ (x0 >> 29)) * BLOCK);
-                ADAPT_PREFETCH(m->table + block_line(m, x1 ^ (x1 >> 29)) * BLOCK);
+            if (recall_names_byte(m) && (m->mbyte >> 5) == (m->c0 & 7)) {
+                /* recall names the byte and the three bits so far agree:
+                 * its nibble's lines alone */
+                uint64_t salt = ((uint64_t)(m->mbyte >> 4) + 1) * 0x2545F4914F6CDD1Dull;
+                for (i = 0; i < m->hashed; i++) {
+                    uint64_t x = (m->h[i] + salt) * 0x9E3779B97F4A7C15ull;
+                    ADAPT_PREFETCH(m->table + block_line(m, x ^ (x >> 29)) * BLOCK);
+                }
+            } else {
+                for (i = 0; i < m->hashed; i++) {
+                    uint64_t x0 = (m->h[i] + salt0) * 0x9E3779B97F4A7C15ull;
+                    uint64_t x1 = (m->h[i] + salt1) * 0x9E3779B97F4A7C15ull;
+                    ADAPT_PREFETCH(m->table + block_line(m, x0 ^ (x0 >> 29)) * BLOCK);
+                    ADAPT_PREFETCH(m->table + block_line(m, x1 ^ (x1 >> 29)) * BLOCK);
+                }
             }
         } else if (m->bitpos == 7) {
             uint8_t low = (uint8_t)((m->c0 << 1) & 0xFE);
-            prefetch_byte(m, low, fast, 1);
-            prefetch_byte(m, (uint8_t)(low | 1), fast, 1);
+            if (recall_names_byte(m) && (m->mbyte >> 1) == (m->c0 & 0x7F)) {
+                prefetch_byte(m, (uint8_t)m->mbyte, fast, 1);
+            } else {
+                prefetch_byte(m, low, fast, 1);
+                prefetch_byte(m, (uint8_t)(low | 1), fast, 1);
+            }
         }
     }
 }

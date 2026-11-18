@@ -163,7 +163,9 @@ static void test_version_table(void) {
         ADAPT_TEXT_METADATA_LAST_VERSION, ADAPT_MAX_PRESSURE_VERSION, ADAPT_MAX_PRESSURE_METADATA_VERSION, ADAPT_MID_VERSION,
         ADAPT_TEXT_MID_VERSION, ADAPT_MID_METADATA_VERSION, ADAPT_TEXT_MID_METADATA_VERSION, ADAPT_MAX_KEYS_VERSION,
         ADAPT_MAX_KEYS_BINARY_VERSION, ADAPT_MAX_KEYS_METADATA_VERSION, ADAPT_MAX_KEYS_BINARY_METADATA_VERSION,
-        ADAPT_NORMAL_KEYS_VERSION, ADAPT_NORMAL_KEYS_METADATA_VERSION};
+        ADAPT_NORMAL_KEYS_VERSION, ADAPT_NORMAL_KEYS_METADATA_VERSION, ADAPT_MAX_PRECISE_VERSION,
+        ADAPT_MAX_PRECISE_KEYS_VERSION, ADAPT_MAX_PRECISE_KEYS_BINARY_VERSION, ADAPT_MAX_PRECISE_METADATA_VERSION,
+        ADAPT_MAX_PRECISE_KEYS_METADATA_VERSION, ADAPT_MAX_PRECISE_KEYS_BINARY_METADATA_VERSION};
     size_t i, j;
     uint8_t last = 0;
     for (i = 0; i < sizeof(declared); i++) {
@@ -267,9 +269,64 @@ static void test_keys_versions(void) {
     CHECK(!adapt_sizes_valid(sizes));
 }
 
+/* The precise coder's versions: 86, 87 and 88 the models of 72, 80 and
+ * 81 with the probability coded in sixteen bits, 89 to 91 the same with
+ * metadata, each with version 72's sizing byte (the second max model's
+ * bit required); 92 is no version; as sizes the coder goes only with the
+ * second max model, never with an experimental predictor or the BMP
+ * transform; no earlier version names it. */
+static void test_precise_versions(void) {
+    static const uint8_t keys[3] = {ADAPT_KEYS_CLASSIC, ADAPT_KEYS_TEXT, ADAPT_KEYS_BINARY};
+    uint8_t file[ADAPT_HEADER_BYTES + ADAPT_SIZING_BYTES];
+    adapt_sizes sizes;
+    adapt_error error;
+    size_t i;
+    memcpy(file, "ADPT", 4);
+    file[5] = 20;
+    file[6] = 16;
+    file[7] = 20;
+    file[8] = ADAPT_SIZING_MODEL2;
+    for (i = 0; i < 3; i++) {
+        file[4] = (uint8_t)(ADAPT_MAX_PRECISE_VERSION + i);
+        CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+        CHECK(sizes.max == 1 && sizes.model2 == 1 && sizes.precise == 1 && sizes.keys == keys[i] && sizes.text == 0);
+        CHECK(!adapt_header_has_metadata(file) && adapt_header_len(file) == ADAPT_HEADER_BYTES + ADAPT_SIZING_BYTES);
+        CHECK(adapt_sizes_valid(sizes) && adapt_sizes_header_bytes(sizes) == adapt_header_len(file));
+        CHECK(adapt_version_with_metadata(file[4]) == file[4] + ADAPT_PRECISE_METADATA_OFFSET);
+        file[4] = (uint8_t)(ADAPT_MAX_PRECISE_METADATA_VERSION + i);
+        CHECK(adapt_header_has_metadata(file));
+        CHECK(adapt_version_lookup(file[4])->stream == ADAPT_MAX_PRECISE_VERSION + i && adapt_version_lookup(file[4])->precise == 1);
+    }
+    file[4] = ADAPT_MAX_PRECISE_KEYS_BINARY_VERSION;
+    file[8] = ADAPT_SIZING_MODEL2 | ADAPT_SIZING_TEXT | ADAPT_SIZING_LOW_START;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.precise == 1 && sizes.keys == ADAPT_KEYS_BINARY && sizes.text == ADAPT_TEXT_ON && sizes.low_start == 1);
+    /* the second max model's bit is required, and a spare version is none */
+    file[8] = 0;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
+    file[8] = ADAPT_SIZING_MODEL2;
+    file[4] = (uint8_t)(ADAPT_MAX_PRECISE_KEYS_BINARY_METADATA_VERSION + 1);
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
+    /* the versions before it keep the twelve-bit coder */
+    file[4] = ADAPT_MAX_PRESSURE_VERSION;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    CHECK(sizes.precise == 0 && adapt_sizes_valid(sizes));
+    for (i = 0; i < ADAPT_VERSION_COUNT; i++) {
+        CHECK(ADAPT_VERSIONS[i].precise == (ADAPT_VERSIONS[i].stream >= ADAPT_MAX_PRECISE_VERSION));
+    }
+    /* as sizes: only with the second max model */
+    file[4] = ADAPT_MAX_PRECISE_VERSION;
+    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_OK);
+    sizes.model2 = 0;
+    CHECK(!adapt_sizes_valid(sizes));
+    sizes.model2 = 1;
+    sizes.precise = 2;
+    CHECK(!adapt_sizes_valid(sizes));
+}
+
 /* The keyed normal profile: version 84 with its policy byte (the key
  * policy in bits 0 and 1, the text transform in bit 2, nothing else),
- * 85 the same with metadata; 86 is no version; a policy naming the
+ * 85 the same with metadata; a policy naming the
  * classic keys, a fourth policy or a spare bit is refused; as sizes the
  * keys go only with the normal profile. */
 static void test_normal_keys_versions(void) {
@@ -291,8 +348,6 @@ static void test_normal_keys_versions(void) {
     CHECK(sizes.keys == ADAPT_KEYS_BINARY && sizes.text == ADAPT_TEXT_ON);
     file[4] = ADAPT_NORMAL_KEYS_METADATA_VERSION;
     CHECK(adapt_header_has_metadata(file));
-    file[4] = (uint8_t)(ADAPT_NORMAL_KEYS_METADATA_VERSION + 1);
-    CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     file[4] = ADAPT_NORMAL_KEYS_VERSION;
     file[8] = ADAPT_KEYS_CLASSIC;
     CHECK_STATUS(adapt_read_header(file, sizeof(file), &sizes, &error), ADAPT_ERROR_BAD_HEADER);
@@ -362,6 +417,9 @@ static const published_version PUBLISHED[] = {
     {80, "text-max3.adpt", "text.bin", 1},
     {81, "abc-max3.adpt", "abc.bin", 1},
     {84, "text-keyed.adpt", "text.bin", 1},
+    {86, "abc-max4.adpt", "abc.bin", 1},
+    {87, "text-max4.adpt", "text.bin", 1},
+    {88, "samples-max4.adpt", "samples.bin", 1},
 };
 static const uint8_t NEVER_WRITTEN[] = {65, 70};
 
@@ -884,10 +942,10 @@ static void test_framing(void) {
     file[4] = 4;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
     CHECK(error.detail == 4);
-    /* past the keyed normal profile's last version nothing is named */
-    file[4] = ADAPT_NORMAL_KEYS_METADATA_VERSION + 1;
+    /* past the precise coder's last version nothing is named */
+    file[4] = ADAPT_MAX_PRECISE_KEYS_BINARY_METADATA_VERSION + 1;
     CHECK_STATUS(decode_bytes(file, sizeof(EMPTY_FILE), limits, &error), ADAPT_ERROR_UNSUPPORTED_VERSION);
-    CHECK(error.detail == ADAPT_NORMAL_KEYS_METADATA_VERSION + 1);
+    CHECK(error.detail == ADAPT_MAX_PRECISE_KEYS_BINARY_METADATA_VERSION + 1);
     /* the text versions front the five models in order, and their
      * metadata variants five higher carry a record; nothing else does */
     {
@@ -1962,6 +2020,7 @@ int main(int argc, char **argv) {
     SHARD(test_mid_versions());
     SHARD(test_keys_versions());
     SHARD(test_normal_keys_versions());
+    SHARD(test_precise_versions());
     SHARD(test_version_table());
     SHARD(test_published_versions());
     SHARD(test_vector("text-keyed.adpt", "text.bin"));

@@ -116,7 +116,7 @@ cadapt --version
 | --- | --- |
 | `--verify`, `--no-verify` | Enable or explicitly disable encoder round-trip proof. Proof is off by default. It uses two models when the budget permits, or a second pass for suitable named-file input/output. |
 | `--explain` | Report model, allocation and transform selection. This diagnostic output is not a stable machine interface. |
-| `--threads n`, `--segment-bytes bytes` | Encode independent segments when n is at least two; the default segment is 16 MiB. Segment sizes must be whole codec blocks. Worker count is limited by memory and available CPUs. Segmentation changes compression; identical requested settings produce identical bytes regardless of worker scheduling. |
+| `--threads n`, `--segment-bytes bytes` | Encode independent segments when n is at least two; the default segment is 16 MiB. Segment sizes must be whole codec blocks. Worker count is limited by memory and available CPUs. The first block's independent model trials also run concurrently, within the workers' memory. Segmentation changes compression; identical requested settings produce identical bytes regardless of worker scheduling. |
 | `--adaptive rates`, `sparse`, `retained` | Select an experimental causal predictor with normal or max. |
 | `--adaptive auto` | Encode a finite set of candidates and keep the smallest complete container. Up to eight trials use temporary disk for the input and two containers. |
 | `--transform bmp`, `text`, `none` | Select a reversible transform or disable automatic transforms. BMP requires eligible 24-bit input. Text builds its dictionary from the input itself. |
@@ -154,11 +154,13 @@ with `adapt_free()` and check `adapt_status` before using a result.
 
 ## Format
 
-Supported container versions: **19–54, 56–58, 61–72, 75–85**.
+Supported container versions: **19–54, 56–58, 61–72, 75–91**.
 Archive versions **1–4** are readable; the CLI writes archive version **4**.
 The exact wire layouts and model policies are defined by `ADAPT_VERSIONS` and
 the accompanying declarations in [adapt.h](adpat/c/adapt.h).
 
+Max-profile files written by this release carry versions 86–91, which pass
+the final probability to the coder in 16 bits; cadapt 0.12.0 cannot decode them.
 Versions 13–15, written by cadapt 0.11.0, require that release to decode. See the
 [upgrade procedure](docs/release-notes/0.12.0.md#upgrading-from-0110) before
 replacing an older installation. Unknown format numbers are rejected.
@@ -174,6 +176,7 @@ make -C adpat/c sanitize-cli        # CLI sanitizer suite
 make gate                          # 8 MiB size and throughput regression
 make corpus-floor                  # mixed-corpus regressions
 make memory-gate                    # measured codec memory bounds
+make profile                       # hardware counters and hot symbols (Linux perf)
 ```
 
 `make check` has a 120-second default wall budget. Set CHECK_SECONDS for the

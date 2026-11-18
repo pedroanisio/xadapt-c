@@ -41,11 +41,13 @@ static int checks = 0;
 
 static const char *vectors_dir;
 
-/* The versions a current max encode writes: 72 with the classic arbiter
- * keys, 80 and 81 with the text and binary key policies, whichever the
- * first block chose (adapt.h, ADAPT_MAX_KEYS_VERSION). */
+/* The versions a current max encode writes: 86 with the classic arbiter
+ * keys, 87 and 88 with the text and binary key policies, whichever the
+ * first block chose — the models of 72, 80 and 81 under the sixteen-bit
+ * coder (adapt.h, ADAPT_MAX_PRECISE_VERSION). */
 static int is_max_version(uint8_t version) {
-    return version == ADAPT_MAX_PRESSURE_VERSION || version == ADAPT_MAX_KEYS_VERSION || version == ADAPT_MAX_KEYS_BINARY_VERSION;
+    return version == ADAPT_MAX_PRECISE_VERSION || version == ADAPT_MAX_PRECISE_KEYS_VERSION ||
+           version == ADAPT_MAX_PRECISE_KEYS_BINARY_VERSION;
 }
 
 /* The versions a current normal encode writes: 19 with the classic keys
@@ -1412,14 +1414,17 @@ static void test_segments(void) {
 }
 
 /* The arbiters' key policy is the encoder's choice from the first block
- * (choose_keys): text.bin takes the text keys (version 80) and abc.bin,
- * a repeating pattern recall predicts, the binary keys (81), whatever
- * the caller's sizes say; each decodes; a header's policy is what the
- * sizes read back; the max profile's adaptive variant keeps the classic
- * keys and its own version. */
+ * (choose_keys): text.bin takes the text keys (version 87) and
+ * samples.bin, sixteen-bit samples of a random walk, the binary keys
+ * (88), whatever the caller's sizes say (the source is 4096 little-endian
+ * int16 values v, from 0, each v + (x >> 16) % 257 - 128 held to +-30000,
+ * x the generator x = (1103515245 x + 12345) mod 2^31 from 12345); each decodes; a header's policy
+ * and coder are what the sizes read back; the max profile's adaptive
+ * variant keeps the classic keys, the twelve-bit coder and its own
+ * version. */
 static void test_keys_choice(void) {
-    static const char *const sources[2] = {"text.bin", "abc.bin"};
-    static const uint8_t versions[2] = {ADAPT_MAX_KEYS_VERSION, ADAPT_MAX_KEYS_BINARY_VERSION};
+    static const char *const sources[2] = {"text.bin", "samples.bin"};
+    static const uint8_t versions[2] = {ADAPT_MAX_PRECISE_KEYS_VERSION, ADAPT_MAX_PRECISE_KEYS_BINARY_VERSION};
     static const uint8_t policies[2] = {ADAPT_KEYS_TEXT, ADAPT_KEYS_BINARY};
     size_t which;
     for (which = 0; which < 2; which++) {
@@ -1439,7 +1444,7 @@ static void test_keys_choice(void) {
                      ADAPT_OK);
         CHECK(w.len > ADAPT_HEADER_BYTES && coded[4] == versions[which]);
         CHECK_STATUS(adapt_read_header(coded, w.len, &parsed, &error), ADAPT_OK);
-        CHECK(parsed.max == 1 && parsed.model2 == 1 && parsed.keys == policies[which]);
+        CHECK(parsed.max == 1 && parsed.model2 == 1 && parsed.precise == 1 && parsed.keys == policies[which]);
         CHECK_STATUS(adapt_decode(coded, w.len, adapt_default_limits(), &out, &out_len, &error), ADAPT_OK);
         CHECK(out_len == src_len && memcmp(out, src, src_len) == 0);
         adapt_free(out);
@@ -1464,7 +1469,7 @@ static void test_keys_choice(void) {
                      ADAPT_OK);
         CHECK(coded[4] == ADAPT_MAX_ADAPTIVE_VERSION);
         CHECK_STATUS(adapt_read_header(coded, w.len, &parsed, &error), ADAPT_OK);
-        CHECK(parsed.keys == ADAPT_KEYS_CLASSIC);
+        CHECK(parsed.keys == ADAPT_KEYS_CLASSIC && parsed.precise == 0);
         free(coded);
         free(src);
     }
@@ -1473,7 +1478,7 @@ static void test_keys_choice(void) {
 /* The max profile: the vector, a round trip, and its sizes. */
 static void test_max_profile(void) {
     size_t want_len, src_len, n = 60000, i, out_len;
-    uint8_t *want = read_file("abc-max3.adpt", &want_len);
+    uint8_t *want = read_file("abc-max4.adpt", &want_len);
     uint8_t *src = read_file("abc.bin", &src_len);
     uint8_t *data = malloc(n);
     uint8_t *normal = malloc(n + 64);
@@ -2238,7 +2243,8 @@ int main(int argc, char **argv) {
     SHARD(test_vector("records-keyed.adpt", "records.bin"));
     SHARD(test_vector_profile("text-keyed.adpt", "text.bin", 0));
     SHARD(test_vector_profile("text-fast.adpt", "text.bin", 1));
-    SHARD(test_vector_profile("text-max3.adpt", "text.bin", 2));
+    SHARD(test_vector_profile("text-max4.adpt", "text.bin", 2));
+    SHARD(test_vector_profile("samples-max4.adpt", "samples.bin", 2));
     SHARD(test_vector_profile("text-mid.adpt", "text.bin", 3));
     SHARD(test_mid_profile());
     SHARD(test_vector_profile("records-keyed.adpt", "records.bin", 0));

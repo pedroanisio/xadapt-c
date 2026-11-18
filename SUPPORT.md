@@ -19,7 +19,7 @@ requires the [documented container migration](docs/release-notes/0.12.0.md#upgra
 
 ## Compatibility
 
-- **Containers:** the supported format set is 19–54, 56–58, 61–72 and 75–85,
+- **Containers:** the supported format set is 19–54, 56–58, 61–72 and 75–91,
   as defined by `ADAPT_VERSIONS` in [adapt.h](adpat/c/adapt.h). Decoding semantics
   for these formats are preserved in later releases; unknown numbers are
   rejected. Versions 13–15 require cadapt 0.11.0. Predictor or layout changes

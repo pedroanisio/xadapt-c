@@ -8,7 +8,7 @@ BUILD ?= build
 CODEC_BUILD = $(if $(filter /%,$(BUILD)),$(BUILD),adpat/c/$(BUILD))
 GATE_ARGS ?=
 FLOOR_ARGS ?=
-.PHONY: all test check check-parts clean install uninstall sanitize sanitize-cli coverage check-suites check-long bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor memory-gate release test-install ltcb ltcb-release
+.PHONY: all test check check-parts clean install uninstall sanitize sanitize-cli coverage check-suites check-long bench plot sbom manifest reproduce gate ratio-floor corpus corpus-floor memory-gate profile release test-install ltcb ltcb-release
 
 # Forwarded to the codec's Makefile as written: SUPPORT.md and SECURITY.md
 # say `make sanitize`, and the documents' tests hold every cited target to
@@ -87,6 +87,26 @@ memory-gate: all
 	$(PYTHON) -B tools/check_memory.py --binary "$(abspath $(CODEC_BUILD))/cadapt" \
 	    --fixture enwik8-8MiB="$(abspath $(CODEC_BUILD))/enwik8-8MiB" $(MEMORY_ARGS)
 MEMORY_ARGS ?=
+
+# Where the time goes, on the gate's proxy under the locked command
+# (tools/ratio_floor.json names it; nothing here repeats it): the hardware
+# counters of one encode and one decode — cycles, instructions, cache and
+# TLB misses — then the decode's hottest symbols. The per-bit path is bound
+# by memory latency, so a change is ranked by cycles and misses, never by
+# instruction counts alone. Needs Linux perf (PERF= names another binary);
+# a measurement, not a gate: it asserts nothing and CI does not run it.
+PERF ?= perf
+PROFILE_EVENTS ?= cycles,instructions,cache-misses,LLC-load-misses,dTLB-load-misses,branch-misses
+PROFILE_COMMAND = $(shell $(PYTHON) -B -c "import json; print(' '.join(json.load(open('tools/ratio_floor.json'))['arguments']))")
+profile: all
+	unzip -p static/corpus/enwik8.zip enwik8 | head -c 8388608 > "$(CODEC_BUILD)/enwik8-8MiB"
+	$(PERF) stat -e $(PROFILE_EVENTS) "$(abspath $(CODEC_BUILD))/cadapt" $(PROFILE_COMMAND) \
+	    "$(abspath $(CODEC_BUILD))/enwik8-8MiB" -o "$(abspath $(CODEC_BUILD))/profile.adpt" --force
+	$(PERF) stat -e $(PROFILE_EVENTS) "$(abspath $(CODEC_BUILD))/cadapt" decode \
+	    "$(abspath $(CODEC_BUILD))/profile.adpt" -o "$(abspath $(CODEC_BUILD))/profile.out" --force
+	$(PERF) record -q -o "$(abspath $(CODEC_BUILD))/profile.data" "$(abspath $(CODEC_BUILD))/cadapt" decode \
+	    "$(abspath $(CODEC_BUILD))/profile.adpt" -o "$(abspath $(CODEC_BUILD))/profile.out" --force
+	$(PERF) report -i "$(abspath $(CODEC_BUILD))/profile.data" --stdio --sort symbol 2>/dev/null | head -40
 
 # The release artifacts of the committed HEAD (or RELEASE_REV), built from
 # an export of that revision alone — nothing reads the working tree — into
