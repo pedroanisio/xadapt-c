@@ -839,6 +839,8 @@ adapt_status adapt_sizes_for_threads_max(uint64_t length, uint64_t max_memory, u
 
 /* Rebalance valid, already fitted sizes toward context capacity, then grow
  * the recall window with the remaining budget. All other fields are preserved.
+ * A known input longer than 64 MiB whose table stays below its target takes
+ * the recall index and the table's fraction before a window beyond 64 MiB.
  * Known input targets adapt_table_log_for(length); unknown input targets the
  * format maximum. Segmented known inputs target one segment and account for
  * every requested worker. Unknown input preserves the two-model reservation

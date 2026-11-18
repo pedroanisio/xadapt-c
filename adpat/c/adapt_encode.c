@@ -64,6 +64,10 @@
 /* Grow recall to the format limit only when budget remains after table
  * and window allocation. Normal/fast use the separate cap below. */
 #define RECALL_LOG_SPARE 24
+/* The window a context-first sizing serves before it turns to the recall
+ * index and the table's fraction, on an input longer than this whose
+ * table stays below its target: 64 MiB (adapt_sizes_prioritize_context). */
+#define WINDOW_LOG_SERVED 26
 /* Recall growth cap for the normal and fast profiles. */
 #define RECALL_LOG_SPARE_NORMAL 22
 /* The most bytes a block's coded form can take: at most four settled bytes
@@ -390,7 +394,7 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
     adapt_sizes s, floor, next;
     uint64_t workers = length_known ? threads : 1;
     uint8_t target, cap;
-    int verified = 0;
+    int verified = 0, served;
     if (sizes == NULL || !sizes_valid(*sizes) || threads == 0 ||
         (threads >= 2 && !adapt_segment_bytes_valid(segment_bytes)))
         return fail(error, ADAPT_ERROR_INVALID_ARGUMENT, 0, 0);
@@ -443,11 +447,32 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
             s.lean = (uint8_t)(s.table_log <= ADAPT_COMPACT_TABLE_LOG);
         }
     }
-    while (s.window_log < cap) {
+    /* An input the table cannot serve in full (it stays below its target)
+     * and longer than WINDOW_LOG_SERVED: once the window holds that much,
+     * the recall index and the table's fraction come before more window.
+     * Measured on enwik9 with a 512 MiB table: the index's 32 MiB from
+     * 2^23 to 2^24 entries was worth 0.30 %, the table's next 192 MiB
+     * 0.76 %, and the window's 192 MiB from 2^26 to 2^28 bytes 0.17 %;
+     * at 1 GiB the window took those 192 MiB first and left the index at
+     * 2^21, and the file came out larger than at 674 MiB. A budget that
+     * ends before the window is served, a table at its target, a shorter
+     * input and an input of unknown length keep the order below. */
+    served = length_known && s.table_log < target && cap > WINDOW_LOG_SERVED;
+    while (s.window_log < (served ? WINDOW_LOG_SERVED : cap)) {
         next = s;
         next.window_log++;
         if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
         s = next;
+    }
+    served = served && s.window_log == WINDOW_LOG_SERVED;
+    if (served) {
+        uint8_t recall = clamp_u8(bits(length > 0 ? length - 1 : 0), MATCH_LOG_MIN, s.max ? RECALL_LOG_SPARE : RECALL_LOG_SPARE_NORMAL);
+        while (s.match_log < recall) {
+            next = s;
+            next.match_log++;
+            if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
+            s = next;
+        }
     }
     /* What the budget still holds goes to the table as a fraction of its
      * next doubling, an eighth at a time (ADAPT_MAX_SIZED_VERSION): the
@@ -458,6 +483,15 @@ adapt_status adapt_sizes_prioritize_context(int length_known, uint64_t length, u
         while (s.table_frac < ADAPT_SIZING_FRAC_MAX) {
             next = s;
             next.table_frac++;
+            if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
+            s = next;
+        }
+    }
+    /* a served window takes what the index and the fraction left */
+    if (served) {
+        while (s.window_log < cap) {
+            next = s;
+            next.window_log++;
             if (context_allocation_bound(next, workers, segment_bytes, verified) > max_memory) break;
             s = next;
         }

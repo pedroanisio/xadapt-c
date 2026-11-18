@@ -163,6 +163,41 @@ static void test_context_allocation(void) {
     CHECK(adapt_sizes_valid(s) && s.fast && s.table_log <= ADAPT_FAST_TABLE_LOG_MAX);
 }
 
+/* An input the table cannot serve in full, at a budget that holds more
+ * than a 64 MiB window: the recall index and the table's fraction come
+ * before more window. A gibibyte for 10^9 bytes is the table at 13/8 of
+ * 2^25, the index at its cap and the window at 2^26 (measured on enwik9
+ * with the lean set: 143,751,760 B, against 145,756,760 B at 674 MiB);
+ * the 674 MiB tier, whose budget ends at that window, a table that
+ * reaches its target, a shorter input and an input of unknown length are
+ * sized as they were. */
+static void test_context_allocation_serves_the_window_first(void) {
+    static const uint64_t gib = (uint64_t)1 << 30, tier9 = (uint64_t)674 << 20;
+    adapt_sizes s;
+    adapt_error error;
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 1000000000, gib, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 1000000000, gib, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.table_log == 25 && s.table_frac == 5 && s.window_log == 26 && s.match_log == 24);
+    CHECK(adapt_sizes_valid(s) && adapt_encode_memory_bound(s) <= gib);
+    CHECK(adapt_table_blocks(s) == ((uint64_t)13 << 22));
+    /* the budget ends at the served window: the sizes of the locked floor */
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 1000000000, tier9, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 1000000000, tier9, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.table_log == 25 && s.table_frac == 0 && s.window_log == 26 && s.match_log == 23);
+    /* a table at its target keeps the window first: enwik8's length at a gibibyte */
+    CHECK_STATUS(adapt_sizes_for_input_max(1, 100000000, gib, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, 100000000, gib, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.table_log == 25 && s.table_frac == 0 && s.window_log == 27 && s.match_log == 24);
+    /* an input no longer than the served window */
+    CHECK_STATUS(adapt_sizes_for_input_max(1, (uint64_t)1 << 26, gib, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(1, (uint64_t)1 << 26, gib, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.window_log == 26 && adapt_encode_memory_bound(s) <= gib);
+    /* an unknown length grows the window as far as the budget goes */
+    CHECK_STATUS(adapt_sizes_for_input_max(0, 0, gib, &s, &error), ADAPT_OK);
+    CHECK_STATUS(adapt_sizes_prioritize_context(0, 0, gib, 1, ADAPT_SEGMENT_BYTES, &s, &error), ADAPT_OK);
+    CHECK(s.window_log > 26 && adapt_verified_memory_bound(s) <= gib);
+}
+
 static void test_sizes(void) {
     adapt_sizes s;
     adapt_error error;
@@ -2288,6 +2323,7 @@ int main(int argc, char **argv) {
     SHARD(test_vector_profile("cjk-keyed.adpt", "cjk.bin", 0));
     SHARD(test_sizes());
     SHARD(test_context_allocation());
+    SHARD(test_context_allocation_serves_the_window_first());
     SHARD(test_compact_side_tables());
     SHARD(test_class_width_proof());
     SHARD(test_lean_contexts());

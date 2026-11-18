@@ -32,6 +32,13 @@ and `adapt_version_info` gained the field `precise`.
   byte's contexts once: the hashes computed for the prefetch are reused when
   the byte starts. The decoder prefetches a single candidate where recall
   names the byte. Containers of versions 19 to 85 are byte for byte unchanged.
+- Context-first sizing (`--allocation context`) of a known input longer than
+  64 MiB whose context table stays below its target gives the recall index and
+  the table's fraction priority over a window beyond 64 MiB. Among the tiers,
+  only `-10` changes its sizes, for inputs of 128 MiB or more. enwik9 under
+  `--max --allocation context --contexts lean -10` is 143,751,760 B at
+  1,006 MiB of model memory; `-9` gives 145,756,760 B at 654 MiB, and the
+  earlier `-10` sizing gave 145,920,578 B with the full context set.
 
 ### Fixed
 

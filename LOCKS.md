@@ -40,7 +40,11 @@ Automatic allocation grows the context table first when window-first sizing
 leaves the table below its target for the input unit. A threaded segmented
 input uses a segment as the sizing unit. Context-first and window-first remain
 explicit choices. Unused budget can grow recall without changing its update
-semantics. Compact side tables and fractional table sizing are recorded in
+semantics. Context-first sizing of a known input longer than 64 MiB whose
+table stays below its target serves a 64 MiB window, then the recall index and
+the table's fraction, then more window. On enwik9 under the lean command the
+`-10` tier then gives 143,751,760 B at 1,006 MiB against 145,756,760 B at
+`-9` (654 MiB). Compact side tables and fractional table sizing are recorded in
 format policy, never inferred from host memory.
 
 The text transform constructs its dictionary causally from the input. Encoder
