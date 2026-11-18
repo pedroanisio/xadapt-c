@@ -15,8 +15,8 @@
 # With a fixture, the container is written by the release binary through
 # tools/check_ratio_floor.py --verify — encoded, decoded and compared byte
 # for byte against the entry's floors (tools/ltcb_floor.json of the
-# revision: the command and the largest container it may write, the time
-# gated only on the host the file names) — and its size, time and hash go into
+# revision: the command and the largest container it may write; the file
+# names no gating host, so the time is reported) — and its size, time and hash go into
 # the manifest. With --containers, the .adpt files and the floor-check.txt
 # of an earlier run of this script are taken over instead of encoding
 # again (they were written by the same revision's binary, which the

@@ -1,7 +1,7 @@
 {
   "schema": "cadapt.ratio-floor.v2",
   "locked_on": "2026-11-18",
-  "host": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "host": "none: measured on a shared cloud VM, time is reported and not gated",
   "arguments": [
     "encode",
     "--max",
